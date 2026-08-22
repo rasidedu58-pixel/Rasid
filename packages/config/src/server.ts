@@ -19,6 +19,8 @@ const serverEnvSchema = z.object({
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  /** HS256 secret used to verify Supabase-issued access tokens server-side. */
+  SUPABASE_JWT_SECRET: z.string().optional(),
 
   REDIS_URL: z.string().optional(),
 

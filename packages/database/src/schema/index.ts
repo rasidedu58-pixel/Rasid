@@ -1,6 +1,8 @@
 /**
- * Structural placeholder barrel — see each module's own comment.
- * Reserved for Phase N schema — not implemented in Phase 0.
+ * Schema barrel. `identity`, `workspaces`, and `permissions` (memberships
+ * only) are implemented as of Phase 1 — see each module's own comment.
+ * All other modules remain structural placeholders reserved for later
+ * phases.
  */
 export * as identity from "./identity";
 export * as workspaces from "./workspaces";

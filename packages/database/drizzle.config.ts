@@ -7,7 +7,7 @@ import { defineConfig } from "drizzle-kit";
  * requires a live database connection string to run in Phase 0.
  */
 export default defineConfig({
-  schema: "./src/schema/index.ts",
+  schema: "./src/schema/*.ts",
   out: "./src/migrations",
   dialect: "postgresql",
   dbCredentials: {

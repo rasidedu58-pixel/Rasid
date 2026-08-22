@@ -37,14 +37,23 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const body = exception.getResponse();
+      const bodyObject = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : undefined;
       const message =
-        typeof body === "string" ? body : ((body as { message?: string }).message ?? exception.message);
+        typeof body === "string" ? body : ((bodyObject?.message as string | undefined) ?? exception.message);
+
+      // Domain/API-level exceptions (see ApiException) carry an explicit
+      // error-catalog `code` in their response body — honor it over the
+      // generic HTTP-status-derived code so 401/403/404/422 map to the
+      // exact codes required by API Contract §12 (e.g. UNAUTHENTICATED vs
+      // SESSION_EXPIRED, RESOURCE_NOT_FOUND, VALIDATION_ERROR).
+      const explicitCode = typeof bodyObject?.code === "string" ? bodyObject.code : undefined;
+      const details = bodyObject?.details as Record<string, unknown> | undefined;
 
       return {
         status,
-        code: this.statusToCode(status),
+        code: explicitCode ?? this.statusToCode(status),
         message,
-        details: typeof body === "object" ? (body as Record<string, unknown>) : undefined,
+        details: details ?? (explicitCode ? undefined : bodyObject),
       };
     }
 

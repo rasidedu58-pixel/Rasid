@@ -9,6 +9,8 @@ import { z } from "zod";
  */
 const browserEnvSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
+  /** Base URL of the NestJS API (including /api/v1), e.g. http://localhost:3000/api/v1. */
+  NEXT_PUBLIC_API_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
   NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),

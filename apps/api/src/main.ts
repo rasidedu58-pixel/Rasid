@@ -16,10 +16,12 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Academic Precision API")
     .setDescription(
-      "Phase 0 foundation — only infrastructure endpoints (health/readiness) are documented. " +
-        "No business feature endpoints are exposed yet.",
+      "Phase 0 infrastructure (health/readiness) + Phase 1 identity/auth/workspace " +
+        "endpoints (GET /me, GET /me/workspaces/:id/context, POST /onboarding/complete). " +
+        "No later-phase business feature endpoints are exposed yet.",
     )
     .setVersion("v1")
+    .addBearerAuth({ type: "http", scheme: "bearer", bearerFormat: "JWT" })
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup(`${API_PREFIX}/docs`, app, document);

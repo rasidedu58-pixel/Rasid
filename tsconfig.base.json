@@ -21,7 +21,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "composite": false,
-    "incremental": true,
+    "incremental": false,
     "baseUrl": "."
   },
   "exclude": ["node_modules", "dist", "build", ".next", ".turbo", "coverage"]
