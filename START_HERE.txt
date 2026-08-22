@@ -1,0 +1,7 @@
+Rasid — Claude Code Start
+
+1) Put ALL contents of this folder directly inside the root of the Rasid repository.
+2) Open the Rasid repository root in Claude Code.
+3) Send:
+   اقرأ 00_READ_FIRST.md ثم 06_MASTER_CLAUDE_CODE_PROMPT.md بالكامل، وبعد ذلك نفّذ فقط 07_PHASE_0_PROMPT.md. لا تبدأ أي Phase أخرى. وفي النهاية أعطني Completion Report ونتائج lint/typecheck/test/build وأي Blockers.
+4) Do not start Phase 1 until Phase 0 is reviewed and approved.
