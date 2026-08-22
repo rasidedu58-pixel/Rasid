@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { createRemoteJWKSet, jwtVerify, errors as joseErrors, type JWTVerifyGetKey } from "jose";
 import { API_ENV } from "../../config/config.module";
 import type { ServerEnv } from "@academic-precision/config/server";
@@ -52,8 +52,8 @@ export class JwtTokenVerifier implements TokenVerifier {
    */
   constructor(
     @Inject(API_ENV) private readonly env: ServerEnv,
-    private readonly jwksOverride?: JWTVerifyGetKey,
-    private readonly issuerOverride?: string,
+    @Optional() private readonly jwksOverride?: JWTVerifyGetKey,
+    @Optional() private readonly issuerOverride?: string,
   ) {}
 
   async verify(token: string): Promise<VerifiedSupabaseToken> {
