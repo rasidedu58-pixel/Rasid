@@ -47,3 +47,15 @@ export class ValidationApiException extends ApiException {
     super(422, "VALIDATION_ERROR", message, { fieldErrors });
   }
 }
+
+/**
+ * 422 — a requested permission grant is incoherent: an unknown permission
+ * key, a scope that violates the catalog's required scope kind, or (Phase 2
+ * §7) a SELECTED_GROUPS group id that the GroupOwnershipPort reports does
+ * NOT belong to the grant's workspace.
+ */
+export class PermissionScopeInvalidException extends ApiException {
+  constructor(message = "نطاق الصلاحية غير صالح.", details?: Record<string, unknown>) {
+    super(422, "PERMISSION_SCOPE_INVALID", message, details);
+  }
+}

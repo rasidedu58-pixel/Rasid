@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
 import { getDatabaseUrl } from "./env";
@@ -29,4 +30,29 @@ export async function closeDb(): Promise<void> {
     client = undefined;
     db = undefined;
   }
+}
+
+/**
+ * Runs `callback` inside a transaction with `app.workspace_id` set for the
+ * lifetime of that transaction (`SET LOCAL` — scoped to the transaction,
+ * never leaks to other connections/requests pooled afterward). This backs
+ * the Phase 2 RLS policies (Technical Architecture §6, Database Schema
+ * §16): defense-in-depth only — application-level authorization remains
+ * the actual authority, this is not a substitute for it.
+ *
+ * Phase 1's existing call sites (identity provisioning/onboarding) do not
+ * use this helper yet — see the Phase 2 handoff notes for why that is an
+ * explicit, additive-safe decision rather than a silent gap.
+ */
+export function withWorkspaceScope<T>(
+  workspaceId: string,
+  callback: (scopedDb: PostgresJsDatabase<typeof schema>) => Promise<T>,
+): Promise<T> {
+  return getDb().transaction(async (tx) => {
+    // `set_config(..., true)` is the transaction-scoped ("SET LOCAL")
+    // equivalent that supports a bound parameter (`SET LOCAL x = $1` is not
+    // valid Postgres syntax — SET does not accept bind parameters).
+    await tx.execute(sql`SELECT set_config('app.workspace_id', ${workspaceId}, true)`);
+    return callback(tx as unknown as PostgresJsDatabase<typeof schema>);
+  });
 }

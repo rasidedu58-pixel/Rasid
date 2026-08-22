@@ -1,8 +1,9 @@
 /**
- * Schema barrel. `identity`, `workspaces`, and `permissions` (memberships
- * only) are implemented as of Phase 1 — see each module's own comment.
- * All other modules remain structural placeholders reserved for later
- * phases.
+ * Schema barrel. `identity`, `workspaces` are implemented as of Phase 1.
+ * `permissions` (memberships, permission_grants, permission_group_scopes)
+ * and `audit` (audit_events) are implemented as of Phase 2 — see each
+ * module's own comment. All other modules remain structural placeholders
+ * reserved for later phases.
  */
 export * as identity from "./identity";
 export * as workspaces from "./workspaces";
