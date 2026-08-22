@@ -16,11 +16,15 @@ const serverEnvSchema = z.object({
 
   DATABASE_URL: z.string().optional(),
 
+  /**
+   * Base Supabase project URL. Also used server-side to derive the JWKS
+   * endpoint (`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`) and expected
+   * issuer (`{SUPABASE_URL}/auth/v1`) for asymmetric access-token
+   * verification — no shared HS256 secret is used in production.
+   */
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
-  /** HS256 secret used to verify Supabase-issued access tokens server-side. */
-  SUPABASE_JWT_SECRET: z.string().optional(),
 
   REDIS_URL: z.string().optional(),
 

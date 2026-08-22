@@ -15,16 +15,16 @@ export interface AuthenticatedRequest extends FastifyRequest {
 }
 
 /**
- * Verifies the bearer token against Supabase's issued-JWT secret and
- * attaches the verified user id to the request context. No client-supplied
- * header/body value is ever trusted as identity — only the verified `sub`
- * claim from a signature-checked token.
+ * Verifies the bearer token against Supabase's asymmetric JWKS-published
+ * signing keys and attaches the verified user id to the request context. No
+ * client-supplied header/body value is ever trusted as identity — only the
+ * verified `sub` claim from a signature-checked token.
  */
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
   constructor(@Inject(TOKEN_VERIFIER) private readonly tokenVerifier: TokenVerifier) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const token = this.extractBearerToken(request.headers.authorization);
 
@@ -33,7 +33,7 @@ export class SupabaseAuthGuard implements CanActivate {
     }
 
     try {
-      request[AUTH_USER_REQUEST_KEY] = this.tokenVerifier.verify(token);
+      request[AUTH_USER_REQUEST_KEY] = await this.tokenVerifier.verify(token);
     } catch (error) {
       if (error instanceof TokenExpiredVerificationError) {
         throw new SessionExpiredException();

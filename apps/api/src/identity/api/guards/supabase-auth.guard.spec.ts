@@ -22,47 +22,35 @@ function makeContext(headers: Record<string, string | undefined>): {
 }
 
 describe("SupabaseAuthGuard", () => {
-  it("throws UNAUTHENTICATED (401) when there is no Authorization header — proves GET /me requires a session", () => {
+  it("throws UNAUTHENTICATED (401) when there is no Authorization header — proves GET /me requires a session", async () => {
     const verifier: TokenVerifier = { verify: jest.fn() };
     const guard = new SupabaseAuthGuard(verifier);
     const { context } = makeContext({});
 
-    let caught: unknown;
-    try {
-      guard.canActivate(context);
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(caught).toBeInstanceOf(UnauthenticatedException);
-    expect((caught as UnauthenticatedException).getStatus()).toBe(401);
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthenticatedException);
     expect(verifier.verify).not.toHaveBeenCalled();
   });
 
-  it("throws UNAUTHENTICATED (401) for a malformed/invalid token", () => {
+  it("throws UNAUTHENTICATED (401) for a malformed/invalid token (bad signature)", async () => {
     const verifier: TokenVerifier = {
-      verify: jest.fn(() => {
-        throw new InvalidTokenVerificationError("bad signature");
-      }),
+      verify: jest.fn().mockRejectedValue(new InvalidTokenVerificationError("bad signature")),
     };
     const guard = new SupabaseAuthGuard(verifier);
     const { context } = makeContext({ authorization: "Bearer not-a-real-token" });
 
-    expect(() => guard.canActivate(context)).toThrow(UnauthenticatedException);
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthenticatedException);
   });
 
-  it("throws SESSION_EXPIRED (401) when the token verifier reports expiry", () => {
+  it("throws SESSION_EXPIRED (401) when the token verifier reports expiry", async () => {
     const verifier: TokenVerifier = {
-      verify: jest.fn(() => {
-        throw new TokenExpiredVerificationError("expired");
-      }),
+      verify: jest.fn().mockRejectedValue(new TokenExpiredVerificationError("expired")),
     };
     const guard = new SupabaseAuthGuard(verifier);
     const { context } = makeContext({ authorization: "Bearer expired-token" });
 
     let caught: unknown;
     try {
-      guard.canActivate(context);
+      await guard.canActivate(context);
     } catch (error) {
       caught = error;
     }
@@ -70,13 +58,13 @@ describe("SupabaseAuthGuard", () => {
     expect(caught).toBeInstanceOf(SessionExpiredException);
   });
 
-  it("attaches the verified user to the request and allows the route on a valid token", () => {
+  it("attaches the verified user to the request and allows the route on a valid token", async () => {
     const verified: VerifiedSupabaseToken = { id: "user-1", email: "a@b.com" };
-    const verifier: TokenVerifier = { verify: jest.fn(() => verified) };
+    const verifier: TokenVerifier = { verify: jest.fn().mockResolvedValue(verified) };
     const guard = new SupabaseAuthGuard(verifier);
     const { context, request } = makeContext({ authorization: "Bearer good-token" });
 
-    const allowed = guard.canActivate(context);
+    const allowed = await guard.canActivate(context);
 
     expect(allowed).toBe(true);
     expect(request[AUTH_USER_REQUEST_KEY]).toEqual(verified);
