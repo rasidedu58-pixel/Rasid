@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   enrollmentCreateRequestSchema,
   enrollmentPreviewRequestSchema,
@@ -65,6 +67,8 @@ export class EnrollmentsController {
 
   @Post("group-months/:id/enrollments")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Create or reactivate an Enrollment (POST /api/v1/group-months/:id/enrollments)" })
   createEnrollment(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -86,6 +90,8 @@ export class EnrollmentsController {
 
   @Post("enrollments/:id/withdraw")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Withdraw with effective reason/date (POST /api/v1/enrollments/:id/withdraw)" })
   withdraw(
@@ -128,6 +134,8 @@ export class EnrollmentsController {
 
   @Post("enrollments/:id/transfer")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Transfer preserving Student identity (POST /api/v1/enrollments/:id/transfer)" })
   transfer(
     @CurrentUser() user: VerifiedSupabaseToken,

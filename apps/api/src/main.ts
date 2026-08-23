@@ -32,9 +32,18 @@ async function bootstrap() {
   // rather than a parse error; downstream DTO validation (zod) still
   // rejects it cleanly with VALIDATION_ERROR if the endpoint actually
   // requires fields.
+  //
+  // Phase 8: also stashes the exact raw body string on `req.rawBody`
+  // BEFORE JSON.parse — `POST /webhooks/paddle` needs the untransformed
+  // bytes for HMAC signature verification (API Contract §11.16 step 1;
+  // re-serializing a parsed JSON object never reproduces the original
+  // byte-for-byte string, which would make every signature check fail
+  // unpredictably). Harmless for every other route — `rawBody` is simply
+  // unused there.
   const fastifyInstance = app.getHttpAdapter().getInstance();
   fastifyInstance.removeContentTypeParser("application/json");
-  fastifyInstance.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body: string, done) => {
+  fastifyInstance.addContentTypeParser("application/json", { parseAs: "string" }, (req, body: string, done) => {
+    (req as unknown as { rawBody?: string }).rawBody = body;
     if (body.length === 0) {
       done(null, {});
       return;

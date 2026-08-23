@@ -51,6 +51,8 @@ const serverEnvSchema = z.object({
   PADDLE_API_KEY: z.string().optional(),
   PADDLE_WEBHOOK_SECRET: z.string().optional(),
   PADDLE_ENVIRONMENT: z.string().optional(),
+  /** The single V1 subscription price id in Paddle's dashboard — checkout creation attaches it directly (no in-app plan picker in V1). */
+  PADDLE_PRICE_ID: z.string().optional(),
 
   SENTRY_DSN: z.string().optional(),
   POSTHOG_API_KEY: z.string().optional(),

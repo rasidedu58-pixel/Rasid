@@ -1,10 +1,14 @@
+import { randomUUID } from "node:crypto";
 import type {
+  EntitlementRow,
   MembershipWithWorkspace,
   OnboardingCompleteInput,
   ProvisionedIdentity,
   ProvisionInput,
+  SubscriptionRow,
   WorkspaceRow,
 } from "@academic-precision/database";
+import { resolveEntitlementSnapshot, type Capability } from "@academic-precision/database";
 import type { IdentityRepositoryPort } from "../ports/identity-repository.port";
 
 /**
@@ -19,9 +23,47 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
   readonly usersById = new Map<string, ProvisionedIdentity["user"]>();
   readonly workspacesByUserId = new Map<string, ProvisionedIdentity["workspace"]>();
   readonly membershipsByUserId = new Map<string, ProvisionedIdentity["membership"]>();
+  readonly subscriptionsByWorkspaceId = new Map<string, SubscriptionRow>();
+  readonly entitlementsByWorkspaceId = new Map<string, EntitlementRow[]>();
 
   private newId(): string {
     return `test-id-${this.nextId++}`;
+  }
+
+  /** Mirrors `provisionSubscriptionForNewWorkspaceTransaction` (packages/database) for a fresh in-memory workspace — always grants a 14-day TRIAL (the fixture has no cross-test `owner_trial_grants` concept; anti-abuse behavior itself is covered separately by the live integration suite). */
+  private seedTrialSubscription(workspaceId: string): void {
+    const now = new Date();
+    const periodEnd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const subscription: SubscriptionRow = {
+      id: randomUUID(),
+      workspaceId,
+      provider: "PADDLE",
+      providerCustomerId: null,
+      providerSubscriptionId: null,
+      state: "TRIAL",
+      periodStart: now,
+      periodEnd,
+      cancelAtPeriodEnd: false,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    };
+    this.subscriptionsByWorkspaceId.set(workspaceId, subscription);
+
+    const snapshot = resolveEntitlementSnapshot("TRIAL");
+    const rows: EntitlementRow[] = (Object.keys(snapshot) as Capability[]).map((capability) => ({
+      id: randomUUID(),
+      workspaceId,
+      capability,
+      state: snapshot[capability],
+      sourceType: "TRIAL",
+      sourceId: subscription.id,
+      effectiveFrom: now,
+      effectiveTo: null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    this.entitlementsByWorkspaceId.set(workspaceId, rows);
   }
 
   async provision(input: ProvisionInput): Promise<ProvisionedIdentity> {
@@ -74,6 +116,7 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
     this.usersById.set(user.id, user);
     this.workspacesByUserId.set(user.id, workspace);
     this.membershipsByUserId.set(user.id, membership);
+    this.seedTrialSubscription(workspace.id);
 
     return { user, workspace, membership };
   }
@@ -161,5 +204,14 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
     });
     this.workspacesByUserId.set(userId, workspace);
     this.membershipsByUserId.set(userId, membership);
+    this.seedTrialSubscription(workspace.id);
+  }
+
+  async findSubscriptionByWorkspaceId(workspaceId: string): Promise<SubscriptionRow | undefined> {
+    return this.subscriptionsByWorkspaceId.get(workspaceId);
+  }
+
+  async listAllowedEntitlementsForWorkspace(workspaceId: string): Promise<EntitlementRow[]> {
+    return (this.entitlementsByWorkspaceId.get(workspaceId) ?? []).filter((e) => e.state === "ALLOWED");
   }
 }

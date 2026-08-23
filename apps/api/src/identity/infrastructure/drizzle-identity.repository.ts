@@ -4,12 +4,16 @@ import {
   completeOnboarding,
   createUserWorkspaceMembership,
   findMembership,
+  findSubscriptionByWorkspaceId,
+  listAllowedEntitlementsForWorkspace,
   listMembershipsForUser,
   withRuntimeContext,
+  type EntitlementRow,
   type MembershipWithWorkspace,
   type OnboardingCompleteInput,
   type ProvisionedIdentity,
   type ProvisionInput,
+  type SubscriptionRow,
   type WorkspaceRow,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
@@ -80,5 +84,18 @@ export class DrizzleIdentityRepository implements IdentityRepositoryPort {
       { userId: ctx?.userId, workspaceId: input.workspaceId },
       (db) => completeOnboarding(db, input),
     );
+  }
+
+  findSubscriptionByWorkspaceId(workspaceId: string): Promise<SubscriptionRow | undefined> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => findSubscriptionByWorkspaceId(db, workspaceId));
+  }
+
+  listAllowedEntitlementsForWorkspace(workspaceId: string): Promise<EntitlementRow[]> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => listAllowedEntitlementsForWorkspace(db, workspaceId));
+  }
+
+  private runtimeCtx(workspaceId: string) {
+    const ctx = getContext();
+    return { userId: ctx?.userId, workspaceId };
   }
 }

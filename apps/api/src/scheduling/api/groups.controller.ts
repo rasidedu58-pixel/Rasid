@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   createGroupRequestSchema,
   updateGroupRequestSchema,
@@ -44,6 +46,8 @@ export class GroupsController {
 
   @Post()
   @RequirePermission("groups.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Create a stable Group identity (POST /api/v1/groups)" })
   createGroup(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -74,6 +78,8 @@ export class GroupsController {
 
   @Patch(":id")
   @RequirePermission("groups.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Versioned edit of a Group's stable identity (PATCH /api/v1/groups/:id)" })
   updateGroup(
     @CurrentUser() user: VerifiedSupabaseToken,

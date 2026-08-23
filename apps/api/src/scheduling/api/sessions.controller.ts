@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   sessionRescheduleRequestSchema,
   sessionReschedulePreviewRequestSchema,
@@ -73,6 +75,8 @@ export class SessionsController {
 
   @Post(":id/cancel")
   @RequirePermission("sessions.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Cancel an eligible (SCHEDULED) session (POST /api/v1/sessions/:id/cancel)" })
   cancelSession(
@@ -105,6 +109,8 @@ export class SessionsController {
 
   @Post(":id/reschedule")
   @RequirePermission("sessions.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Create one linked replacement session (POST /api/v1/sessions/:id/reschedule)" })
   reschedule(
     @CurrentUser() user: VerifiedSupabaseToken,

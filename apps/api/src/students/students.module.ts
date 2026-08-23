@@ -15,6 +15,9 @@ import { StudentsService } from "./application/students.service";
 import { EnrollmentsService } from "./application/enrollments.service";
 import { STUDENTS_REPOSITORY } from "./application/ports/students-repository.port";
 import { DrizzleStudentsRepository } from "./infrastructure/drizzle-students.repository";
+import { EntitlementGuard } from "../billing/api/guards/entitlement.guard";
+import { ENTITLEMENT_REPOSITORY } from "../billing/application/ports/entitlement-repository.port";
+import { DrizzleEntitlementRepository } from "../billing/infrastructure/drizzle-entitlement.repository";
 
 /**
  * Phase 4 — Students / Guardians / QR / Enrollment module. Mirrors
@@ -34,11 +37,13 @@ import { DrizzleStudentsRepository } from "./infrastructure/drizzle-students.rep
     PreviewTokenService,
     PermissionResolverService,
     PermissionGuard,
+    EntitlementGuard,
     SupabaseAuthGuard,
     { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier },
     { provide: TEAM_REPOSITORY, useClass: DrizzleTeamRepository },
     { provide: GROUP_OWNERSHIP_PORT, useClass: DrizzleGroupOwnershipAdapter },
     { provide: STUDENTS_REPOSITORY, useClass: DrizzleStudentsRepository },
+    { provide: ENTITLEMENT_REPOSITORY, useClass: DrizzleEntitlementRepository },
   ],
 })
 export class StudentsModule {}

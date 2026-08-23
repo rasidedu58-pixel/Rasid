@@ -12,8 +12,10 @@
  * (financial_obligations, payments, payment_reversals) is implemented as of
  * Phase 6. `attention` (attention_cases, attention_reasons,
  * attention_evidence) and `followup` (contact_logs, scheduled_followups)
- * are implemented as of Phase 7 — see each module's own comment. All other
- * modules remain structural placeholders reserved for later phases.
+ * are implemented as of Phase 7. `subscriptions` (subscriptions,
+ * entitlements, owner_trial_grants) is implemented as of Phase 8 — see
+ * each module's own comment. All other modules remain structural
+ * placeholders reserved for later phases.
  */
 export * as identity from "./identity";
 export * as workspaces from "./workspaces";

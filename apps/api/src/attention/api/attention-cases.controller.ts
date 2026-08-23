@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   attentionCaseTransitionRequestSchema,
   contactDraftRequestSchema,
@@ -63,6 +65,8 @@ export class AttentionCasesController {
 
   @Post(":id/start-followup")
   @RequirePermission("followup.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "New → In Follow-up (POST /api/v1/attention-cases/:id/start-followup)" })
   startFollowup(
@@ -79,6 +83,8 @@ export class AttentionCasesController {
 
   @Post(":id/mark-monitoring")
   @RequirePermission("followup.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "→ Monitoring (POST /api/v1/attention-cases/:id/mark-monitoring)" })
   markMonitoring(
@@ -95,6 +101,8 @@ export class AttentionCasesController {
 
   @Post(":id/close")
   @RequirePermission("followup.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Close explicitly (POST /api/v1/attention-cases/:id/close)" })
   closeCase(

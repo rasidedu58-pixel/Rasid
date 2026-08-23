@@ -41,9 +41,11 @@ describe("IdentityService", () => {
 
       expect(context.workspace.id).toBe(workspaceId);
       expect(context.membership.roleLabel).toBe("OWNER");
-      expect(context.permissions).toEqual([]);
-      expect(context.entitlements).toEqual([]);
-      expect(context.subscriptionState).toBeNull();
+      expect(context.permissions).toEqual([]); // pre-existing Phase 1 gap, not Phase 8's mandate
+      // Phase 8 — a freshly-provisioned workspace starts on its 14-day
+      // TRIAL with every V1 capability ALLOWED.
+      expect(context.subscriptionState).toBe("TRIAL");
+      expect(context.entitlements.sort()).toEqual(["CORE_OPERATIONS", "CREATE_MONTH", "REPORT_EXPORT", "TEAM_MANAGEMENT"].sort());
     });
 
     it("returns safe no-leak RESOURCE_NOT_FOUND (not FORBIDDEN) for a workspace the user is not a member of", async () => {

@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   createStudentRequestSchema,
   linkGuardianRequestSchema,
@@ -81,6 +83,8 @@ export class StudentsController {
 
   @Post("students")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Create Student + guardian links + initial QR (POST /api/v1/students)" })
   createStudent(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -111,6 +115,8 @@ export class StudentsController {
 
   @Patch("students/:id")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Versioned basic edit (PATCH /api/v1/students/:id)" })
   updateStudent(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -132,6 +138,8 @@ export class StudentsController {
 
   @Post("students/:id/archive")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Archive; no hard delete (POST /api/v1/students/:id/archive)" })
   archiveStudent(
@@ -145,6 +153,8 @@ export class StudentsController {
 
   @Post("students/:id/guardians")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Link/create a guardian (POST /api/v1/students/:id/guardians)" })
   linkGuardian(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -166,6 +176,8 @@ export class StudentsController {
 
   @Patch("students/:studentId/guardians/:guardianId")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Edit relation/contact flags on the join row (PATCH .../guardians/:guardianId)" })
   updateStudentGuardian(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -189,6 +201,8 @@ export class StudentsController {
 
   @Post("students/:studentId/guardians/:guardianId/set-primary")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Set one primary guardian (POST .../guardians/:guardianId/set-primary)" })
   setPrimaryGuardian(
@@ -209,6 +223,8 @@ export class StudentsController {
 
   @Post("students/:id/qr/issue")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Issue if no active QR (POST /api/v1/students/:id/qr/issue)" })
   issueQr(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -221,6 +237,8 @@ export class StudentsController {
 
   @Post("students/:id/qr/reissue")
   @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Revoke old; audit; token once (POST /api/v1/students/:id/qr/reissue)" })
   reissueQr(
     @CurrentUser() user: VerifiedSupabaseToken,

@@ -5,6 +5,8 @@ import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-to
 import { CurrentUser } from "../../identity/api/decorators/current-user.decorator";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import { createContactLogRequestSchema, type CreateContactLogResponse } from "@academic-precision/contracts";
 import { ValidationApiException } from "../../common/exceptions/api.exception";
 import { toFieldErrors } from "../../common/validation/zod-field-errors";
@@ -26,6 +28,8 @@ export class ContactLogsController {
   constructor(private readonly attentionService: AttentionService) {}
 
   @Post()
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: "Persist selected guardian + outcome + optional due date (POST /api/v1/contact-logs)" })
   createContactLog(

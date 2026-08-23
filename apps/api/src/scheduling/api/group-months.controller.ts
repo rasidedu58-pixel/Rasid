@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   groupMonthApplyChangeRequestSchema,
   groupMonthChangePreviewRequestSchema,
@@ -74,6 +76,8 @@ export class GroupMonthsController {
 
   @Post(":id/apply-change")
   @RequirePermission("groups.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Apply an approved GroupMonth change (POST .../apply-change)" })
   applyChange(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -123,6 +127,8 @@ export class GroupMonthsController {
 
   @Post(":id/schedule/apply")
   @RequirePermission("sessions.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Apply a previewed schedule change (POST .../schedule/apply)" })
   applySchedule(
     @CurrentUser() user: VerifiedSupabaseToken,

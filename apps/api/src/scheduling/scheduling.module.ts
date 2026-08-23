@@ -7,6 +7,9 @@ import { GROUP_OWNERSHIP_PORT } from "../team/application/ports/group-ownership.
 import { TEAM_REPOSITORY } from "../team/application/ports/team-repository.port";
 import { DrizzleTeamRepository } from "../team/infrastructure/drizzle-team.repository";
 import { DrizzleGroupOwnershipAdapter } from "../team/infrastructure/group-ownership.adapter";
+import { EntitlementGuard } from "../billing/api/guards/entitlement.guard";
+import { ENTITLEMENT_REPOSITORY } from "../billing/application/ports/entitlement-repository.port";
+import { DrizzleEntitlementRepository } from "../billing/infrastructure/drizzle-entitlement.repository";
 import { GroupsController } from "./api/groups.controller";
 import { MonthsController } from "./api/months.controller";
 import { GroupMonthsController } from "./api/group-months.controller";
@@ -23,6 +26,12 @@ import { DrizzleSchedulingRepository } from "./infrastructure/drizzle-scheduling
  * + its dependencies directly (rather than importing `TeamModule`) to avoid
  * a module cycle, since neither Phase 1's nor Phase 2's module currently
  * exports its providers.
+ *
+ * Phase 8 retrofit: `EntitlementGuard`/`ENTITLEMENT_REPOSITORY` are
+ * re-provided directly here too (same avoid-a-cycle rationale, per
+ * `billing.module.ts`'s own doc comment) so `POST /months` can carry
+ * `@RequireEntitlement("CREATE_MONTH")` alongside its existing
+ * `PermissionGuard` check.
  */
 @Module({
   controllers: [GroupsController, MonthsController, GroupMonthsController, SessionsController],
@@ -31,11 +40,13 @@ import { DrizzleSchedulingRepository } from "./infrastructure/drizzle-scheduling
     PreviewTokenService,
     PermissionResolverService,
     PermissionGuard,
+    EntitlementGuard,
     SupabaseAuthGuard,
     { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier },
     { provide: TEAM_REPOSITORY, useClass: DrizzleTeamRepository },
     { provide: GROUP_OWNERSHIP_PORT, useClass: DrizzleGroupOwnershipAdapter },
     { provide: SCHEDULING_REPOSITORY, useClass: DrizzleSchedulingRepository },
+    { provide: ENTITLEMENT_REPOSITORY, useClass: DrizzleEntitlementRepository },
   ],
 })
 export class SchedulingModule {}

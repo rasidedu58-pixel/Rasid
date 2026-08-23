@@ -242,3 +242,29 @@ export class FollowupInvalidStateException extends ApiException {
     super(409, "FOLLOWUP_INVALID_STATE", message, details);
   }
 }
+
+/**
+ * 403 — Phase 8, API Contract §12: "Workspace منتهي/غير مدفوع لعملية
+ * محجوبة." Used for the 3 "operational" V1 capabilities (CORE_OPERATIONS/
+ * CREATE_MONTH/TEAM_MANAGEMENT) — the workspace's subscription itself is
+ * what's blocking the action; the CTA is billing/renewal, not a
+ * permission change.
+ */
+export class SubscriptionRequiredException extends ApiException {
+  constructor(message = "يلزم تجديد الاشتراك لإتمام هذا الإجراء.", details?: Record<string, unknown>) {
+    super(403, "SUBSCRIPTION_REQUIRED", message, details);
+  }
+}
+
+/**
+ * 403 — Phase 8, API Contract §12: "Capability غير مسموحة. لا تعتمد على
+ * UI state." Used for the REPORT_EXPORT capability specifically — a
+ * feature-level gate distinct from "the whole workspace is expired"
+ * (though in V1 the two conditions happen to be triggered by the exact
+ * same subscription states, per PRD §44.2.1's matrix).
+ */
+export class EntitlementBlockedException extends ApiException {
+  constructor(message = "هذه الإمكانية غير متاحة حاليًا لمساحة العمل.", details?: Record<string, unknown>) {
+    super(403, "ENTITLEMENT_BLOCKED", message, details);
+  }
+}

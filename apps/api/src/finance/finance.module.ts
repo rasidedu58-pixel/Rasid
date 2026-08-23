@@ -13,6 +13,9 @@ import { StudentObligationsController } from "./api/student-obligations.controll
 import { FinanceService } from "./application/finance.service";
 import { FINANCE_REPOSITORY } from "./application/ports/finance-repository.port";
 import { DrizzleFinanceRepository } from "./infrastructure/drizzle-finance.repository";
+import { EntitlementGuard } from "../billing/api/guards/entitlement.guard";
+import { ENTITLEMENT_REPOSITORY } from "../billing/application/ports/entitlement-repository.port";
+import { DrizzleEntitlementRepository } from "../billing/infrastructure/drizzle-entitlement.repository";
 
 /**
  * Phase 6 — Finance module. Mirrors `SessionModeModule`'s (Phase 5)
@@ -27,11 +30,13 @@ import { DrizzleFinanceRepository } from "./infrastructure/drizzle-finance.repos
     FinanceService,
     PermissionResolverService,
     PermissionGuard,
+    EntitlementGuard,
     SupabaseAuthGuard,
     { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier },
     { provide: TEAM_REPOSITORY, useClass: DrizzleTeamRepository },
     { provide: GROUP_OWNERSHIP_PORT, useClass: DrizzleGroupOwnershipAdapter },
     { provide: FINANCE_REPOSITORY, useClass: DrizzleFinanceRepository },
+    { provide: ENTITLEMENT_REPOSITORY, useClass: DrizzleEntitlementRepository },
   ],
 })
 export class FinanceModule {}

@@ -1,10 +1,10 @@
 import { createLogger, runWithContext } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
-import { closeDb, getWorkerDb, processPendingOutboxEvents } from "@academic-precision/database";
+import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
 
 /**
- * Standalone worker process bootstrap — Phase 7.
+ * Standalone worker process bootstrap — Phase 7, extended in Phase 8.
  *
  * Runs the outbox dispatcher (packages/database/src/worker/outbox-
  * dispatcher.ts) on the dedicated, least-privilege `app_worker` connection
@@ -17,6 +17,10 @@ import { registerGracefulShutdown } from "./shutdown";
  * one before scheduling the next, with backoff on empty/errored cycles and
  * a graceful-shutdown path that lets an in-flight cycle finish before the
  * process exits.
+ *
+ * Phase 8 adds the scheduled Subscription expiry check (API Contract §16)
+ * on the SAME loop/connection — see `SUBSCRIPTION_EXPIRY_INTERVAL_MS` for
+ * why it runs on its own coarser cadence rather than every cycle.
  */
 const logger = createLogger("academic-precision-worker");
 
@@ -25,6 +29,14 @@ const IDLE_POLL_DELAY_MS = 5_000; // nothing was claimed — wait a bit before c
 const ACTIVE_POLL_DELAY_MS = 250; // something WAS claimed — check again soon, more may be waiting.
 const ERROR_POLL_DELAY_MS = 15_000; // an unexpected (non-event-scoped) error — back off harder.
 const MAX_EVENTS_PER_CYCLE = 20;
+
+// Phase 8 — Subscription expiry is a day-granularity concern (`period_end`),
+// not a sub-second one like outbox dispatch — running it on every ~250ms
+// active-outbox cycle would be pure waste. Piggybacks on the SAME
+// sequential polling loop (never a separate `setInterval`, for the exact
+// overlapping-cycle reason explained in the module doc comment above) but
+// only actually queries when this interval has elapsed since its last run.
+const SUBSCRIPTION_EXPIRY_INTERVAL_MS = 60_000;
 
 function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
   return new Promise((resolve) => {
@@ -44,12 +56,28 @@ function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
 }
 
 async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<typeof getWorkerDb>): Promise<void> {
+  let lastSubscriptionExpiryCheckAt = 0;
+
   while (!state.stopped) {
     const bootId = randomUUID();
     try {
       const result = await runWithContext({ jobId: bootId }, () =>
         processPendingOutboxEvents(workerDb, { eventTypes: POLL_EVENT_TYPES, maxEvents: MAX_EVENTS_PER_CYCLE }),
       );
+
+      if (Date.now() - lastSubscriptionExpiryCheckAt >= SUBSCRIPTION_EXPIRY_INTERVAL_MS) {
+        lastSubscriptionExpiryCheckAt = Date.now();
+        try {
+          const expiryResult = await runWithContext({ jobId: bootId }, () => runSubscriptionExpiryCheck(workerDb));
+          if (expiryResult.expired > 0 || expiryResult.conflicted > 0) {
+            logger.info({ ...expiryResult }, "Subscription expiry scan completed.");
+          }
+        } catch (error) {
+          // Deliberately scoped to THIS check only — a failure here must
+          // never take down outbox dispatch, which already succeeded above.
+          logger.error({ error }, "Subscription expiry scan failed unexpectedly — will retry next interval.");
+        }
+      }
 
       if (result.claimed === 0) {
         await sleep(IDLE_POLL_DELAY_MS, state);

@@ -9,6 +9,9 @@ import { GROUP_OWNERSHIP_PORT } from "./application/ports/group-ownership.port";
 import { TEAM_REPOSITORY } from "./application/ports/team-repository.port";
 import { DrizzleTeamRepository } from "./infrastructure/drizzle-team.repository";
 import { DrizzleGroupOwnershipAdapter } from "./infrastructure/group-ownership.adapter";
+import { EntitlementGuard } from "../billing/api/guards/entitlement.guard";
+import { ENTITLEMENT_REPOSITORY } from "../billing/application/ports/entitlement-repository.port";
+import { DrizzleEntitlementRepository } from "../billing/infrastructure/drizzle-entitlement.repository";
 
 /**
  * Phase 2 — RBAC / Membership / Permissions module. Depends on
@@ -18,6 +21,10 @@ import { DrizzleGroupOwnershipAdapter } from "./infrastructure/group-ownership.a
  * `export` its providers). `SupabaseAuthGuard` itself only depends on
  * `TOKEN_VERIFIER`, which is re-provided here so it can be instantiated
  * standalone in this module's injector.
+ *
+ * Phase 8 retrofit: `EntitlementGuard`/`ENTITLEMENT_REPOSITORY` re-provided
+ * directly too (same avoid-a-cycle rationale) so the membership write
+ * routes can carry `@RequireEntitlement("TEAM_MANAGEMENT")`.
  */
 @Module({
   controllers: [TeamController],
@@ -25,10 +32,12 @@ import { DrizzleGroupOwnershipAdapter } from "./infrastructure/group-ownership.a
     TeamService,
     PermissionResolverService,
     PermissionGuard,
+    EntitlementGuard,
     SupabaseAuthGuard,
     { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier },
     { provide: TEAM_REPOSITORY, useClass: DrizzleTeamRepository },
     { provide: GROUP_OWNERSHIP_PORT, useClass: DrizzleGroupOwnershipAdapter },
+    { provide: ENTITLEMENT_REPOSITORY, useClass: DrizzleEntitlementRepository },
   ],
 })
 export class TeamModule {}

@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   completeFollowupRequestSchema,
   rescheduleFollowupRequestSchema,
@@ -49,6 +51,8 @@ export class FollowupsController {
 
   @Post(":id/complete")
   @RequirePermission("followup.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Complete a scheduled follow-up (POST /api/v1/followups/:id/complete)" })
   completeFollowup(
@@ -65,6 +69,8 @@ export class FollowupsController {
 
   @Post(":id/reschedule")
   @RequirePermission("followup.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Move a scheduled follow-up's due date/time (POST /api/v1/followups/:id/reschedule)" })
   rescheduleFollowup(

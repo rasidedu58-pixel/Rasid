@@ -8,6 +8,7 @@ import { StudentsModule } from "./students/students.module";
 import { SessionModeModule } from "./session-mode/session-mode.module";
 import { FinanceModule } from "./finance/finance.module";
 import { AttentionModule } from "./attention/attention.module";
+import { BillingModule } from "./billing/billing.module";
 import { RequestIdMiddleware } from "./common/middleware/request-id.middleware";
 
 /**
@@ -16,7 +17,8 @@ import { RequestIdMiddleware } from "./common/middleware/request-id.middleware";
  * Phase 2 added the RBAC/Team/Permissions module. Phase 3 added the
  * Months/Groups/Scheduling module. Phase 4 added the Students/Guardians/
  * QR/Enrollment module. Phase 5 added the Session Mode module. Phase 6
- * added the Finance module. Phase 7 adds the Attention/Follow-up module.
+ * added the Finance module. Phase 7 added the Attention/Follow-up module.
+ * Phase 8 adds the Billing/Entitlements module.
  */
 @Module({
   imports: [
@@ -29,6 +31,7 @@ import { RequestIdMiddleware } from "./common/middleware/request-id.middleware";
     SessionModeModule,
     FinanceModule,
     AttentionModule,
+    BillingModule,
   ],
 })
 export class AppModule implements NestModule {

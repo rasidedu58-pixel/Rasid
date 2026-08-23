@@ -22,6 +22,7 @@ import { users } from "../schema/identity";
 import { memberships } from "../schema/permissions";
 import { workspaces } from "../schema/workspaces";
 import type * as schema from "../schema/index";
+import { provisionSubscriptionForNewWorkspaceTransaction } from "./subscriptions.repository";
 
 export type Db = PostgresJsDatabase<typeof schema>;
 
@@ -164,6 +165,17 @@ export async function createUserWorkspaceMembership(
     if (!newMembership) {
       throw new Error(`Failed to create owner membership for user ${newUser.id}.`);
     }
+
+    // Phase 8 — same transaction as the new owner workspace itself: either
+    // the 14-day ordinary trial (first time this verified identity has
+    // ever owned a workspace) or an immediately-EXPIRED subscription
+    // (repeat identity — see subscriptions.repository.ts's own doc
+    // comment on why EXPIRED, not a skipped/missing row).
+    await provisionSubscriptionForNewWorkspaceTransaction(tx as unknown as Db, {
+      workspaceId: newWorkspace.id,
+      ownerUserId: newUser.id,
+      email: input.email,
+    });
 
     return { user: newUser, workspace: newWorkspace, membership: newMembership };
   });

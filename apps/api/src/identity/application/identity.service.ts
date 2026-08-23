@@ -69,6 +69,11 @@ export class IdentityService {
       throw new ResourceNotFoundException();
     }
 
+    const [subscription, allowedEntitlements] = await Promise.all([
+      this.repository.findSubscriptionByWorkspaceId(workspaceId),
+      this.repository.listAllowedEntitlementsForWorkspace(workspaceId),
+    ]);
+
     return {
       workspace: {
         id: found.workspace.id,
@@ -79,11 +84,13 @@ export class IdentityService {
         id: found.membership.id,
         roleLabel: found.membership.roleLabel,
       },
-      // Phase 1 scope: permission engine (Phase 2) and entitlements/
-      // subscriptions (Phase 8) are not implemented yet.
+      // Phase 1 scope note (still true): the permission engine (Phase 2)
+      // was never wired into this specific response — pre-existing gap,
+      // out of Phase 8's mandate. Phase 8 wires only entitlements/
+      // subscriptionState, its own explicit deliverable.
       permissions: [],
-      entitlements: [],
-      subscriptionState: null,
+      entitlements: allowedEntitlements.map((e) => e.capability),
+      subscriptionState: subscription?.state ?? null,
     };
   }
 

@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   recordPaymentRequestSchema,
   reversePaymentRequestSchema,
@@ -36,6 +38,8 @@ export class PaymentsController {
 
   @Post()
   @RequirePermission("payments.record")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Post one payment; Idempotency-Key required (POST /api/v1/payments)" })
   recordPayment(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -56,6 +60,8 @@ export class PaymentsController {
 
   @Post(":id/reverse")
   @RequirePermission("payments.record")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Reverse with mandatory reason; Idempotency-Key required (POST /api/v1/payments/:id/reverse)" })
   reversePayment(
     @CurrentUser() user: VerifiedSupabaseToken,

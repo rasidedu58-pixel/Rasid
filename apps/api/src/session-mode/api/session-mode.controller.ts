@@ -9,6 +9,8 @@ import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   attendanceBatchRequestSchema,
   examDefinitionRequestSchema,
@@ -58,6 +60,8 @@ export class SessionModeController {
 
   @Post(":id/start")
   @RequirePermission("attendance.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "SCHEDULED→IN_PROGRESS (POST /api/v1/sessions/:id/start)" })
   start(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -90,6 +94,8 @@ export class SessionModeController {
 
   @Put(":id/attendance")
   @RequirePermission("attendance.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Atomic batch attendance (PUT /api/v1/sessions/:id/attendance)" })
   putAttendance(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -104,6 +110,8 @@ export class SessionModeController {
 
   @Post(":id/attendance/mark-all-present")
   @RequirePermission("attendance.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Bulk command (POST /api/v1/sessions/:id/attendance/mark-all-present)" })
   markAllPresent(
@@ -119,6 +127,8 @@ export class SessionModeController {
 
   @Put(":id/homework")
   @RequirePermission("homework.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Atomic batch homework (PUT /api/v1/sessions/:id/homework)" })
   putHomework(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -133,6 +143,8 @@ export class SessionModeController {
 
   @Post(":id/homework/mark-all-done")
   @RequirePermission("homework.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Bulk command (POST /api/v1/sessions/:id/homework/mark-all-done)" })
   markAllDone(
@@ -148,6 +160,8 @@ export class SessionModeController {
 
   @Post(":id/homework/no-homework")
   @RequirePermission("homework.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Resolved no-homework state (POST /api/v1/sessions/:id/homework/no-homework)" })
   noHomework(
@@ -163,6 +177,8 @@ export class SessionModeController {
 
   @Put(":id/exam")
   @RequirePermission("exams.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Define optional exam (PUT /api/v1/sessions/:id/exam)" })
   putExam(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -177,6 +193,8 @@ export class SessionModeController {
 
   @Put(":id/exam/scores")
   @RequirePermission("exams.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Atomic batch scores/absence (PUT /api/v1/sessions/:id/exam/scores)" })
   putExamScores(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -202,6 +220,8 @@ export class SessionModeController {
 
   @Post(":id/complete")
   @RequirePermission("attendance.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
   @ApiOperation({ summary: "Idempotent completion transaction (POST /api/v1/sessions/:id/complete)" })
   complete(
     @CurrentUser() user: VerifiedSupabaseToken,

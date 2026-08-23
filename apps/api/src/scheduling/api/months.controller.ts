@@ -8,6 +8,8 @@ import { REQUEST_ID_HEADER } from "../../common/middleware/request-id.middleware
 import { extractHeader } from "../../common/http/header-utils";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   createMonthConfirmRequestSchema,
   createMonthPreviewRequestSchema,
@@ -67,6 +69,8 @@ export class MonthsController {
 
   @Post("months")
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CREATE_MONTH")
   @ApiOperation({ summary: "Create month transaction; Idempotency-Key required, Owner-only (POST /api/v1/months)" })
   confirmCreateMonth(
     @CurrentUser() user: VerifiedSupabaseToken,

@@ -14,6 +14,8 @@ import { TeamService } from "../application/team.service";
 import { CurrentWorkspaceContext } from "./decorators/current-workspace-context.decorator";
 import { RequirePermission } from "./decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "./guards/permission.guard";
+import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
+import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 
 /**
  * Thin controller — every route requires a verified Supabase session
@@ -36,6 +38,8 @@ export class TeamController {
 
   @Patch("memberships/:id/permissions")
   @RequirePermission("team.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("TEAM_MANAGEMENT")
   @ApiOperation({ summary: "Replace a membership's active permission grants (owner-only)" })
   updateMembershipPermissions(
     @CurrentUser() user: VerifiedSupabaseToken,
@@ -50,6 +54,8 @@ export class TeamController {
 
   @Post("memberships/:id/disable")
   @RequirePermission("team.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("TEAM_MANAGEMENT")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Disable a membership without deleting its history (owner-only)" })
   disableMembership(

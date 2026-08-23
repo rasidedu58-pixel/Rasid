@@ -225,6 +225,41 @@
       "when": 1787440400000,
       "tag": "0033_app_worker_groups_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787440500000,
+      "tag": "0034_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787440600000,
+      "tag": "0035_entitlements",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787440700000,
+      "tag": "0036_owner_trial_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787440800000,
+      "tag": "0037_rls_subscriptions_entitlements",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787440900000,
+      "tag": "0038_app_worker_subscriptions_grant",
+      "breakpoints": true
     }
   ]
 }
