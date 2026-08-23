@@ -13,17 +13,22 @@
  * transactional integrity of each operation (atomic writes, idempotency
  * race handling, optimistic-concurrency version checks at the SQL level).
  */
-import { and, asc, desc, eq, gt, gte, lte, sql as rawSql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lte, sql as rawSql } from "drizzle-orm";
 import { groupMonths, groups, scheduleRules } from "../schema/groups";
 import { locations, operatingMonths } from "../schema/months";
 import { sessions } from "../schema/sessions";
 import { idempotencyRecords } from "../schema/idempotency";
 import { auditEvents } from "../schema/audit";
 import { workspaces } from "../schema/workspaces";
+import { enrollments } from "../schema/enrollments";
+import { financialObligations } from "../schema/finance";
+import { outboxEvents } from "../schema/outbox";
 // `WorkspaceRow` is already exported by identity.repository.ts (same
 // underlying `workspaces` table) — re-used here (not redeclared) to avoid
 // a duplicate-export name collision at the package barrel.
 import type { Db, WorkspaceRow } from "./identity.repository";
+import { upsertObligationForEnrollment } from "./finance.repository";
+import { computeObligationDueDate } from "../finance/due-date";
 import {
   generateSessionOccurrencesForRules,
   type ScheduleRuleInput,
@@ -512,6 +517,15 @@ export interface CreateMonthGroupSpec {
   dueDay: number | null;
   joinFeePolicy: string;
   scheduleRules: ScheduleRuleInput[];
+  /**
+   * Set only when this group is being carried forward from a prior
+   * OperatingMonth (Phase 6 Closure Delta). When present, the transaction
+   * carries every ACTIVE enrollment of this source GroupMonth into a brand
+   * new Enrollment (new id, same Student) + FinancialObligation under the
+   * newly-created GroupMonth. Absent for a fresh group with no prior month
+   * to carry from (`selectedGroupIds` preview path).
+   */
+  sourceGroupMonthId?: string;
 }
 
 export interface CreateMonthTransactionInput {
@@ -520,6 +534,8 @@ export interface CreateMonthTransactionInput {
   targetYear: number;
   targetMonth: number;
   createdByUserId: string;
+  createdByMembershipId: string | null;
+  correlationId?: string | null;
   groupSpecs: CreateMonthGroupSpec[];
 }
 
@@ -527,20 +543,99 @@ export interface CreateMonthTransactionResult {
   operatingMonth: OperatingMonthRow;
   groupMonths: GroupMonthRow[];
   sessionCount: number;
+  /** Count of brand-new Enrollment rows created by carrying forward continuing students (Phase 6 Closure Delta). Zero for group specs with no `sourceGroupMonthId`. */
+  enrollmentCount: number;
+}
+
+export const CARRY_FORWARD_FEE_METHOD_REQUIRED = "CARRY_FORWARD_FEE_METHOD_REQUIRED" as const;
+export const CARRY_FORWARD_DUE_DAY_UNRESOLVED = "CARRY_FORWARD_DUE_DAY_UNRESOLVED" as const;
+
+/**
+ * Thrown INSIDE the transaction to force a full rollback ("no half-created
+ * month") when a carried-forward group cannot be resolved automatically.
+ * Caught by `runCreateMonthTransaction`'s own try/catch (mirrors
+ * `session-mode.repository.ts`'s marker-error convention) and converted to
+ * a sentinel string return value — never surfaces as a raw 500.
+ */
+class CarryForwardFeeMethodRequiredMarker extends Error {
+  constructor(public readonly groupId: string) {
+    super(CARRY_FORWARD_FEE_METHOD_REQUIRED);
+  }
+}
+
+class CarryForwardDueDayUnresolvedMarker extends Error {
+  constructor(public readonly groupId: string) {
+    super(CARRY_FORWARD_DUE_DAY_UNRESOLVED);
+  }
 }
 
 /**
- * The CreateMonth / Carry-Forward transaction (Database Schema §17.3 steps
- * 1-4, 7-9 — steps 5-6, Enrollments/FinancialObligations, are out of Phase 3
- * scope per the pre-authorized scoping decision). Re-validates no duplicate
- * (workspace, year, month) INSIDE the transaction (defense against a race
- * between preview and confirm), archives the previous CURRENT month (if
- * any) to preserve INT-01, creates the OperatingMonth as CURRENT, creates
- * one GroupMonth + its schedule_rules per group spec, and generates
- * SCHEDULED sessions from those rules. No OutboxEvent step — no
- * `outbox_events` table exists yet (documented Phase 3 deviation).
+ * The CreateMonth / Carry-Forward transaction — Database Schema §17.3 steps
+ * 1-9, now fully implemented (Phase 6 Closure Delta closes steps 5-6,
+ * Enrollments/FinancialObligations, and the Outbox step, both previously
+ * documented as deferred). Re-validates no duplicate (workspace, year,
+ * month) INSIDE the transaction (defense against a race between preview
+ * and confirm), archives the previous CURRENT month (if any) to preserve
+ * INT-01, creates the OperatingMonth as CURRENT, creates one GroupMonth +
+ * its schedule_rules per group spec, generates SCHEDULED sessions from
+ * those rules, and — for every group spec carrying a `sourceGroupMonthId`
+ * — carries forward its ACTIVE enrollments:
+ *
+ * - Continuing = `enrollment.status === "ACTIVE"` in the source GroupMonth
+ *   only (the only status literally meaning "currently enrolled"); no doc
+ *   defines this classification explicitly, so this is the minimal,
+ *   non-invented reading — WITHDRAWN/STOPPED/TRANSFERRED/PENDING are never
+ *   carried.
+ * - Each continuing student gets a brand-new Enrollment row (new id, same
+ *   student_id, new group_month_id, join_date = the new month's first
+ *   calendar day, status ACTIVE, fee_method FULL_MONTH) — never a reused or
+ *   reactivated enrollment id.
+ * - Fee rule (no doc states this explicitly for carry-forward — PRD §33
+ *   proration and `join_fee_policy` are both written only for mid-month
+ *   joins): a continuing student is present from day 1 of the new month, so
+ *   REMAINING_SESSIONS mathematically collapses to the same value as
+ *   FULL_MONTH (every session is "eligible") — both `FULL` and `REMAINING`
+ *   join_fee_policy therefore charge the group's full `baseFeeMinor`,
+ *   calculationBasis `FULL_MONTH`, WITHOUT invoking the proration engine
+ *   (which was never specified for this context). `ASK_EVERY_TIME` has no
+ *   default by its own definition and no reviewer exists during an
+ *   automated confirm — it aborts the WHOLE transaction via
+ *   `CarryForwardFeeMethodRequiredMarker` rather than silently picking a
+ *   value.
+ * - The new FinancialObligation is created via the SAME
+ *   `upsertObligationForEnrollment` used by manual Enrollment create/
+ *   transfer, inside this SAME `tx` — amount_paid always starts at 0,
+ *   remaining = full net_due; prior Payments/Reversals never transfer
+ *   (impossible anyway — the Enrollment id is new). Old (prior-month) debt
+ *   is left as an independent, untouched historical obligation — no
+ *   auto-allocation.
+ * - Attendance/Homework/Exams/Session records/Payments/Reversals are never
+ *   copied — nothing in this function reads or writes those tables.
+ *
+ * AuditEvent(month.created) + OutboxEvent(MonthCreated) are inserted INSIDE
+ * this same transaction (moved here from the app layer in the Closure
+ * Delta), matching the `recordPaymentTransaction`/`reversePaymentTransaction`
+ * convention exactly.
  */
 export async function runCreateMonthTransaction(
+  db: Db,
+  input: CreateMonthTransactionInput,
+): Promise<
+  | CreateMonthTransactionResult
+  | "MONTH_ALREADY_EXISTS"
+  | typeof CARRY_FORWARD_FEE_METHOD_REQUIRED
+  | typeof CARRY_FORWARD_DUE_DAY_UNRESOLVED
+> {
+  try {
+    return await runCreateMonthTransactionInner(db, input);
+  } catch (err) {
+    if (err instanceof CarryForwardFeeMethodRequiredMarker) return CARRY_FORWARD_FEE_METHOD_REQUIRED;
+    if (err instanceof CarryForwardDueDayUnresolvedMarker) return CARRY_FORWARD_DUE_DAY_UNRESOLVED;
+    throw err;
+  }
+}
+
+async function runCreateMonthTransactionInner(
   db: Db,
   input: CreateMonthTransactionInput,
 ): Promise<CreateMonthTransactionResult | "MONTH_ALREADY_EXISTS"> {
@@ -587,6 +682,19 @@ export async function runCreateMonthTransaction(
 
     const createdGroupMonths: GroupMonthRow[] = [];
     let sessionCount = 0;
+    let enrollmentCount = 0;
+
+    // Only fetched if at least one group spec carries forward — the
+    // workspace's `unifiedDueDay` fallback (same specificity-priority
+    // FinanceService's `resolveObligationTerms` already uses for manual
+    // enrollments: `groupMonth.dueDay ?? workspace.unifiedDueDay`).
+    let workspaceRow: WorkspaceRow | undefined;
+    if (input.groupSpecs.some((s) => s.sourceGroupMonthId)) {
+      const rows = await tx.select().from(workspaces).where(eq(workspaces.id, input.workspaceId)).limit(1);
+      workspaceRow = rows[0];
+    }
+
+    const firstOfMonthIso = `${input.targetYear}-${String(input.targetMonth).padStart(2, "0")}-01`;
 
     for (const spec of input.groupSpecs) {
       const [groupMonth] = await tx
@@ -638,10 +746,151 @@ export async function runCreateMonthTransaction(
         });
         sessionCount += 1;
       }
+
+      if (spec.sourceGroupMonthId) {
+        const sourceEnrollments = await tx
+          .select()
+          .from(enrollments)
+          .where(and(eq(enrollments.groupMonthId, spec.sourceGroupMonthId), eq(enrollments.status, "ACTIVE")));
+
+        if (sourceEnrollments.length > 0 && spec.joinFeePolicy === "ASK_EVERY_TIME") {
+          // No default exists for this policy by its own definition, and no
+          // human reviewer is present during an automated confirm — abort
+          // the WHOLE month rather than silently pick FULL_MONTH.
+          throw new CarryForwardFeeMethodRequiredMarker(spec.groupId);
+        }
+
+        const dueDay = spec.dueDay ?? workspaceRow?.unifiedDueDay ?? null;
+
+        for (const source of sourceEnrollments) {
+          if (dueDay === null) {
+            throw new CarryForwardDueDayUnresolvedMarker(spec.groupId);
+          }
+          const dueDate = computeObligationDueDate({
+            year: input.targetYear,
+            month: input.targetMonth,
+            dueDay,
+            workspaceTimezone: input.workspaceTimezone,
+          });
+
+          const [newEnrollment] = await tx
+            .insert(enrollments)
+            .values({
+              workspaceId: input.workspaceId,
+              studentId: source.studentId,
+              groupMonthId: groupMonth.id,
+              joinDate: firstOfMonthIso,
+              status: "ACTIVE",
+              feeMethod: "FULL_MONTH",
+              customFeeMinor: null,
+            })
+            .returning();
+          if (!newEnrollment) throw new Error("Failed to insert carried-forward enrollments row.");
+          enrollmentCount += 1;
+
+          await upsertObligationForEnrollment(tx, {
+            workspaceId: input.workspaceId,
+            enrollmentId: newEnrollment.id,
+            baseFeeMinor: spec.baseFeeMinor,
+            currencyCode: spec.currencyCode,
+            dueDate,
+            calculationBasis: "FULL_MONTH",
+            calculationSnapshotJson: {
+              source: "CARRY_FORWARD",
+              sourceEnrollmentId: source.id,
+              sourceGroupMonthId: spec.sourceGroupMonthId,
+              joinFeePolicy: spec.joinFeePolicy,
+            },
+          });
+        }
+      }
     }
 
-    return { operatingMonth, groupMonths: createdGroupMonths, sessionCount };
+    await tx.insert(auditEvents).values({
+      workspaceId: input.workspaceId,
+      actorUserId: input.createdByUserId,
+      actorMembershipId: input.createdByMembershipId,
+      action: "month.created",
+      entityType: "operating_month",
+      entityId: operatingMonth.id,
+      afterJson: {
+        operatingMonthId: operatingMonth.id,
+        groupMonthCount: createdGroupMonths.length,
+        sessionCount,
+        enrollmentCount,
+      },
+      correlationId: input.correlationId ?? null,
+    });
+
+    await tx.insert(outboxEvents).values({
+      workspaceId: input.workspaceId,
+      eventType: "MonthCreated",
+      aggregateType: "OperatingMonth",
+      aggregateId: operatingMonth.id,
+      payload: {
+        operatingMonthId: operatingMonth.id,
+        year: input.targetYear,
+        month: input.targetMonth,
+        groupMonthCount: createdGroupMonths.length,
+        sessionCount,
+        enrollmentCount,
+      },
+    });
+
+    return { operatingMonth, groupMonths: createdGroupMonths, sessionCount, enrollmentCount };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Carry-Forward preview stats (Phase 6 Closure Delta) — read-only, used by
+// `previewCreateMonth` to populate API Contract §11.3's `students`/
+// `newObligationsTotalMinor`/`studentsWithOldDebt` fields, deliberately
+// omitted until now (Phase 3 pre-authorized scoping decision #3).
+// ---------------------------------------------------------------------------
+
+export interface CarryForwardStats {
+  continuing: number;
+  excluded: number;
+  transferred: number;
+  continuingStudentIds: string[];
+}
+
+/** Classifies a source GroupMonth's enrollments for carry-forward preview: continuing = ACTIVE only, transferred = TRANSFERRED, excluded = everything else (PENDING/STOPPED/WITHDRAWN). */
+export async function getCarryForwardStats(db: Db, sourceGroupMonthId: string): Promise<CarryForwardStats> {
+  const rows = await db
+    .select({ status: enrollments.status, studentId: enrollments.studentId })
+    .from(enrollments)
+    .where(eq(enrollments.groupMonthId, sourceGroupMonthId));
+
+  const stats: CarryForwardStats = { continuing: 0, excluded: 0, transferred: 0, continuingStudentIds: [] };
+  for (const row of rows) {
+    if (row.status === "ACTIVE") {
+      stats.continuing += 1;
+      stats.continuingStudentIds.push(row.studentId);
+    } else if (row.status === "TRANSFERRED") {
+      stats.transferred += 1;
+    } else {
+      stats.excluded += 1;
+    }
+  }
+  return stats;
+}
+
+/** Count of `studentIds` with at least one prior obligation still owing (remaining > 0) — old debt is independent of carry-forward eligibility (never blocks, never auto-allocated), this is purely informational for the preview. */
+export async function countStudentsWithOldDebt(db: Db, workspaceId: string, studentIds: string[]): Promise<number> {
+  if (studentIds.length === 0) return 0;
+  const rows = await db
+    .selectDistinct({ studentId: enrollments.studentId })
+    .from(financialObligations)
+    .innerJoin(enrollments, eq(enrollments.id, financialObligations.enrollmentId))
+    .where(
+      and(
+        eq(financialObligations.workspaceId, workspaceId),
+        inArray(enrollments.studentId, studentIds),
+        gt(financialObligations.remainingMinor, 0),
+      ),
+    );
+  return rows.length;
 }
 
 export interface SchedulingAuditEventInput {

@@ -105,15 +105,28 @@ export const createMonthPreviewRequestSchema = z.object({
 export type CreateMonthPreviewRequest = z.infer<typeof createMonthPreviewRequestSchema>;
 
 /**
- * Only the fields computable without Students/Enrollments/Finance (which
- * don't exist until Phase 4/6) — `students`, `newObligationsTotalMinor`,
- * `studentsWithOldDebt`, `enrollmentCount` are deliberately OMITTED, not
- * fabricated as zeros (see Phase 3 pre-authorized scoping decision #3).
+ * `students`/`newObligationsTotalMinor`/`studentsWithOldDebt` were
+ * deliberately OMITTED (not fabricated as zeros) until Students/Enrollments/
+ * Finance existed (Phase 3 pre-authorized scoping decision #3) — now closed
+ * by the Phase 6 Closure Delta (CreateMonth Carry-Forward Integration).
+ * `continuing`/`excluded`/`transferred` classify the SOURCE month's
+ * enrollments for a `sourceMonthId` preview (continuing = ACTIVE only);
+ * for a `selectedGroupIds` preview (no source month to carry from) these
+ * are genuinely zero, not fabricated. `studentsWithOldDebt` counts
+ * continuing students with any prior obligation still owing — informational
+ * only, never affects eligibility or allocation.
  */
 export const createMonthPreviewResponseSchema = z.object({
   previewToken: z.string(),
   groups: z.array(z.object({ groupId: z.string().uuid(), name: z.string() })),
   generatedSessions: z.number().int(),
+  students: z.object({
+    continuing: z.number().int(),
+    excluded: z.number().int(),
+    transferred: z.number().int(),
+  }),
+  newObligationsTotalMinor: z.number().int(),
+  studentsWithOldDebt: z.number().int(),
   expiresAt: z.string(),
 });
 export type CreateMonthPreviewResponse = z.infer<typeof createMonthPreviewResponseSchema>;
@@ -126,6 +139,7 @@ export const createMonthConfirmResponseSchema = z.object({
   status: z.literal("CURRENT"),
   groupMonthCount: z.number().int(),
   sessionCount: z.number().int(),
+  enrollmentCount: z.number().int(),
 });
 export type CreateMonthConfirmResponse = z.infer<typeof createMonthConfirmResponseSchema>;
 

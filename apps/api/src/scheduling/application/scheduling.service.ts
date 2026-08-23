@@ -36,6 +36,8 @@ import {
   type SessionRow,
 } from "@academic-precision/database";
 import {
+  CarryForwardDueDayUnresolvedException,
+  CarryForwardFeeMethodRequiredException,
   IdempotencyConflictException,
   MonthAlreadyExistsException,
   MonthCreateFailedException,
@@ -71,6 +73,8 @@ interface CreateMonthPreviewPayload {
     dueDay: number | null;
     joinFeePolicy: string;
     scheduleRules: ScheduleRuleInput[];
+    /** Set only on the `sourceMonthId` preview path — the GroupMonth this group is being carried forward from (Phase 6 Closure Delta). */
+    sourceGroupMonthId?: string;
   }>;
   generatedSessionsEstimate: number;
 }
@@ -265,6 +269,7 @@ export class SchedulingService {
           dueDay: gm.dueDay,
           joinFeePolicy: gm.joinFeePolicy,
           scheduleRules: rules.map((r) => this.toScheduleRuleInput(r)),
+          sourceGroupMonthId: gm.id,
         });
       }
     } else if (body.selectedGroupIds && body.selectedGroupIds.length > 0) {
@@ -309,6 +314,34 @@ export class SchedulingService {
       );
     }, 0);
 
+    // Carry-Forward preview stats (Phase 6 Closure Delta) — only meaningful
+    // on the `sourceMonthId` path; `selectedGroupIds` groups have no prior
+    // month, so these stay genuinely zero (not fabricated).
+    let studentsContinuing = 0;
+    let studentsExcluded = 0;
+    let studentsTransferred = 0;
+    let newObligationsTotalMinor = 0;
+    const allContinuingStudentIds: string[] = [];
+    for (const spec of groupSpecs) {
+      if (!spec.sourceGroupMonthId) continue;
+      const stats = await this.repository.getCarryForwardStats(spec.sourceGroupMonthId);
+      if (stats.continuing > 0 && spec.joinFeePolicy === "ASK_EVERY_TIME") {
+        // Fail fast at preview time — confirm would definitely fail this
+        // group anyway (see runCreateMonthTransaction's own guard); no
+        // point issuing a preview token that can never be confirmed.
+        throw new CarryForwardFeeMethodRequiredException(undefined, { groupId: spec.groupId });
+      }
+      studentsContinuing += stats.continuing;
+      studentsExcluded += stats.excluded;
+      studentsTransferred += stats.transferred;
+      newObligationsTotalMinor += stats.continuing * spec.baseFeeMinor;
+      allContinuingStudentIds.push(...stats.continuingStudentIds);
+    }
+    const studentsWithOldDebt =
+      allContinuingStudentIds.length > 0
+        ? await this.repository.countStudentsWithOldDebt(workspaceContext.workspaceId, allContinuingStudentIds)
+        : 0;
+
     const { token, expiresAt } = this.previewTokens.issue<CreateMonthPreviewPayload>(
       CREATE_MONTH_PREVIEW_KIND,
       workspaceContext.workspaceId,
@@ -319,6 +352,9 @@ export class SchedulingService {
       previewToken: token,
       groups: groupSpecs.map((s) => ({ groupId: s.groupId, name: s.groupName })),
       generatedSessions: generatedSessionsEstimate,
+      students: { continuing: studentsContinuing, excluded: studentsExcluded, transferred: studentsTransferred },
+      newObligationsTotalMinor,
+      studentsWithOldDebt,
       expiresAt: expiresAt.toISOString(),
     };
   }
@@ -393,6 +429,8 @@ export class SchedulingService {
       targetYear: plan.targetYear,
       targetMonth: plan.targetMonth,
       createdByUserId: authUser.id,
+      createdByMembershipId: workspaceContext.membership.id,
+      correlationId,
       groupSpecs: plan.groupSpecs.map((spec) => ({
         groupId: spec.groupId,
         locationId: spec.locationId,
@@ -402,6 +440,7 @@ export class SchedulingService {
         dueDay: spec.dueDay,
         joinFeePolicy: spec.joinFeePolicy,
         scheduleRules: spec.scheduleRules,
+        sourceGroupMonthId: spec.sourceGroupMonthId,
       })),
     });
 
@@ -409,24 +448,27 @@ export class SchedulingService {
       await this.repository.failIdempotencyRecord(idempotencyRow.id);
       throw new MonthAlreadyExistsException();
     }
+    if (result === "CARRY_FORWARD_FEE_METHOD_REQUIRED") {
+      await this.repository.failIdempotencyRecord(idempotencyRow.id);
+      throw new CarryForwardFeeMethodRequiredException();
+    }
+    if (result === "CARRY_FORWARD_DUE_DAY_UNRESOLVED") {
+      await this.repository.failIdempotencyRecord(idempotencyRow.id);
+      throw new CarryForwardDueDayUnresolvedException();
+    }
 
+    // AuditEvent(month.created) + OutboxEvent(MonthCreated) are now inserted
+    // INSIDE runCreateMonthTransaction's own transaction (Phase 6 Closure
+    // Delta) — mirrors recordPaymentTransaction/reversePaymentTransaction/
+    // completeSessionTransaction's convention. No duplicate app-layer insert
+    // here anymore.
     const response: CreateMonthConfirmResponse = {
       monthId: result.operatingMonth.id,
       status: "CURRENT",
       groupMonthCount: result.groupMonths.length,
       sessionCount: result.sessionCount,
+      enrollmentCount: result.enrollmentCount,
     };
-
-    await this.repository.insertAuditEvent({
-      workspaceId: workspaceContext.workspaceId,
-      actorUserId: authUser.id,
-      actorMembershipId: workspaceContext.membership.id,
-      action: "month.created",
-      entityType: "operating_month",
-      entityId: result.operatingMonth.id,
-      afterJson: response,
-      correlationId,
-    });
 
     await this.repository.completeIdempotencyRecord(idempotencyRow.id, 201, response);
 

@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
+  computeObligationDueDate,
   generateSessionOccurrencesForRules,
+  type CarryForwardStats,
   type CreateMonthTransactionInput,
   type CreateMonthTransactionResult,
+  type EnrollmentRow,
+  type FinancialObligationRow,
   type GroupMonthRow,
   type GroupRow,
   type IdempotencyRecordRow,
@@ -19,6 +23,12 @@ import {
 } from "@academic-precision/database";
 import type { SchedulingRepositoryPort } from "../ports/scheduling-repository.port";
 
+const CARRY_FORWARD_FEE_METHOD_REQUIRED = "CARRY_FORWARD_FEE_METHOD_REQUIRED" as const;
+const CARRY_FORWARD_DUE_DAY_UNRESOLVED = "CARRY_FORWARD_DUE_DAY_UNRESOLVED" as const;
+
+class CarryForwardFeeMethodRequiredMarker extends Error {}
+class CarryForwardDueDayUnresolvedMarker extends Error {}
+
 /**
  * In-memory test double for {@link SchedulingRepositoryPort} — mirrors
  * `InMemoryTeamRepository` (Phase 2): no live Postgres needed for unit
@@ -33,7 +43,13 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
   readonly sessionsById = new Map<string, SessionRow>();
   readonly idempotencyById = new Map<string, IdempotencyRecordRow>();
   readonly auditEvents: SchedulingAuditEventInput[] = [];
+  readonly outboxEvents: Array<{ eventType: string; aggregateId: string; payload: unknown }> = [];
+  /** Carry-Forward (Phase 6 Closure Delta) — self-contained, mirrors `students.repository.ts`'s enrollment/obligation shape; SchedulingService never calls into StudentsRepositoryPort, so these don't need to be shared with `InMemoryStudentsRepository`. */
+  readonly enrollmentsById = new Map<string, EnrollmentRow>();
+  readonly obligationsById = new Map<string, FinancialObligationRow>();
   workspaceTimezone = "Africa/Cairo";
+  /** Workspace's `unifiedDueDay` fallback, used only when a carried-forward group has no `dueDay` of its own. */
+  workspaceUnifiedDueDay: number | null = null;
 
   private now(): Date {
     return new Date();
@@ -124,6 +140,87 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
     };
     this.sessionsById.set(row.id, row);
     return row;
+  }
+
+  seedEnrollment(
+    input: Partial<EnrollmentRow> & { workspaceId: string; studentId: string; groupMonthId: string },
+  ): EnrollmentRow {
+    const now = this.now();
+    const row: EnrollmentRow = {
+      id: input.id ?? randomUUID(),
+      workspaceId: input.workspaceId,
+      studentId: input.studentId,
+      groupMonthId: input.groupMonthId,
+      joinDate: input.joinDate ?? "2026-08-01",
+      status: input.status ?? "ACTIVE",
+      feeMethod: input.feeMethod ?? "FULL_MONTH",
+      customFeeMinor: input.customFeeMinor ?? null,
+      endedAt: input.endedAt ?? null,
+      endReason: input.endReason ?? null,
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now,
+      version: input.version ?? 1,
+    };
+    this.enrollmentsById.set(row.id, row);
+    return row;
+  }
+
+  seedObligation(
+    input: Partial<FinancialObligationRow> & { workspaceId: string; enrollmentId: string; baseFeeMinor: number },
+  ): FinancialObligationRow {
+    const now = this.now();
+    const row: FinancialObligationRow = {
+      id: input.id ?? randomUUID(),
+      workspaceId: input.workspaceId,
+      enrollmentId: input.enrollmentId,
+      currencyCode: input.currencyCode ?? "EGP",
+      baseFeeMinor: input.baseFeeMinor,
+      discountMinor: input.discountMinor ?? 0,
+      waiverMinor: input.waiverMinor ?? 0,
+      netDueMinor: input.netDueMinor ?? input.baseFeeMinor,
+      dueDate: input.dueDate ?? "2026-08-15",
+      amountPaidMinor: input.amountPaidMinor ?? 0,
+      remainingMinor: input.remainingMinor ?? input.baseFeeMinor,
+      status: input.status ?? "UNPAID",
+      calculationBasis: input.calculationBasis ?? "FULL_MONTH",
+      calculationSnapshotJson: input.calculationSnapshotJson ?? null,
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now,
+      version: input.version ?? 1,
+    };
+    this.obligationsById.set(row.id, row);
+    return row;
+  }
+
+  private upsertObligationInMemory(
+    workspaceId: string,
+    enrollmentId: string,
+    terms: {
+      baseFeeMinor: number;
+      currencyCode: string;
+      dueDate: string;
+      calculationBasis: "FULL_MONTH" | "CUSTOM" | "REMAINING_SESSIONS";
+      calculationSnapshotJson: unknown;
+    },
+  ): FinancialObligationRow {
+    const existing = [...this.obligationsById.values()].find((o) => o.enrollmentId === enrollmentId);
+    if (existing) {
+      // Mirrors `upsertObligationForEnrollment` — never touches real ledger activity.
+      if (existing.status !== "UNPAID" || existing.amountPaidMinor !== 0) return existing;
+    }
+    return this.seedObligation({
+      id: existing?.id,
+      workspaceId,
+      enrollmentId,
+      baseFeeMinor: terms.baseFeeMinor,
+      currencyCode: terms.currencyCode,
+      netDueMinor: terms.baseFeeMinor,
+      dueDate: terms.dueDate,
+      remainingMinor: terms.baseFeeMinor,
+      calculationBasis: terms.calculationBasis,
+      calculationSnapshotJson: terms.calculationSnapshotJson,
+      version: existing ? existing.version + 1 : 1,
+    });
   }
 
   // ---- SchedulingRepositoryPort ---------------------------------------
@@ -334,9 +431,59 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
     return { original: updatedOriginal, replacement };
   }
 
+  /** Snapshots every Map/array this "transaction" can mutate, so a thrown error (marker or otherwise) can be rolled back exactly like a real Postgres `db.transaction` — "no half-created month" must hold in the unit-test double too, not just against live Postgres. */
+  private snapshot() {
+    return {
+      monthsById: new Map(this.monthsById),
+      groupMonthsById: new Map(this.groupMonthsById),
+      scheduleRulesById: new Map(this.scheduleRulesById),
+      sessionsById: new Map(this.sessionsById),
+      enrollmentsById: new Map(this.enrollmentsById),
+      obligationsById: new Map(this.obligationsById),
+      auditEventsLength: this.auditEvents.length,
+      outboxEventsLength: this.outboxEvents.length,
+    };
+  }
+
+  private restore(snap: ReturnType<InMemorySchedulingRepository["snapshot"]>): void {
+    this.monthsById.clear();
+    for (const [k, v] of snap.monthsById) this.monthsById.set(k, v);
+    this.groupMonthsById.clear();
+    for (const [k, v] of snap.groupMonthsById) this.groupMonthsById.set(k, v);
+    this.scheduleRulesById.clear();
+    for (const [k, v] of snap.scheduleRulesById) this.scheduleRulesById.set(k, v);
+    this.sessionsById.clear();
+    for (const [k, v] of snap.sessionsById) this.sessionsById.set(k, v);
+    this.enrollmentsById.clear();
+    for (const [k, v] of snap.enrollmentsById) this.enrollmentsById.set(k, v);
+    this.obligationsById.clear();
+    for (const [k, v] of snap.obligationsById) this.obligationsById.set(k, v);
+    this.auditEvents.length = snap.auditEventsLength;
+    this.outboxEvents.length = snap.outboxEventsLength;
+  }
+
   async runCreateMonthTransaction(
     input: CreateMonthTransactionInput,
-  ): Promise<CreateMonthTransactionResult | "MONTH_ALREADY_EXISTS"> {
+  ): Promise<
+    | CreateMonthTransactionResult
+    | "MONTH_ALREADY_EXISTS"
+    | typeof CARRY_FORWARD_FEE_METHOD_REQUIRED
+    | typeof CARRY_FORWARD_DUE_DAY_UNRESOLVED
+  > {
+    const snap = this.snapshot();
+    try {
+      return this.runCreateMonthTransactionInner(input);
+    } catch (err) {
+      this.restore(snap);
+      if (err instanceof CarryForwardFeeMethodRequiredMarker) return CARRY_FORWARD_FEE_METHOD_REQUIRED;
+      if (err instanceof CarryForwardDueDayUnresolvedMarker) return CARRY_FORWARD_DUE_DAY_UNRESOLVED;
+      throw err;
+    }
+  }
+
+  private runCreateMonthTransactionInner(
+    input: CreateMonthTransactionInput,
+  ): CreateMonthTransactionResult | "MONTH_ALREADY_EXISTS" {
     const duplicate = [...this.monthsById.values()].find(
       (m) => m.workspaceId === input.workspaceId && m.year === input.targetYear && m.month === input.targetMonth,
     );
@@ -359,6 +506,8 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
 
     const createdGroupMonths: GroupMonthRow[] = [];
     let sessionCount = 0;
+    let enrollmentCount = 0;
+    const firstOfMonthIso = `${input.targetYear}-${String(input.targetMonth).padStart(2, "0")}-01`;
 
     for (const spec of input.groupSpecs) {
       const groupMonth = this.seedGroupMonth({
@@ -411,9 +560,104 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
         });
         sessionCount += 1;
       }
+
+      if (spec.sourceGroupMonthId) {
+        const sourceEnrollments = [...this.enrollmentsById.values()].filter(
+          (e) => e.groupMonthId === spec.sourceGroupMonthId && e.status === "ACTIVE",
+        );
+
+        if (sourceEnrollments.length > 0 && spec.joinFeePolicy === "ASK_EVERY_TIME") {
+          throw new CarryForwardFeeMethodRequiredMarker(spec.groupId);
+        }
+
+        const dueDay = spec.dueDay ?? this.workspaceUnifiedDueDay ?? null;
+
+        for (const source of sourceEnrollments) {
+          if (dueDay === null) {
+            throw new CarryForwardDueDayUnresolvedMarker(spec.groupId);
+          }
+          const dueDate = computeObligationDueDate({
+            year: input.targetYear,
+            month: input.targetMonth,
+            dueDay,
+            workspaceTimezone: input.workspaceTimezone,
+          });
+
+          const newEnrollment = this.seedEnrollment({
+            workspaceId: input.workspaceId,
+            studentId: source.studentId,
+            groupMonthId: groupMonth.id,
+            joinDate: firstOfMonthIso,
+            status: "ACTIVE",
+            feeMethod: "FULL_MONTH",
+            customFeeMinor: null,
+          });
+          enrollmentCount += 1;
+
+          this.upsertObligationInMemory(input.workspaceId, newEnrollment.id, {
+            baseFeeMinor: spec.baseFeeMinor,
+            currencyCode: spec.currencyCode,
+            dueDate,
+            calculationBasis: "FULL_MONTH",
+            calculationSnapshotJson: {
+              source: "CARRY_FORWARD",
+              sourceEnrollmentId: source.id,
+              sourceGroupMonthId: spec.sourceGroupMonthId,
+              joinFeePolicy: spec.joinFeePolicy,
+            },
+          });
+        }
+      }
     }
 
-    return { operatingMonth, groupMonths: createdGroupMonths, sessionCount };
+    this.auditEvents.push({
+      workspaceId: input.workspaceId,
+      actorUserId: input.createdByUserId,
+      actorMembershipId: input.createdByMembershipId,
+      action: "month.created",
+      entityType: "operating_month",
+      entityId: operatingMonth.id,
+      afterJson: { operatingMonthId: operatingMonth.id, groupMonthCount: createdGroupMonths.length, sessionCount, enrollmentCount },
+      correlationId: input.correlationId ?? null,
+    });
+    this.outboxEvents.push({
+      eventType: "MonthCreated",
+      aggregateId: operatingMonth.id,
+      payload: { operatingMonthId: operatingMonth.id, groupMonthCount: createdGroupMonths.length, sessionCount, enrollmentCount },
+    });
+
+    return { operatingMonth, groupMonths: createdGroupMonths, sessionCount, enrollmentCount };
+  }
+
+  async getCarryForwardStats(sourceGroupMonthId: string): Promise<CarryForwardStats> {
+    const rows = [...this.enrollmentsById.values()].filter((e) => e.groupMonthId === sourceGroupMonthId);
+    const stats: CarryForwardStats = { continuing: 0, excluded: 0, transferred: 0, continuingStudentIds: [] };
+    for (const row of rows) {
+      if (row.status === "ACTIVE") {
+        stats.continuing += 1;
+        stats.continuingStudentIds.push(row.studentId);
+      } else if (row.status === "TRANSFERRED") {
+        stats.transferred += 1;
+      } else {
+        stats.excluded += 1;
+      }
+    }
+    return stats;
+  }
+
+  async countStudentsWithOldDebt(workspaceId: string, studentIds: string[]): Promise<number> {
+    if (studentIds.length === 0) return 0;
+    const studentIdSet = new Set(studentIds);
+    const enrollmentIdToStudentId = new Map(
+      [...this.enrollmentsById.values()].map((e) => [e.id, e.studentId] as const),
+    );
+    const withDebt = new Set<string>();
+    for (const obligation of this.obligationsById.values()) {
+      if (obligation.workspaceId !== workspaceId || obligation.remainingMinor <= 0) continue;
+      const studentId = enrollmentIdToStudentId.get(obligation.enrollmentId);
+      if (studentId && studentIdSet.has(studentId)) withDebt.add(studentId);
+    }
+    return withDebt.size;
   }
 
   async findIdempotencyRecord(

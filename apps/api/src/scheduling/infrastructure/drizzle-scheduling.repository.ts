@@ -3,6 +3,7 @@ import {
   applyScheduleChangeTransaction,
   cancelSessionIfScheduled,
   completeIdempotencyRecord,
+  countStudentsWithOldDebt,
   failIdempotencyRecord,
   findGroupById,
   findGroupMonthById,
@@ -11,6 +12,7 @@ import {
   findOperatingMonthByYearMonth,
   findSessionById,
   findWorkspaceTimezone,
+  getCarryForwardStats,
   insertGroup,
   insertSchedulingAuditEvent,
   listGroupMonthsForOperatingMonth,
@@ -24,6 +26,7 @@ import {
   updateGroupMonthWithVersion,
   updateGroupWithVersion,
   withRuntimeContext,
+  type CarryForwardStats,
   type CreateMonthTransactionInput,
   type GroupMonthRow,
   type GroupRow,
@@ -148,6 +151,16 @@ export class DrizzleSchedulingRepository implements SchedulingRepositoryPort {
 
   runCreateMonthTransaction(input: CreateMonthTransactionInput) {
     return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => runCreateMonthTransaction(db, input));
+  }
+
+  getCarryForwardStats(sourceGroupMonthId: string): Promise<CarryForwardStats> {
+    return withRuntimeContext(this.runtimeCtx(), (db) => getCarryForwardStats(db, sourceGroupMonthId));
+  }
+
+  countStudentsWithOldDebt(workspaceId: string, studentIds: string[]): Promise<number> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) =>
+      countStudentsWithOldDebt(db, workspaceId, studentIds),
+    );
   }
 
   findIdempotencyRecord(
