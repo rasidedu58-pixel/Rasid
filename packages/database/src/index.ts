@@ -4,4 +4,7 @@ export * as schema from "./schema/index";
 export * from "./repositories/identity.repository";
 export * from "./repositories/permissions.repository";
 export * from "./repositories/scheduling.repository";
+export * from "./repositories/students.repository";
 export * from "./scheduling/session-generator";
+export * from "./scheduling/proration";
+export * from "./students/arabic-normalize";

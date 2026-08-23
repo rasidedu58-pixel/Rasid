@@ -100,3 +100,44 @@ export class IdempotencyConflictException extends ApiException {
     super(409, "IDEMPOTENCY_CONFLICT", message, details);
   }
 }
+
+/** 422 — API Contract §12 error catalog: student not eligible for the requested session/date/enrollment action. */
+export class EnrollmentNotEligibleException extends ApiException {
+  constructor(message = "طالب غير مؤهل للحصة/التاريخ.", details?: Record<string, unknown>) {
+    super(422, "ENROLLMENT_NOT_ELIGIBLE", message, details);
+  }
+}
+
+/** 422 — API Contract §12 error catalog: no enabled/valid guardian for the requested contact channel. */
+export class GuardianContactDisabledException extends ApiException {
+  constructor(message = "لا يوجد ولي أمر مفعّل صالح لهذه القناة.", details?: Record<string, unknown>) {
+    super(422, "GUARDIAN_CONTACT_DISABLED", message, details);
+  }
+}
+
+/**
+ * 404 — API Contract §12: QR token unknown/revoked/out-of-scope. Deliberately
+ * a single response shape for all three cases (safe no-leak — API Contract
+ * §18: never distinguish "unknown" from "revoked" from "belongs to another
+ * workspace" in the response).
+ */
+export class QrInvalidException extends ApiException {
+  constructor(message = "رمز QR غير معروف.", details?: Record<string, unknown>) {
+    super(404, "QR_INVALID", message, details);
+  }
+}
+
+/**
+ * 409 — a student already has an ACTIVE QR credential; `/qr/issue` is
+ * "issue if no active QR" per the API Contract §9.5 registry. Not in the
+ * approved error catalog verbatim (documented Phase 4 deviation — the
+ * registry implies reissue is the intended path when one already exists,
+ * but does not name a dedicated code for issue-while-active) — a new,
+ * clearly-named 409 code was the least surprising choice available, rather
+ * than overloading an unrelated existing code.
+ */
+export class QrAlreadyActiveException extends ApiException {
+  constructor(message = "يوجد رمز QR فعّال بالفعل لهذا الطالب. استخدم إعادة الإصدار بدلاً من ذلك.", details?: Record<string, unknown>) {
+    super(409, "QR_ALREADY_ACTIVE", message, details);
+  }
+}

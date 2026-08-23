@@ -4,8 +4,10 @@
  * and `audit` (audit_events) are implemented as of Phase 2. `months`
  * (locations, operating_months), `groups` (groups, group_months,
  * schedule_rules), `sessions`, and `idempotency` (idempotency_records) are
- * implemented as of Phase 3 — see each module's own comment. All other
- * modules remain structural placeholders reserved for later phases.
+ * implemented as of Phase 3. `students`, `guardians` (guardians +
+ * student_guardians), `qrCredentials`, and `enrollments` are implemented as
+ * of Phase 4 — see each module's own comment. All other modules remain
+ * structural placeholders reserved for later phases.
  */
 export * as identity from "./identity";
 export * as workspaces from "./workspaces";
@@ -14,6 +16,8 @@ export * as months from "./months";
 export * as groups from "./groups";
 export * as students from "./students";
 export * as guardians from "./guardians";
+export * as qrCredentials from "./qr-credentials";
+export * as enrollments from "./enrollments";
 export * as sessions from "./sessions";
 export * as finance from "./finance";
 export * as attention from "./attention";
