@@ -3,13 +3,12 @@
  * `SELECTED_GROUPS` group ids belong to the same workspace as the grant's
  * target membership (Phase 2 spec §7).
  *
- * No real `groups` table exists yet (Phase 3 builds it), so Phase 2 wires a
- * temporary stub adapter (`AlwaysTrueGroupOwnershipAdapter`, in
- * `../infrastructure/stub-group-ownership.adapter.ts`) that always reports
- * true. The validation *call site* (`TeamService.updateMembershipPermissions`)
- * exists and is exercised regardless — Phase 3 replaces only the adapter
- * bound to this port (a real DB-backed check against `groups`), without
- * changing the port's contract or any call site.
+ * Phase 2 wired a temporary stub adapter (`AlwaysTrueGroupOwnershipAdapter`)
+ * that always reported true, since no real `groups` table existed yet.
+ * Phase 3 replaces that binding in `team.module.ts` with
+ * `DrizzleGroupOwnershipAdapter` (`../infrastructure/group-ownership.adapter.ts`),
+ * a real DB-backed check against `groups` — the port's contract
+ * (`isGroupInWorkspace`) is unchanged, as is every call site.
  */
 export interface GroupOwnershipPort {
   isGroupInWorkspace(groupId: string, workspaceId: string): Promise<boolean>;

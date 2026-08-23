@@ -15,6 +15,37 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new RequestContextInterceptor());
 
+  // Nest/Fastify only register their own default JSON content-type parser
+  // during `app.init()` (triggered internally by `app.listen()`), so a
+  // replacement parser can only be installed AFTER that point — installing
+  // it earlier (e.g. right after NestFactory.create()) collides with
+  // Nest's own registration ("already present"). Initialize explicitly
+  // first so we can safely override afterwards.
+  await app.init();
+
+  // Fastify's default JSON content-type parser throws a raw
+  // FST_ERR_CTP_EMPTY_JSON_BODY (surfaced as an opaque 500, bypassing our
+  // error contract) for any request that sends `Content-Type:
+  // application/json` with an empty body — a real client mistake for
+  // bodyless POST endpoints (e.g. `/sessions/:id/cancel`), not a server
+  // bug, but real HTTP clients do this. Treat an empty JSON body as `{}`
+  // rather than a parse error; downstream DTO validation (zod) still
+  // rejects it cleanly with VALIDATION_ERROR if the endpoint actually
+  // requires fields.
+  const fastifyInstance = app.getHttpAdapter().getInstance();
+  fastifyInstance.removeContentTypeParser("application/json");
+  fastifyInstance.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body: string, done) => {
+    if (body.length === 0) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  });
+
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Academic Precision API")
     .setDescription(

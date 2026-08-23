@@ -43,6 +43,55 @@
       "when": 1787437800000,
       "tag": "0007_fix_rls_empty_string_guc",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787437900000,
+      "tag": "0008_locations_months_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787438000000,
+      "tag": "0009_group_months_schedule_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787438100000,
+      "tag": "0010_idempotency_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787438200000,
+      "tag": "0011_permission_group_scopes_group_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787438300000,
+      "tag": "0012_rls_phase3",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787438400000,
+      "tag": "0013_schedule_rules_delete_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787438500000,
+      "tag": "0014_group_months_cross_workspace_guard",
+      "breakpoints": true
     }
   ]
 }

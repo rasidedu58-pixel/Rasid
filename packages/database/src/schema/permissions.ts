@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./identity";
 import { workspaces } from "./workspaces";
+import { groups } from "./groups";
 
 export const memberships = pgTable(
   "memberships",
@@ -92,16 +93,14 @@ export const permissionGrants = pgTable(
 /**
  * permission_group_scopes — Database Schema §4.5.
  *
- * IMPORTANT — deliberate, user-authorized scoping decision (Phase 2 spec):
- * `group_id` has NO foreign key constraint here. The real `groups` table
- * does not exist yet — it is built in Phase 3. Adding a FK now is
- * impossible (the referenced table doesn't exist) and the approved schema
- * table itself only requires `group_id uuid NOT NULL` at this layer; the
- * referential guarantee is provided by the `GroupOwnershipPort` application
- * check at grant time (see apps/api Phase 2 authorization module), not by
- * the database. Phase 3 will add `REFERENCES groups(id)` via its own
- * migration once the `groups` table exists — this file/migration must NOT
- * be edited retroactively; Phase 3 adds a new ALTER TABLE migration.
+ * `group_id` originally shipped in Phase 2 with NO foreign key constraint
+ * (the real `groups` table did not exist yet — it was built in Phase 3).
+ * Phase 3 adds the deferred `REFERENCES groups(id) ON DELETE RESTRICT` via
+ * its own migration (0011_permission_group_scopes_group_fk.sql) — the
+ * original 0004 migration is intentionally left unedited, matching the
+ * additive-migration convention used throughout this schema. This TS
+ * definition is updated in place (rather than 0004's SQL) so the Drizzle
+ * schema reflects the current, post-Phase-3 truth of the table.
  */
 export const permissionGroupScopes = pgTable(
   "permission_group_scopes",
@@ -112,8 +111,9 @@ export const permissionGroupScopes = pgTable(
     permissionGrantId: uuid("permission_grant_id")
       .notNull()
       .references(() => permissionGrants.id, { onDelete: "cascade" }),
-    // No FK to `groups` — see module comment above (Phase 3 adds it).
-    groupId: uuid("group_id").notNull(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
   (table) => [

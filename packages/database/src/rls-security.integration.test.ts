@@ -224,6 +224,11 @@ describe.skipIf(!hasLiveCreds)("RLS Security Delta (live Postgres)", () => {
   });
 
   it("6. regression: a pooled connection previously scoped to a workspace must not leak a stale empty placeholder into a later workspaceId-less call", async () => {
+    // 12 concurrent live round-trips to the remote Supabase instance can
+    // occasionally exceed Vitest's 5s default under CPU/network
+    // contention (e.g. other test suites running concurrently on the same
+    // machine) without indicating any real regression — bump the timeout
+    // rather than risk a flaky failure. See the closing arg of `it(...)`.
     // Real bug found during manual verification of this delta: once
     // `set_config('app.workspace_id', <value>, true)` ("SET LOCAL") has
     // been called on a physical connection, Postgres registers a
@@ -260,7 +265,7 @@ describe.skipIf(!hasLiveCreds)("RLS Security Delta (live Postgres)", () => {
       db.execute(sql`SELECT workspace_id FROM memberships WHERE user_id = ${userAId}`),
     );
     expect(rows.map((r) => (r as { workspace_id: string }).workspace_id)).toContain(workspaceAId);
-  });
+  }, 20000);
 
   it("5. the privileged admin (MIGRATION_DATABASE_URL) connection is unaffected — BYPASSRLS, sees across both workspaces", async () => {
     const roleRows = await admin`SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user`;

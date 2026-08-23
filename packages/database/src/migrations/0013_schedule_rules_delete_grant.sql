@@ -1,0 +1,18 @@
+-- Phase 3 fix: `applyScheduleChangeTransaction` (packages/database/src/repositories/scheduling.repository.ts)
+-- wholesale-replaces a group_month's `schedule_rules` rows on every schedule
+-- change (DELETE the old set, INSERT the new set) rather than soft-updating
+-- them. Unlike `sessions`/`audit_events`/etc., `schedule_rules` is a live
+-- configuration set, not append-only operational history — Database Schema
+-- §5.5 does not list it among append-only/no-delete entities, and there is
+-- no product requirement to retain a historical trail of every past
+-- schedule_rules row (the *sessions* generated from those rules ARE the
+-- durable history, and those are never deleted). Migration
+-- 0012_rls_phase3.sql granted only SELECT/INSERT/UPDATE to `app_runtime`
+-- for `schedule_rules`, which would reject the app's own
+-- `applySchedule`/schedule/apply endpoint with a permission-denied error —
+-- found and fixed during live verification of this phase. This is the one
+-- documented exception to the "app_runtime never gets DELETE" rule
+-- established in the RLS Security Delta; every other table's grant is
+-- unchanged.
+--> statement-breakpoint
+GRANT DELETE ON public.schedule_rules TO app_runtime;

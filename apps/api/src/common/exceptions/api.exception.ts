@@ -59,3 +59,44 @@ export class PermissionScopeInvalidException extends ApiException {
     super(422, "PERMISSION_SCOPE_INVALID", message, details);
   }
 }
+
+/** 409 — Database Schema INT-01: a (workspace, year, month) OperatingMonth already exists. */
+export class MonthAlreadyExistsException extends ApiException {
+  constructor(message = "يوجد شهر تشغيلي بنفس السنة والشهر بالفعل.", details?: Record<string, unknown>) {
+    super(409, "MONTH_ALREADY_EXISTS", message, details);
+  }
+}
+
+/**
+ * 422 — the CreateMonth transaction could not complete: an invalid/expired
+ * preview token, a source-state change since preview, or a validation
+ * failure. API Contract §12 also allows 500 for a genuine unexpected
+ * failure — that case is left to the generic INTERNAL_ERROR path instead of
+ * this exception.
+ */
+export class MonthCreateFailedException extends ApiException {
+  constructor(message = "تعذر إنشاء الشهر.", details?: Record<string, unknown>) {
+    super(422, "MONTH_CREATE_FAILED", message, details);
+  }
+}
+
+/** 409 — the requested action is not valid for the session's current status. */
+export class SessionInvalidStateException extends ApiException {
+  constructor(message = "الإجراء غير صالح لحالة الحصة الحالية.", details?: Record<string, unknown>) {
+    super(409, "SESSION_INVALID_STATE", message, details);
+  }
+}
+
+/** 409 — optimistic concurrency: the record changed since it was last read. */
+export class VersionConflictException extends ApiException {
+  constructor(message = "تم تعديل السجل من مستخدم آخر. يرجى إعادة التحميل.", details?: Record<string, unknown>) {
+    super(409, "VERSION_CONFLICT", message, details);
+  }
+}
+
+/** 409 — same Idempotency-Key + operation but a different request payload. */
+export class IdempotencyConflictException extends ApiException {
+  constructor(message = "نفس مفتاح idempotency باستخدام بيانات مختلفة.", details?: Record<string, unknown>) {
+    super(409, "IDEMPOTENCY_CONFLICT", message, details);
+  }
+}

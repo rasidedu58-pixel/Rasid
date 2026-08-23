@@ -8,7 +8,7 @@ import { TeamService } from "./application/team.service";
 import { GROUP_OWNERSHIP_PORT } from "./application/ports/group-ownership.port";
 import { TEAM_REPOSITORY } from "./application/ports/team-repository.port";
 import { DrizzleTeamRepository } from "./infrastructure/drizzle-team.repository";
-import { AlwaysTrueGroupOwnershipAdapter } from "./infrastructure/stub-group-ownership.adapter";
+import { DrizzleGroupOwnershipAdapter } from "./infrastructure/group-ownership.adapter";
 
 /**
  * Phase 2 — RBAC / Membership / Permissions module. Depends on
@@ -28,7 +28,7 @@ import { AlwaysTrueGroupOwnershipAdapter } from "./infrastructure/stub-group-own
     SupabaseAuthGuard,
     { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier },
     { provide: TEAM_REPOSITORY, useClass: DrizzleTeamRepository },
-    { provide: GROUP_OWNERSHIP_PORT, useClass: AlwaysTrueGroupOwnershipAdapter },
+    { provide: GROUP_OWNERSHIP_PORT, useClass: DrizzleGroupOwnershipAdapter },
   ],
 })
 export class TeamModule {}
