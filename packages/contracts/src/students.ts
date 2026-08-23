@@ -211,9 +211,22 @@ export type EnrollmentWithdrawRequest = z.infer<typeof enrollmentWithdrawRequest
 export const enrollmentWithdrawResponseSchema = z.object({ enrollment: enrollmentSchema });
 export type EnrollmentWithdrawResponse = z.infer<typeof enrollmentWithdrawResponseSchema>;
 
+/**
+ * Product Decision — Transfer Fee Method (delta closing the Phase 4
+ * FULL_MONTH-default blocker): a Transfer's fee for the TARGET GroupMonth
+ * is EXPLICITLY chosen by the caller, same Proration Engine as a normal
+ * Enrollment. CUSTOM is deliberately excluded — Transfer is not a fee
+ * re-negotiation flow (API Contract §9.5 names it "Transfer impact
+ * preview"), so only the two policy-driven methods are offered.
+ */
+export const transferFeeMethodSchema = z.enum(["FULL_MONTH", "REMAINING_SESSIONS"]);
+export type TransferFeeMethod = z.infer<typeof transferFeeMethodSchema>;
+
 export const enrollmentTransferPreviewRequestSchema = z.object({
   targetGroupMonthId: z.string().uuid(),
   joinDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** Required — no silent backend default (Product Decision, see above). */
+  feeMethod: transferFeeMethodSchema,
 });
 export type EnrollmentTransferPreviewRequest = z.infer<typeof enrollmentTransferPreviewRequestSchema>;
 
@@ -221,12 +234,21 @@ export const enrollmentTransferPreviewResponseSchema = z.object({
   targetGroupMonthId: z.string().uuid(),
   targetBaseFeeMinor: z.number().int(),
   targetCurrency: z.string(),
+  feeMethod: transferFeeMethodSchema,
+  calculatedDueMinor: z.number().int(),
+  eligibleSessions: z.number().int().nullable(),
+  totalBillableSessions: z.number().int().nullable(),
+  rounding: z.string().nullable(),
   previewToken: z.string(),
   expiresAt: z.string(),
 });
 export type EnrollmentTransferPreviewResponse = z.infer<typeof enrollmentTransferPreviewResponseSchema>;
 
-export const enrollmentTransferRequestSchema = z.object({ previewToken: z.string() });
+export const enrollmentTransferRequestSchema = z.object({
+  previewToken: z.string(),
+  /** Required — must match the value the preview token was issued for. */
+  feeMethod: transferFeeMethodSchema,
+});
 export type EnrollmentTransferRequest = z.infer<typeof enrollmentTransferRequestSchema>;
 
 export const enrollmentTransferResponseSchema = z.object({

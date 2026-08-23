@@ -1,3 +1,7 @@
+import {
+  enrollmentTransferPreviewRequestSchema,
+  enrollmentTransferRequestSchema,
+} from "@academic-precision/contracts";
 import { ResourceNotFoundException, ValidationApiException } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
@@ -215,12 +219,13 @@ describe("EnrollmentsService", () => {
 
       const transferPreview = await service.transferPreview(owner, ownerContext, created.enrollment.id, {
         targetGroupMonthId: targetGm.id,
+        feeMethod: "FULL_MONTH",
       });
       const result = await service.transfer(
         owner,
         ownerContext,
         created.enrollment.id,
-        { previewToken: transferPreview.previewToken },
+        { previewToken: transferPreview.previewToken, feeMethod: "FULL_MONTH" },
         null,
       );
 
@@ -232,6 +237,131 @@ describe("EnrollmentsService", () => {
 
       const allForStudent = [...repo.enrollmentsById.values()].filter((e) => e.studentId === student.id);
       expect(allForStudent).toHaveLength(2); // source (ended) + exactly one new target
+    });
+
+    describe("Product Decision — Transfer Fee Method", () => {
+      it("feeMethod is required — a missing value is a validation error, never a silent FULL_MONTH default", () => {
+        // Enforced by the zod contract schema itself (transferFeeMethodSchema
+        // is required, not .optional()) — the application layer never sees
+        // an undefined feeMethod to begin with. Documents the contract-level
+        // guarantee alongside the runtime behavior tests below.
+        expect(() =>
+          enrollmentTransferPreviewRequestSchema.parse({ targetGroupMonthId: "00000000-0000-0000-0000-000000000000" }),
+        ).toThrow();
+        expect(() => enrollmentTransferRequestSchema.parse({ previewToken: "x" })).toThrow();
+      });
+
+      it("FULL_MONTH transfer charges the target GroupMonth's base fee in full, regardless of join date", async () => {
+        const sourceGm = seedGroupMonth({ joinFeePolicy: "FULL" });
+        const targetGm = seedGroupMonth({ joinFeePolicy: "ASK_EVERY_TIME", baseFeeMinor: 75000 });
+        const student = await seedStudent();
+        const sourcePreview = await service.previewEnrollment(owner, ownerContext, sourceGm.id, {
+          studentId: student.id,
+          joinDate: "2026-08-01",
+        });
+        const created = await service.createEnrollment(
+          owner,
+          ownerContext,
+          sourceGm.id,
+          { studentId: student.id, joinDate: "2026-08-01", feeMethod: "FULL_MONTH", previewToken: sourcePreview.previewToken },
+          null,
+        );
+
+        const preview = await service.transferPreview(owner, ownerContext, created.enrollment.id, {
+          targetGroupMonthId: targetGm.id,
+          feeMethod: "FULL_MONTH",
+        });
+        expect(preview.calculatedDueMinor).toBe(75000);
+        expect(preview.eligibleSessions).toBeNull();
+        expect(preview.totalBillableSessions).toBeNull();
+
+        const result = await service.transfer(
+          owner,
+          ownerContext,
+          created.enrollment.id,
+          { previewToken: preview.previewToken, feeMethod: "FULL_MONTH" },
+          null,
+        );
+        expect(result.target.feeMethod).toBe("FULL_MONTH");
+      });
+
+      it("REMAINING_SESSIONS transfer runs the same Proration Engine as a normal Enrollment", async () => {
+        const sourceGm = seedGroupMonth({ joinFeePolicy: "FULL" });
+        const targetGm = seedGroupMonth({ joinFeePolicy: "ASK_EVERY_TIME", baseFeeMinor: 60000 });
+        for (let i = 0; i < 5; i += 1) {
+          repo.seedSession({
+            workspaceId: WORKSPACE_A,
+            groupMonthId: targetGm.id,
+            createdByUserId: owner.id,
+            scheduledAt: new Date(Date.UTC(2026, 7, 1 + i, 8, 0, 0)),
+          });
+        }
+        for (let i = 0; i < 3; i += 1) {
+          repo.seedSession({
+            workspaceId: WORKSPACE_A,
+            groupMonthId: targetGm.id,
+            createdByUserId: owner.id,
+            scheduledAt: new Date(Date.UTC(2026, 7, 15 + i, 8, 0, 0)),
+          });
+        }
+        const student = await seedStudent();
+        const sourcePreview = await service.previewEnrollment(owner, ownerContext, sourceGm.id, {
+          studentId: student.id,
+          joinDate: "2026-08-01",
+        });
+        const created = await service.createEnrollment(
+          owner,
+          ownerContext,
+          sourceGm.id,
+          { studentId: student.id, joinDate: "2026-08-01", feeMethod: "FULL_MONTH", previewToken: sourcePreview.previewToken },
+          null,
+        );
+
+        const preview = await service.transferPreview(owner, ownerContext, created.enrollment.id, {
+          targetGroupMonthId: targetGm.id,
+          joinDate: "2026-08-15",
+          feeMethod: "REMAINING_SESSIONS",
+        });
+        // Same exact PRD AC-07 worked example as regular Enrollment (60000 * 3 / 8).
+        expect(preview.calculatedDueMinor).toBe(22500);
+        expect(preview.eligibleSessions).toBe(3);
+        expect(preview.totalBillableSessions).toBe(8);
+
+        const result = await service.transfer(
+          owner,
+          ownerContext,
+          created.enrollment.id,
+          { previewToken: preview.previewToken, feeMethod: "REMAINING_SESSIONS" },
+          null,
+        );
+        expect(result.target.feeMethod).toBe("REMAINING_SESSIONS");
+      });
+
+      it("REMAINING_SESSIONS transfer into a GroupMonth with zero billable sessions is rejected — same rule as a normal Enrollment", async () => {
+        const sourceGm = seedGroupMonth({ joinFeePolicy: "FULL" });
+        const targetGm = seedGroupMonth({ joinFeePolicy: "ASK_EVERY_TIME" }); // no sessions seeded
+        const student = await seedStudent();
+        const sourcePreview = await service.previewEnrollment(owner, ownerContext, sourceGm.id, {
+          studentId: student.id,
+          joinDate: "2026-08-01",
+        });
+        const created = await service.createEnrollment(
+          owner,
+          ownerContext,
+          sourceGm.id,
+          { studentId: student.id, joinDate: "2026-08-01", feeMethod: "FULL_MONTH", previewToken: sourcePreview.previewToken },
+          null,
+        );
+
+        await expect(
+          service.transferPreview(owner, ownerContext, created.enrollment.id, {
+            targetGroupMonthId: targetGm.id,
+            feeMethod: "REMAINING_SESSIONS",
+          }),
+        ).rejects.toMatchObject({
+          response: { details: { fieldErrors: { feeMethod: [expect.stringContaining("لا توجد حصص قابلة للحساب")] } } },
+        });
+      });
     });
   });
 

@@ -43,6 +43,8 @@ interface TransferPreviewPayload {
   sourceEnrollmentId: string;
   targetGroupMonthId: string;
   joinDate: string;
+  feeMethod: FeeMethod;
+  calculatedDueMinor: number;
 }
 
 /**
@@ -221,10 +223,25 @@ export class EnrollmentsService {
     );
 
     const joinDate = body.joinDate ?? new Date().toISOString().slice(0, 10);
+
+    // Product Decision — Transfer Fee Method: same Proration Engine as a
+    // normal Enrollment preview. REMAINING_SESSIONS with zero billable
+    // sessions is rejected by `computeDue` itself (UNAVAILABLE_MESSAGE) —
+    // identical rule to regular Enrollment, not a bespoke one.
+    const { calculatedDueMinor, eligibleSessions, totalBillableSessions, rounding } = await this.computeDue(
+      workspaceContext,
+      target,
+      body.feeMethod,
+      joinDate,
+      undefined,
+    );
+
     const payload: TransferPreviewPayload = {
       sourceEnrollmentId: source.id,
       targetGroupMonthId: target.id,
       joinDate,
+      feeMethod: body.feeMethod,
+      calculatedDueMinor,
     };
     const { token, expiresAt } = this.previewTokens.issue<TransferPreviewPayload>(
       TRANSFER_PREVIEW_KIND,
@@ -236,6 +253,11 @@ export class EnrollmentsService {
       targetGroupMonthId: target.id,
       targetBaseFeeMinor: target.baseFeeMinor,
       targetCurrency: target.currencyCode,
+      feeMethod: body.feeMethod,
+      calculatedDueMinor,
+      eligibleSessions,
+      totalBillableSessions,
+      rounding,
       previewToken: token,
       expiresAt: expiresAt.toISOString(),
     };
@@ -258,9 +280,28 @@ export class EnrollmentsService {
     if (plan.sourceEnrollmentId !== id) {
       throw new ValidationApiException({ previewToken: ["رمز المعاينة لا يخص هذا التسجيل."] });
     }
+    if (plan.feeMethod !== body.feeMethod) {
+      throw new ValidationApiException({ feeMethod: ["يجب أن يطابق طريقة الرسوم المعاينة."] });
+    }
     // Re-validate target scope server-side at transfer time too (not just
     // at preview time) — state can change between preview and apply.
-    await this.loadGroupMonthInScope(authUser, workspaceContext, plan.targetGroupMonthId, "students.edit");
+    const { groupMonth: target } = await this.loadGroupMonthInScope(
+      authUser,
+      workspaceContext,
+      plan.targetGroupMonthId,
+      "students.edit",
+    );
+
+    // Re-validate REMAINING_SESSIONS eligibility server-side even though the
+    // preview already computed it — never trust the client-supplied payload
+    // as authorization (API Contract §11.4), same rule as a normal
+    // Enrollment create.
+    if (plan.feeMethod === "REMAINING_SESSIONS") {
+      const recomputed = await this.computeDue(workspaceContext, target, plan.feeMethod, plan.joinDate, undefined);
+      if (recomputed.calculatedDueMinor !== plan.calculatedDueMinor) {
+        throw new EnrollmentNotEligibleException("تغيرت بيانات الحصص منذ المعاينة. يرجى إعادة المعاينة.");
+      }
+    }
 
     const result = await this.repository.transferEnrollmentTransaction({
       sourceEnrollmentId: plan.sourceEnrollmentId,
@@ -268,12 +309,9 @@ export class EnrollmentsService {
       targetWorkspaceId: workspaceContext.workspaceId,
       joinDate: plan.joinDate,
       status: "ACTIVE",
-      // Transfer's preview response deliberately does not collect a
-      // feeMethod from the caller (API Contract §9.5 names it "Transfer
-      // impact preview", not a fee re-negotiation flow) — FULL_MONTH is the
-      // simplest, most defensible default for the new GroupMonth context;
-      // documented Phase 4 simplification (see handoff DEVIATIONS).
-      feeMethod: "FULL_MONTH",
+      // Product Decision — Transfer Fee Method: explicit, caller-chosen at
+      // preview time, re-validated here — no silent backend default.
+      feeMethod: plan.feeMethod,
       customFeeMinor: null,
     });
     if (!result) {

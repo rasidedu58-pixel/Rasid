@@ -184,6 +184,7 @@ describe("Student Group-Scope Security Delta", () => {
     await expect(
       enrollmentsService.transferPreview(assistantA, assistantAContext, existing!.id, {
         targetGroupMonthId: groupMonthA.id,
+        feeMethod: "FULL_MONTH",
       }),
     ).rejects.toBeInstanceOf(ResourceNotFoundException);
   });
