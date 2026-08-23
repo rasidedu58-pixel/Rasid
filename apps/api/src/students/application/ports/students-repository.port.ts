@@ -53,6 +53,8 @@ export interface StudentsRepositoryPort {
     patch: UpdateStudentInput,
   ): Promise<StudentRow | undefined>;
   searchStudents(filter: StudentSearchFilter): Promise<StudentRow[]>;
+  /** Group-Scope Security Delta: all Group ids the Student has ever been Enrolled into. */
+  listGroupIdsForStudent(studentId: string): Promise<string[]>;
 
   // Guardians / student_guardians
   insertGuardian(input: InsertGuardianInput): Promise<GuardianRow>;

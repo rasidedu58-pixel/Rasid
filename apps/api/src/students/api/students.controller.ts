@@ -50,13 +50,14 @@ export class StudentsController {
   @RequirePermission("students.view_basic")
   @ApiOperation({ summary: "Scoped directory/search (GET /api/v1/students)" })
   listStudents(
+    @CurrentUser() user: VerifiedSupabaseToken,
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
     @Query("q") q?: string,
     @Query("searchBy") searchBy?: "name" | "code" | "guardianPhone",
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ): Promise<ListStudentsResponse> {
-    return this.studentsService.listStudents(workspaceContext, {
+    return this.studentsService.listStudents(user, workspaceContext, {
       q,
       searchBy,
       cursor,
@@ -69,12 +70,13 @@ export class StudentsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Possible-duplicate candidates; no side effects, no auto merge (POST /api/v1/students/match-preview)" })
   matchPreview(
+    @CurrentUser() user: VerifiedSupabaseToken,
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
     @Body() body: unknown,
   ): Promise<MatchPreviewResponse> {
     const parsed = matchPreviewRequestSchema.safeParse(body);
     if (!parsed.success) throw new ValidationApiException(toFieldErrors(parsed.error));
-    return this.studentsService.matchPreview(workspaceContext, parsed.data as MatchPreviewRequest);
+    return this.studentsService.matchPreview(user, workspaceContext, parsed.data as MatchPreviewRequest);
   }
 
   @Post("students")
@@ -100,10 +102,11 @@ export class StudentsController {
   @RequirePermission("students.view_basic")
   @ApiOperation({ summary: "Student 360-lite projection (GET /api/v1/students/:id)" })
   getStudent(
+    @CurrentUser() user: VerifiedSupabaseToken,
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
     @Param("id") id: string,
   ): Promise<StudentDetailResponse> {
-    return this.studentsService.getStudent(workspaceContext, id);
+    return this.studentsService.getStudent(user, workspaceContext, id);
   }
 
   @Patch("students/:id")

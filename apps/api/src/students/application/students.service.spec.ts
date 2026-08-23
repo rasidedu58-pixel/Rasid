@@ -7,6 +7,8 @@ import {
 } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { PermissionResolverService } from "../../team/application/permission-resolver.service";
+import { InMemoryTeamRepository } from "../../team/application/__fixtures__/in-memory-team.repository";
 import { InMemoryStudentsRepository } from "./__fixtures__/in-memory-students.repository";
 import { StudentsService } from "./students.service";
 
@@ -15,28 +17,20 @@ const WORKSPACE_B = "workspace-b";
 
 describe("StudentsService", () => {
   let repo: InMemoryStudentsRepository;
+  let teamRepo: InMemoryTeamRepository;
+  let resolver: PermissionResolverService;
   let service: StudentsService;
   let owner: VerifiedSupabaseToken;
   let ownerContext: WorkspaceContext;
 
   beforeEach(() => {
     repo = new InMemoryStudentsRepository();
-    service = new StudentsService(repo);
+    teamRepo = new InMemoryTeamRepository();
+    resolver = new PermissionResolverService(teamRepo);
+    service = new StudentsService(repo, resolver);
     owner = { id: "u-owner", email: "owner@example.com" };
-    ownerContext = {
-      workspaceId: WORKSPACE_A,
-      membership: {
-        id: "m-owner",
-        workspaceId: WORKSPACE_A,
-        userId: owner.id,
-        roleLabel: "OWNER",
-        status: "ACTIVE",
-        joinedAt: new Date(),
-        disabledAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    };
+    const ownerMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: owner.id, roleLabel: "OWNER" });
+    ownerContext = { workspaceId: WORKSPACE_A, membership: ownerMembership };
   });
 
   describe("createStudent", () => {
@@ -108,7 +102,7 @@ describe("StudentsService", () => {
   describe("cross-workspace safety", () => {
     it("getStudent 404s (safe no-leak) for a student belonging to a different workspace", async () => {
       const other = repo.seedStudent({ workspaceId: WORKSPACE_B, studentCode: "AP-XXXXXX", name: "Other" });
-      await expect(service.getStudent(ownerContext, other.id)).rejects.toBeInstanceOf(ResourceNotFoundException);
+      await expect(service.getStudent(owner, ownerContext, other.id)).rejects.toBeInstanceOf(ResourceNotFoundException);
     });
   });
 
@@ -202,17 +196,17 @@ describe("StudentsService", () => {
 
     it("resolve (GLOBAL) finds the student for a valid token and never leaks details for an invalid one", async () => {
       const created = await service.createStudent(owner, ownerContext, { name: "طالب QR" }, null);
-      const resolved = await service.resolveQr(ownerContext, { token: created.qr.displayToken, context: "GLOBAL" });
+      const resolved = await service.resolveQr(owner, ownerContext, { token: created.qr.displayToken, context: "GLOBAL" });
       expect(resolved.studentId).toBe(created.student.id);
 
       await expect(
-        service.resolveQr(ownerContext, { token: "not-a-real-token", context: "GLOBAL" }),
+        service.resolveQr(owner, ownerContext, { token: "not-a-real-token", context: "GLOBAL" }),
       ).rejects.toBeInstanceOf(QrInvalidException);
     });
 
     it("rejects a non-GLOBAL context explicitly rather than silently no-op'ing", async () => {
       await expect(
-        service.resolveQr(ownerContext, { token: "x", context: "SESSION" }),
+        service.resolveQr(owner, ownerContext, { token: "x", context: "SESSION" }),
       ).rejects.toBeInstanceOf(ValidationApiException);
     });
 
@@ -220,7 +214,7 @@ describe("StudentsService", () => {
       const created = await service.createStudent(owner, ownerContext, { name: "طالب" }, null);
       const otherWorkspaceContext: WorkspaceContext = { ...ownerContext, workspaceId: WORKSPACE_B };
       await expect(
-        service.resolveQr(otherWorkspaceContext, { token: created.qr.displayToken, context: "GLOBAL" }),
+        service.resolveQr(owner, otherWorkspaceContext, { token: created.qr.displayToken, context: "GLOBAL" }),
       ).rejects.toBeInstanceOf(QrInvalidException);
     });
   });
@@ -228,7 +222,7 @@ describe("StudentsService", () => {
   describe("search", () => {
     it("finds a student by exact student_code", async () => {
       const created = await service.createStudent(owner, ownerContext, { name: "طالب بحث" }, null);
-      const results = await service.listStudents(ownerContext, { q: created.student.studentCode, searchBy: "code" });
+      const results = await service.listStudents(owner, ownerContext, { q: created.student.studentCode, searchBy: "code" });
       expect(results.items.map((s) => s.id)).toContain(created.student.id);
     });
   });

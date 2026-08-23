@@ -1,6 +1,8 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
+import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
+import { CurrentUser } from "../../identity/api/decorators/current-user.decorator";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
@@ -32,11 +34,12 @@ export class QrController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Safe-no-leak QR resolve, GLOBAL context only in Phase 4 (POST /api/v1/qr/resolve)" })
   resolve(
+    @CurrentUser() user: VerifiedSupabaseToken,
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
     @Body() body: unknown,
   ): Promise<QrResolveResponse> {
     const parsed = qrResolveRequestSchema.safeParse(body);
     if (!parsed.success) throw new ValidationApiException(toFieldErrors(parsed.error));
-    return this.studentsService.resolveQr(workspaceContext, parsed.data as QrResolveRequest);
+    return this.studentsService.resolveQr(user, workspaceContext, parsed.data as QrResolveRequest);
   }
 }

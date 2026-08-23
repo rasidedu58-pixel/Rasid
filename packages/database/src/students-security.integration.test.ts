@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDb, withRuntimeContext } from "@academic-precision/database";
+import { closeDb, listGroupIdsForStudent, searchStudents, withRuntimeContext } from "@academic-precision/database";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const MIGRATION_DATABASE_URL = process.env.MIGRATION_DATABASE_URL;
@@ -57,12 +57,19 @@ describe.skipIf(!hasLiveCreds)("Phase 4 Students Security (live Postgres)", () =
   const membershipBId = randomUUID();
   const groupAId = randomUUID();
   const groupBId = randomUUID();
+  // Group-Scope Security Delta: a THIRD group, in the SAME workspace as A,
+  // to prove `searchStudents`/`listGroupIdsForStudent`'s restrictToGroupIds
+  // filter is a real Group-Scope boundary — not just tenant/RLS isolation
+  // (which groupB/workspaceB already cover above).
+  const groupCId = randomUUID();
   const monthAId = randomUUID();
   const monthBId = randomUUID();
   const groupMonthAId = randomUUID();
   const groupMonthBId = randomUUID();
+  const groupMonthCId = randomUUID();
   const studentAId = randomUUID();
   const studentBId = randomUUID();
+  const studentCId = randomUUID();
   const guardianAId = randomUUID();
 
   beforeAll(async () => {
@@ -84,7 +91,8 @@ describe.skipIf(!hasLiveCreds)("Phase 4 Students Security (live Postgres)", () =
 
     await admin`INSERT INTO groups (id, workspace_id, name, status) VALUES
       (${groupAId}, ${workspaceAId}, 'Students Test Group A', 'ACTIVE'),
-      (${groupBId}, ${workspaceBId}, 'Students Test Group B', 'ACTIVE')`;
+      (${groupBId}, ${workspaceBId}, 'Students Test Group B', 'ACTIVE'),
+      (${groupCId}, ${workspaceAId}, 'Students Test Group C', 'ACTIVE')`;
 
     await admin`INSERT INTO operating_months (id, workspace_id, year, month, status, created_by) VALUES
       (${monthAId}, ${workspaceAId}, 2026, 8, 'CURRENT', ${userAId}),
@@ -93,12 +101,14 @@ describe.skipIf(!hasLiveCreds)("Phase 4 Students Security (live Postgres)", () =
     await admin`INSERT INTO group_months (id, workspace_id, group_id, operating_month_id, base_fee_minor, due_policy, join_fee_policy)
       VALUES
         (${groupMonthAId}, ${workspaceAId}, ${groupAId}, ${monthAId}, 60000, 'PER_GROUP', 'FULL'),
-        (${groupMonthBId}, ${workspaceBId}, ${groupBId}, ${monthBId}, 60000, 'PER_GROUP', 'FULL')`;
+        (${groupMonthBId}, ${workspaceBId}, ${groupBId}, ${monthBId}, 60000, 'PER_GROUP', 'FULL'),
+        (${groupMonthCId}, ${workspaceAId}, ${groupCId}, ${monthAId}, 60000, 'PER_GROUP', 'FULL')`;
 
     await admin`INSERT INTO students (id, workspace_id, student_code, name, search_name_normalized, status)
       VALUES
         (${studentAId}, ${workspaceAId}, 'AP-TESTA1', 'Student A', 'student a', 'ACTIVE'),
-        (${studentBId}, ${workspaceBId}, 'AP-TESTB1', 'Student B', 'student b', 'ACTIVE')`;
+        (${studentBId}, ${workspaceBId}, 'AP-TESTB1', 'Student B', 'student b', 'ACTIVE'),
+        (${studentCId}, ${workspaceAId}, 'AP-TESTC1', 'Student C', 'student c', 'ACTIVE')`;
 
     await admin`INSERT INTO guardians (id, workspace_id, name, phone, normalized_phone)
       VALUES (${guardianAId}, ${workspaceAId}, 'Guardian A', '+201000000000', '201000000000')`;
@@ -112,7 +122,7 @@ describe.skipIf(!hasLiveCreds)("Phase 4 Students Security (live Postgres)", () =
       await admin`DELETE FROM guardians WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM students WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM group_months WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
-      await admin`DELETE FROM permission_group_scopes WHERE group_id IN (${groupAId}, ${groupBId})`;
+      await admin`DELETE FROM permission_group_scopes WHERE group_id IN (${groupAId}, ${groupBId}, ${groupCId})`;
       await admin`DELETE FROM operating_months WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM groups WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM memberships WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
@@ -243,5 +253,57 @@ describe.skipIf(!hasLiveCreds)("Phase 4 Students Security (live Postgres)", () =
 
     await admin`DELETE FROM student_guardians WHERE id = ${firstLinkId}`;
     await admin`DELETE FROM guardians WHERE id = ${secondGuardianId}`;
+  });
+
+  describe("Student Group-Scope Security Delta", () => {
+    const enrollmentAId = randomUUID();
+    const enrollmentCId = randomUUID();
+
+    beforeAll(async () => {
+      // Student A <- GroupMonth A (Group A); Student C <- GroupMonth C
+      // (Group C) — both live in workspace A, so RLS alone would not tell
+      // them apart; only the Group-Scope `restrictToGroupIds` filter does.
+      await admin`INSERT INTO enrollments (id, workspace_id, student_id, group_month_id, join_date, status, fee_method)
+        VALUES (${enrollmentAId}, ${workspaceAId}, ${studentAId}, ${groupMonthAId}, '2026-08-01', 'ACTIVE', 'FULL_MONTH')`;
+      await admin`INSERT INTO enrollments (id, workspace_id, student_id, group_month_id, join_date, status, fee_method)
+        VALUES (${enrollmentCId}, ${workspaceAId}, ${studentCId}, ${groupMonthCId}, '2026-08-01', 'ACTIVE', 'FULL_MONTH')`;
+    });
+
+    afterAll(async () => {
+      await admin`DELETE FROM enrollments WHERE id IN (${enrollmentAId}, ${enrollmentCId})`;
+    });
+
+    it("8. listGroupIdsForStudent returns exactly the Enrolled group for each student, in real Postgres", async () => {
+      const groupIdsForA = await withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+        listGroupIdsForStudent(db, studentAId),
+      );
+      expect(groupIdsForA).toEqual([groupAId]);
+
+      const groupIdsForC = await withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+        listGroupIdsForStudent(db, studentCId),
+      );
+      expect(groupIdsForC).toEqual([groupCId]);
+    });
+
+    it("9. searchStudents restrictToGroupIds is a real same-workspace boundary — Group A scope excludes Student C, and an empty grant excludes everyone", async () => {
+      const scopedToA = await withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+        searchStudents(db, { workspaceId: workspaceAId, limit: 50, restrictToGroupIds: [groupAId] }),
+      );
+      const scopedIds = scopedToA.map((s) => s.id);
+      expect(scopedIds).toContain(studentAId);
+      expect(scopedIds).not.toContain(studentCId); // same workspace, different group — RLS would admit it, scope must not
+
+      const scopedToEmpty = await withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+        searchStudents(db, { workspaceId: workspaceAId, limit: 50, restrictToGroupIds: [] }),
+      );
+      expect(scopedToEmpty).toHaveLength(0); // SELECTED_GROUPS with zero granted groups matches nothing
+
+      const unrestricted = await withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+        searchStudents(db, { workspaceId: workspaceAId, limit: 50 }),
+      );
+      const unrestrictedIds = unrestricted.map((s) => s.id);
+      expect(unrestrictedIds).toContain(studentAId);
+      expect(unrestrictedIds).toContain(studentCId); // undefined restrictToGroupIds (ALL_GROUPS/Owner) — unrestricted
+    });
   });
 });

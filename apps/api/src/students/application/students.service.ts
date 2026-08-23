@@ -28,40 +28,50 @@ import {
 } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { PermissionResolverService } from "../../team/application/permission-resolver.service";
 import { STUDENTS_REPOSITORY, type StudentsRepositoryPort } from "./ports/students-repository.port";
 
 const DEFAULT_LIST_LIMIT = 50;
 const GLOBAL_CONTEXT = "GLOBAL";
+type ScopedPermission = "students.view_basic" | "students.edit";
 
 /**
  * Application service for Phase 4 Students / Guardians / QR endpoints.
  * Controllers stay thin; all authorization/business rules live here,
  * mirroring the Phase 1-3 convention.
  *
- * Scope-check design (documented per the phase brief's own callout):
+ * Scope-check design (Student Group-Scope Security Delta, superseding the
+ * Phase 4 handoff's original "coarse workspace-wide check" decision, which
+ * PRD §12/§17 and API Contract §10 do NOT actually support — both name
+ * "Group scope" explicitly for `students.view_basic`/`students.edit`):
  * `students`/`guardians` tables carry NO group_id column at all — a Student
  * is not inherently anchored to any one Group (they accumulate Enrollments
- * across groups/months over time). `isGroupInScope` needs a concrete
- * group id to check against, and none exists at the Student-entity level.
- * The safest, most defensible Phase 4 interpretation — matching how
- * `team.manage` and other workspace-level grants already work — is that
- * `students.view_basic`/`students.edit` are enforced as coarse,
- * workspace-wide checks (already done by `PermissionGuard` via
- * `@RequirePermission`, before any handler here even runs). This service
- * therefore does NOT re-derive or filter by group scope for Student/
- * Guardian/QR operations. Only `EnrollmentsService` (Enrollment ties a
- * Student to one specific GroupMonth → Group) performs `isGroupInScope`
- * checks, exactly like `SchedulingService` does for sessions.
+ * across groups/months over time). Enrollment (via GroupMonth → Group) is
+ * therefore the only real link, and `listGroupIdsForStudent` /
+ * `StudentSearchFilter.restrictToGroupIds` (packages/database) are the
+ * mechanism: for a SELECTED_GROUPS caller, a Student is in scope iff they
+ * have (or have had) at least one Enrollment tied to a GroupMonth of one of
+ * the caller's granted groups — regardless of that Enrollment's current
+ * status (ACTIVE/WITHDRAWN/TRANSFERRED/etc.), so a since-withdrawn student
+ * a caller once managed stays visible to them. A caller with ALL_GROUPS
+ * (including Owner) is never restricted. Every Student/Guardian/QR
+ * operation below funnels through `loadStudentInScope`/
+ * `resolveGroupScopeFilter`/`assertStudentGroupScope` to enforce this
+ * server-side — never relying on client-side/UI hiding.
  */
 @Injectable()
 export class StudentsService {
-  constructor(@Inject(STUDENTS_REPOSITORY) private readonly repository: StudentsRepositoryPort) {}
+  constructor(
+    @Inject(STUDENTS_REPOSITORY) private readonly repository: StudentsRepositoryPort,
+    private readonly permissionResolver: PermissionResolverService,
+  ) {}
 
   // ---------------------------------------------------------------------
   // Students
   // ---------------------------------------------------------------------
 
   async listStudents(
+    authUser: VerifiedSupabaseToken,
     workspaceContext: WorkspaceContext,
     query: { q?: string; searchBy?: "name" | "code" | "guardianPhone"; cursor?: string; limit?: number },
   ): Promise<ListStudentsResponse> {
@@ -82,6 +92,12 @@ export class StudentsService {
       }
     }
 
+    const restrictToGroupIds = await this.resolveGroupScopeFilter(
+      workspaceContext.workspaceId,
+      authUser.id,
+      "students.view_basic",
+    );
+
     const rows = await this.repository.searchStudents({
       workspaceId: workspaceContext.workspaceId,
       normalizedNameQuery,
@@ -89,6 +105,7 @@ export class StudentsService {
       guardianNormalizedPhone,
       limit: limit + 1,
       cursorId: query.cursor ?? undefined,
+      restrictToGroupIds,
     });
 
     const hasNext = rows.length > limit;
@@ -110,17 +127,28 @@ export class StudentsService {
   }
 
   async matchPreview(
+    authUser: VerifiedSupabaseToken,
     workspaceContext: WorkspaceContext,
     body: MatchPreviewRequest,
   ): Promise<MatchPreviewResponse> {
     const candidates: MatchPreviewResponse["candidates"] = [];
     const seen = new Set<string>();
 
+    // match-preview is gated on students.edit (StudentsController) — same
+    // permission its scope is resolved against, never leaking a Group B
+    // candidate to a caller SELECTED_GROUPS-restricted to Group A.
+    const restrictToGroupIds = await this.resolveGroupScopeFilter(
+      workspaceContext.workspaceId,
+      authUser.id,
+      "students.edit",
+    );
+
     const normalizedName = normalizeArabicName(body.name);
     const nameMatches = await this.repository.searchStudents({
       workspaceId: workspaceContext.workspaceId,
       normalizedNameQuery: normalizedName,
       limit: 10,
+      restrictToGroupIds,
     });
     for (const s of nameMatches) {
       if (seen.has(s.id)) continue;
@@ -134,6 +162,7 @@ export class StudentsService {
         workspaceId: workspaceContext.workspaceId,
         guardianNormalizedPhone: normalizedPhone,
         limit: 10,
+        restrictToGroupIds,
       });
       for (const s of phoneMatches) {
         if (seen.has(s.id)) continue;
@@ -215,8 +244,12 @@ export class StudentsService {
     };
   }
 
-  async getStudent(workspaceContext: WorkspaceContext, id: string): Promise<StudentDetailResponse> {
-    const student = await this.loadStudentInWorkspace(workspaceContext, id);
+  async getStudent(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    id: string,
+  ): Promise<StudentDetailResponse> {
+    const student = await this.loadStudentInScope(authUser.id, workspaceContext, id, "students.view_basic");
     const links = await this.repository.listGuardiansForStudent(student.id);
     const activeQr = await this.repository.findActiveQrForStudent(student.id);
 
@@ -234,7 +267,7 @@ export class StudentsService {
     body: UpdateStudentRequest,
     correlationId: string | null,
   ): Promise<Student> {
-    const before = await this.loadStudentInWorkspace(workspaceContext, id);
+    const before = await this.loadStudentInScope(authUser.id, workspaceContext, id, "students.edit");
 
     const patch: { name?: string; searchNameNormalized?: string } = {};
     if (body.name !== undefined) {
@@ -268,7 +301,7 @@ export class StudentsService {
     id: string,
     correlationId: string | null,
   ): Promise<Student> {
-    const before = await this.loadStudentInWorkspace(workspaceContext, id);
+    const before = await this.loadStudentInScope(authUser.id, workspaceContext, id, "students.edit");
 
     const updated = await this.repository.updateStudentWithVersion(id, before.version, {
       status: "ARCHIVED",
@@ -304,7 +337,7 @@ export class StudentsService {
     body: LinkGuardianRequest,
     correlationId: string | null,
   ): Promise<GuardianLink> {
-    const student = await this.loadStudentInWorkspace(workspaceContext, studentId);
+    const student = await this.loadStudentInScope(authUser.id, workspaceContext, studentId, "students.edit");
 
     let guardian: GuardianRow;
     if (body.guardianId) {
@@ -365,7 +398,7 @@ export class StudentsService {
     body: UpdateStudentGuardianRequest,
     correlationId: string | null,
   ): Promise<GuardianLink> {
-    await this.loadStudentInWorkspace(workspaceContext, studentId);
+    await this.loadStudentInScope(authUser.id, workspaceContext, studentId, "students.edit");
     const before = await this.loadGuardianLinkForStudent(workspaceContext, studentId, guardianLinkId);
 
     const updated = await this.repository.updateStudentGuardian(guardianLinkId, {
@@ -400,7 +433,7 @@ export class StudentsService {
     guardianLinkId: string,
     correlationId: string | null,
   ): Promise<GuardianLink> {
-    await this.loadStudentInWorkspace(workspaceContext, studentId);
+    await this.loadStudentInScope(authUser.id, workspaceContext, studentId, "students.edit");
     await this.loadGuardianLinkForStudent(workspaceContext, studentId, guardianLinkId);
 
     const updated = await this.repository.setPrimaryGuardianTransaction(studentId, guardianLinkId);
@@ -433,7 +466,7 @@ export class StudentsService {
     studentId: string,
     correlationId: string | null,
   ): Promise<QrIssueResponse> {
-    const student = await this.loadStudentInWorkspace(workspaceContext, studentId);
+    const student = await this.loadStudentInScope(authUser.id, workspaceContext, studentId, "students.edit");
     const active = await this.repository.findActiveQrForStudent(student.id);
     if (active) {
       throw new QrAlreadyActiveException();
@@ -462,7 +495,7 @@ export class StudentsService {
     body: QrReissueRequest,
     correlationId: string | null,
   ): Promise<QrIssueResponse> {
-    const student = await this.loadStudentInWorkspace(workspaceContext, studentId);
+    const student = await this.loadStudentInScope(authUser.id, workspaceContext, studentId, "students.edit");
     const rawToken = this.generateRawQrToken();
     const tokenHash = this.hashQrToken(rawToken);
 
@@ -497,7 +530,11 @@ export class StudentsService {
    * Mode is Phase 5, Finance is Phase 6 — so they are explicitly REJECTED
    * with a validation error rather than silently treated as GLOBAL.
    */
-  async resolveQr(workspaceContext: WorkspaceContext, body: QrResolveRequest): Promise<QrResolveResponse> {
+  async resolveQr(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    body: QrResolveRequest,
+  ): Promise<QrResolveResponse> {
     if (body.context !== GLOBAL_CONTEXT) {
       throw new ValidationApiException({
         context: [`سياق "${body.context}" غير مدعوم بعد — فقط GLOBAL متاح في هذه المرحلة.`],
@@ -514,6 +551,15 @@ export class StudentsService {
 
     const student = await this.repository.findStudentById(credential.studentId);
     if (!student || student.workspaceId !== workspaceContext.workspaceId) {
+      throw new QrInvalidException();
+    }
+
+    // Group-Scope Security Delta: GLOBAL QR resolve must never become a
+    // bypass around Group Scope — a SELECTED_GROUPS caller scanning a
+    // Group B student's QR gets the exact same QR_INVALID as an unknown/
+    // revoked token (no distinction that would confirm the student exists
+    // but is out of scope).
+    if (!(await this.isStudentInScope(workspaceContext.workspaceId, authUser.id, "students.view_basic", student.id))) {
       throw new QrInvalidException();
     }
 
@@ -545,12 +591,61 @@ export class StudentsService {
     return createHash("sha256").update(rawToken).digest("hex");
   }
 
-  private async loadStudentInWorkspace(workspaceContext: WorkspaceContext, studentId: string): Promise<StudentRow> {
+  /**
+   * Loads a Student that must exist in this workspace AND be within the
+   * caller's Group Scope for `permission` — 404 (safe no-leak, no
+   * distinction from "does not exist") on either failure. Replaces the
+   * former workspace-only `loadStudentInWorkspace` (see class doc comment).
+   */
+  private async loadStudentInScope(
+    authUserId: string,
+    workspaceContext: WorkspaceContext,
+    studentId: string,
+    permission: ScopedPermission,
+  ): Promise<StudentRow> {
     const student = await this.repository.findStudentById(studentId);
     if (!student || student.workspaceId !== workspaceContext.workspaceId) {
       throw new ResourceNotFoundException();
     }
+    if (!(await this.isStudentInScope(workspaceContext.workspaceId, authUserId, permission, student.id))) {
+      throw new ResourceNotFoundException();
+    }
     return student;
+  }
+
+  /**
+   * Resolves the group-id restriction to apply to a `searchStudents` call
+   * for `permission`: `undefined` means unrestricted (ALL_GROUPS/Owner),
+   * an array (possibly empty) means restrict to students with an
+   * Enrollment tied to one of these groups. Mirrors
+   * `PermissionResolverService.isGroupInScope`'s own grant lookup but
+   * returns the full group-id set rather than testing one id, since
+   * search needs to filter a result set, not gate one resource.
+   */
+  private async resolveGroupScopeFilter(
+    workspaceId: string,
+    authUserId: string,
+    permission: ScopedPermission,
+  ): Promise<string[] | undefined> {
+    const grant = await this.permissionResolver.hasPermission(workspaceId, authUserId, permission);
+    if (!grant) return []; // defensive — PermissionGuard already required this permission workspace-wide
+    if (grant.scope === "ALL_GROUPS") return undefined;
+    return grant.groupIds ?? [];
+  }
+
+  /** Single-student version of {@link resolveGroupScopeFilter} — is `studentId` within the caller's Group Scope for `permission`? */
+  private async isStudentInScope(
+    workspaceId: string,
+    authUserId: string,
+    permission: ScopedPermission,
+    studentId: string,
+  ): Promise<boolean> {
+    const restrict = await this.resolveGroupScopeFilter(workspaceId, authUserId, permission);
+    if (restrict === undefined) return true; // ALL_GROUPS/Owner
+    if (restrict.length === 0) return false;
+    const studentGroupIds = await this.repository.listGroupIdsForStudent(studentId);
+    const allowed = new Set(restrict);
+    return studentGroupIds.some((id) => allowed.has(id));
   }
 
   private async loadGuardianLinkForStudent(

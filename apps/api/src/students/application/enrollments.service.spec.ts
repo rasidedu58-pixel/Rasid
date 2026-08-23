@@ -26,7 +26,7 @@ describe("EnrollmentsService", () => {
     teamRepo = new InMemoryTeamRepository();
     resolver = new PermissionResolverService(teamRepo);
     previewTokens = new PreviewTokenService();
-    studentsService = new StudentsService(repo);
+    studentsService = new StudentsService(repo, resolver);
     service = new EnrollmentsService(repo, resolver, previewTokens);
 
     owner = { id: "u-owner", email: "owner@example.com" };

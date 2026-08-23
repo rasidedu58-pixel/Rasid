@@ -211,9 +211,28 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
     } else if (filter.normalizedNameQuery) {
       rows = rows.filter((s) => s.searchNameNormalized.includes(filter.normalizedNameQuery!));
     }
+    if (filter.restrictToGroupIds !== undefined) {
+      const allowed = new Set(filter.restrictToGroupIds);
+      const inScope = new Set<string>();
+      for (const enrollment of this.enrollmentsById.values()) {
+        const groupMonth = this.groupMonthsById.get(enrollment.groupMonthId);
+        if (groupMonth && allowed.has(groupMonth.groupId)) inScope.add(enrollment.studentId);
+      }
+      rows = rows.filter((s) => inScope.has(s.id));
+    }
     rows.sort((a, b) => a.id.localeCompare(b.id));
     if (filter.cursorId) rows = rows.filter((s) => s.id > filter.cursorId!);
     return rows.slice(0, filter.limit);
+  }
+
+  async listGroupIdsForStudent(studentId: string): Promise<string[]> {
+    const groupIds = new Set<string>();
+    for (const enrollment of this.enrollmentsById.values()) {
+      if (enrollment.studentId !== studentId) continue;
+      const groupMonth = this.groupMonthsById.get(enrollment.groupMonthId);
+      if (groupMonth) groupIds.add(groupMonth.groupId);
+    }
+    return [...groupIds];
   }
 
   async insertGuardian(input: InsertGuardianInput): Promise<GuardianRow> {

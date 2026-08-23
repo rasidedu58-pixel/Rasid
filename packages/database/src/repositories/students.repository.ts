@@ -6,11 +6,12 @@
  * exactly. Business/authorization decisions (permission checks, preview-
  * token validation) live in apps/api's application service layer, NOT here.
  */
-import { and, asc, eq, gt, isNull, sql as rawSql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, sql as rawSql } from "drizzle-orm";
 import { students } from "../schema/students";
 import { guardians, studentGuardians } from "../schema/guardians";
 import { qrCredentials } from "../schema/qr-credentials";
 import { enrollments } from "../schema/enrollments";
+import { groupMonths } from "../schema/groups";
 import { sessions } from "../schema/sessions";
 import { auditEvents } from "../schema/audit";
 import type { Db } from "./identity.repository";
@@ -129,6 +130,36 @@ export interface StudentSearchFilter {
   guardianNormalizedPhone?: string;
   limit: number;
   cursorId?: string;
+  /**
+   * Student Group-Scope Security Delta: when the caller's effective grant
+   * for `students.view_basic`/`students.edit` is SELECTED_GROUPS (not
+   * ALL_GROUPS/Owner), the application layer passes the caller's granted
+   * group ids here and every branch below is additionally restricted to
+   * students who have (or have had) at least one Enrollment tied to a
+   * GroupMonth of one of these groups. `undefined` means "no restriction"
+   * (ALL_GROUPS/Owner caller); an explicit empty array means "restricted,
+   * but zero groups granted" and must match nothing, not everything.
+   */
+  restrictToGroupIds?: string[];
+}
+
+/**
+ * Subquery of student ids that have (or have had) at least one Enrollment
+ * anchored to a GroupMonth of one of `groupIds` — the only real link
+ * between a Student and a Group, since `students`/`guardians` carry no
+ * `group_id` column of their own (documented architecture decision, see
+ * `StudentsService`'s doc comment). Deliberately NOT filtered by enrollment
+ * status: a SELECTED_GROUPS assistant who once managed a since-withdrawn/
+ * transferred student in their own group keeps visibility into that
+ * historical record — only students with NO enrollment ever tied to any of
+ * the caller's granted groups are out of scope.
+ */
+function studentsInGroupScopeSubquery(db: Db, groupIds: string[]) {
+  return db
+    .select({ studentId: enrollments.studentId })
+    .from(enrollments)
+    .innerJoin(groupMonths, eq(groupMonths.id, enrollments.groupMonthId))
+    .where(inArray(groupMonths.groupId, groupIds));
 }
 
 /**
@@ -139,26 +170,35 @@ export interface StudentSearchFilter {
  * name path via the GIN index created in migration 0015.
  */
 export async function searchStudents(db: Db, filter: StudentSearchFilter): Promise<StudentRow[]> {
+  const scopeCondition =
+    filter.restrictToGroupIds === undefined
+      ? undefined
+      : filter.restrictToGroupIds.length === 0
+        ? rawSql`false` // SELECTED_GROUPS caller with zero granted groups — matches nothing
+        : inArray(students.id, studentsInGroupScopeSubquery(db, filter.restrictToGroupIds));
+
   if (filter.studentCode) {
+    const conditions = [eq(students.workspaceId, filter.workspaceId), eq(students.studentCode, filter.studentCode)];
+    if (scopeCondition) conditions.push(scopeCondition);
     return db
       .select()
       .from(students)
-      .where(and(eq(students.workspaceId, filter.workspaceId), eq(students.studentCode, filter.studentCode)))
+      .where(and(...conditions))
       .limit(filter.limit);
   }
 
   if (filter.guardianNormalizedPhone) {
+    const conditions = [
+      eq(students.workspaceId, filter.workspaceId),
+      eq(guardians.normalizedPhone, filter.guardianNormalizedPhone),
+    ];
+    if (scopeCondition) conditions.push(scopeCondition);
     const rows = await db
       .selectDistinct({ student: students })
       .from(students)
       .innerJoin(studentGuardians, eq(studentGuardians.studentId, students.id))
       .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
-      .where(
-        and(
-          eq(students.workspaceId, filter.workspaceId),
-          eq(guardians.normalizedPhone, filter.guardianNormalizedPhone),
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(asc(students.id))
       .limit(filter.limit);
     return rows.map((r) => r.student);
@@ -170,6 +210,7 @@ export async function searchStudents(db: Db, filter: StudentSearchFilter): Promi
       rawSql`${students.searchNameNormalized} % ${filter.normalizedNameQuery}`,
     ];
     if (filter.cursorId) conditions.push(gt(students.id, filter.cursorId));
+    if (scopeCondition) conditions.push(scopeCondition);
     return db
       .select()
       .from(students)
@@ -181,12 +222,29 @@ export async function searchStudents(db: Db, filter: StudentSearchFilter): Promi
   // No query at all: plain workspace-scoped listing, cursor-paginated by id.
   const conditions = [eq(students.workspaceId, filter.workspaceId)];
   if (filter.cursorId) conditions.push(gt(students.id, filter.cursorId));
+  if (scopeCondition) conditions.push(scopeCondition);
   return db
     .select()
     .from(students)
     .where(and(...conditions))
     .orderBy(asc(students.id))
     .limit(filter.limit);
+}
+
+/**
+ * All distinct Group ids a Student has ever been Enrolled into (via any
+ * GroupMonth, any enrollment status). The Group-Scope Security Delta's
+ * primary read helper: the application layer intersects this against the
+ * caller's SELECTED_GROUPS grant to decide per-student visibility for every
+ * Student/Guardian/QR/Enrollment operation.
+ */
+export async function listGroupIdsForStudent(db: Db, studentId: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ groupId: groupMonths.groupId })
+    .from(enrollments)
+    .innerJoin(groupMonths, eq(groupMonths.id, enrollments.groupMonthId))
+    .where(eq(enrollments.studentId, studentId));
+  return rows.map((r) => r.groupId);
 }
 
 // ---------------------------------------------------------------------------

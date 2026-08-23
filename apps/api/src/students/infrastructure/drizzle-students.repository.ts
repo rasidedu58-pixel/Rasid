@@ -17,6 +17,7 @@ import {
   insertStudentGuardian,
   insertStudentsAuditEvent,
   issueQrCredential,
+  listGroupIdsForStudent,
   listGuardiansForStudent,
   listSessionsForGroupMonth,
   reissueQrCredentialTransaction,
@@ -105,6 +106,10 @@ export class DrizzleStudentsRepository implements StudentsRepositoryPort {
 
   searchStudents(filter: StudentSearchFilter): Promise<StudentRow[]> {
     return withRuntimeContext(this.runtimeCtx(filter.workspaceId), (db) => searchStudents(db, filter));
+  }
+
+  listGroupIdsForStudent(studentId: string): Promise<string[]> {
+    return withRuntimeContext(this.runtimeCtx(), (db) => listGroupIdsForStudent(db, studentId));
   }
 
   insertGuardian(input: InsertGuardianInput): Promise<GuardianRow> {
