@@ -5,3 +5,4 @@ export * from "./permission-catalog";
 export * from "./team";
 export * from "./scheduling";
 export * from "./students";
+export * from "./session-mode";

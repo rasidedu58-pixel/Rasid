@@ -5,17 +5,26 @@ import { IdentityModule } from "./identity/identity.module";
 import { TeamModule } from "./team/team.module";
 import { SchedulingModule } from "./scheduling/scheduling.module";
 import { StudentsModule } from "./students/students.module";
+import { SessionModeModule } from "./session-mode/session-mode.module";
 import { RequestIdMiddleware } from "./common/middleware/request-id.middleware";
 
 /**
  * Root application module. Phase 0 wired only infrastructure concerns
  * (config, health). Phase 1 added the identity/auth/workspace module.
  * Phase 2 added the RBAC/Team/Permissions module. Phase 3 added the
- * Months/Groups/Scheduling module. Phase 4 adds the Students/Guardians/
- * QR/Enrollment module.
+ * Months/Groups/Scheduling module. Phase 4 added the Students/Guardians/
+ * QR/Enrollment module. Phase 5 adds the Session Mode module.
  */
 @Module({
-  imports: [ConfigModule, HealthModule, IdentityModule, TeamModule, SchedulingModule, StudentsModule],
+  imports: [
+    ConfigModule,
+    HealthModule,
+    IdentityModule,
+    TeamModule,
+    SchedulingModule,
+    StudentsModule,
+    SessionModeModule,
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

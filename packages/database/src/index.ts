@@ -5,6 +5,8 @@ export * from "./repositories/identity.repository";
 export * from "./repositories/permissions.repository";
 export * from "./repositories/scheduling.repository";
 export * from "./repositories/students.repository";
+export * from "./repositories/session-mode.repository";
 export * from "./scheduling/session-generator";
 export * from "./scheduling/proration";
 export * from "./students/arabic-normalize";
+export * from "./session-mode/roster";

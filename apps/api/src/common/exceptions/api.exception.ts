@@ -141,3 +141,47 @@ export class QrAlreadyActiveException extends ApiException {
     super(409, "QR_ALREADY_ACTIVE", message, details);
   }
 }
+
+/**
+ * 422 — API Contract §12/PRD §34: `complete_session_with_missing_records`
+ * is False (Phase 5 hardcoded default — see `SessionModeService` doc
+ * comment) and at least one required record (attendance/homework) is still
+ * missing. `NO_HOMEWORK`/`ABSENT_FROM_EXAM` are resolved states, never
+ * counted as missing.
+ */
+export class SessionRecordsMissingException extends ApiException {
+  constructor(message = "توجد سجلات مطلوبة ناقصة قبل إنهاء الحصة.", details?: Record<string, unknown>) {
+    super(422, "SESSION_RECORDS_MISSING", message, details);
+  }
+}
+
+/**
+ * 409 — API Contract §12: `POST /sessions/{id}/complete` called again with a
+ * genuinely different Idempotency-Key (not a byte-identical replay, which
+ * instead returns the cached 200 response) against a Session that is
+ * already COMPLETED. No effects are re-run.
+ */
+export class SessionAlreadyCompletedException extends ApiException {
+  constructor(message = "هذه الحصة مكتملة بالفعل.", details?: Record<string, unknown>) {
+    super(409, "SESSION_ALREADY_COMPLETED", message, details);
+  }
+}
+
+/**
+ * 422 — API Contract §7.5/§17: a batch write (attendance/homework/exam
+ * scores) rejected because at least one row was invalid (out-of-roster
+ * enrollment, wrong GroupMonth, etc.) — the WHOLE batch is rolled back, no
+ * partial write ever committed.
+ */
+export class BatchValidationFailedException extends ApiException {
+  constructor(message = "فشل التحقق من دفعة السجلات؛ لم يتم حفظ أي صف.", details?: Record<string, unknown>) {
+    super(422, "BATCH_VALIDATION_FAILED", message, details);
+  }
+}
+
+/** 422 — API Contract §12: exam score outside [0, max_score]. No partial save. */
+export class ExamScoreOutOfRangeException extends ApiException {
+  constructor(message = "الدرجة خارج النطاق المسموح.", details?: Record<string, unknown>) {
+    super(422, "EXAM_SCORE_OUT_OF_RANGE", message, details);
+  }
+}

@@ -6,7 +6,8 @@
  * schedule_rules), `sessions`, and `idempotency` (idempotency_records) are
  * implemented as of Phase 3. `students`, `guardians` (guardians +
  * student_guardians), `qrCredentials`, and `enrollments` are implemented as
- * of Phase 4 — see each module's own comment. All other modules remain
+ * of Phase 4. `sessionExams` and `sessionRecords` are implemented as of
+ * Phase 5 — see each module's own comment. All other modules remain
  * structural placeholders reserved for later phases.
  */
 export * as identity from "./identity";
@@ -19,6 +20,8 @@ export * as guardians from "./guardians";
 export * as qrCredentials from "./qr-credentials";
 export * as enrollments from "./enrollments";
 export * as sessions from "./sessions";
+export * as sessionExams from "./session-exams";
+export * as sessionRecords from "./session-records";
 export * as finance from "./finance";
 export * as attention from "./attention";
 export * as followup from "./followup";

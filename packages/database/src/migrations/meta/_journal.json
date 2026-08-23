@@ -127,6 +127,27 @@
       "when": 1787439000000,
       "tag": "0019_rls_phase4",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787439100000,
+      "tag": "0020_sessions_enrollments_group_month_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787439200000,
+      "tag": "0021_session_exams_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787439300000,
+      "tag": "0022_rls_phase5",
+      "breakpoints": true
     }
   ]
 }
