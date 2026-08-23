@@ -49,7 +49,7 @@ export class PermissionResolverService {
       return PERMISSION_KEYS.map((permission) => ({ permission, scope: "ALL_GROUPS" as const }));
     }
 
-    const grants = await this.repository.listActiveGrants(membership.id);
+    const grants = await this.repository.listActiveGrants(membership.id, workspaceId);
     return this.computeClosure(
       grants.map((g) => ({
         permissionKey: g.grant.permissionKey as PermissionKey,

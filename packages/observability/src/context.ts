@@ -11,6 +11,7 @@ export type ExecutionContext = {
   readonly requestId?: string;
   readonly jobId?: string;
   readonly workspaceId?: string;
+  readonly userId?: string;
   readonly [key: string]: unknown;
 };
 

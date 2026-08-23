@@ -19,7 +19,15 @@ export interface TeamRepositoryPort {
     workspaceId: string,
   ): Promise<MembershipRow | undefined>;
   listMembershipsForWorkspace(workspaceId: string): Promise<MembershipRow[]>;
-  listActiveGrants(membershipId: string): Promise<GrantWithScopes[]>;
+  /**
+   * `workspaceId` is optional at the port level (kept backward-compatible
+   * for test doubles) but the real `DrizzleTeamRepository` always receives
+   * it explicitly from `PermissionResolverService` — this call is only
+   * ever made from `PermissionGuard`, i.e. BEFORE the request-context
+   * interceptor runs, so ambient ExecutionContext is not yet available and
+   * an explicit `workspaceId` is required for RLS to admit the read.
+   */
+  listActiveGrants(membershipId: string, workspaceId?: string): Promise<GrantWithScopes[]>;
   replaceMembershipGrants(params: {
     workspaceId: string;
     membershipId: string;

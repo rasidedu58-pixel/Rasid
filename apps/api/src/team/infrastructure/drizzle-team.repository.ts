@@ -9,54 +9,128 @@ import {
   listActiveGrantsForMembership,
   listMembershipsForWorkspace,
   replaceMembershipGrants,
+  withRuntimeContext,
   type AuditEventInput,
   type AuditEventRow,
   type DesiredGrantInput,
   type GrantWithScopes,
   type MembershipRow,
 } from "@academic-precision/database";
+import { getContext } from "@academic-precision/observability";
 import type { TeamRepositoryPort } from "../application/ports/team-repository.port";
 
 /**
  * Real (PostgreSQL/Drizzle) implementation of {@link TeamRepositoryPort}.
  * Thin adapter only — all persistence/transaction logic lives in
  * packages/database, mirroring `DrizzleIdentityRepository` (Phase 1).
+ *
+ * All of Phase 2's Team module operations already have an authorized
+ * `workspaceId` available by the time they reach these functions (resolved
+ * and verified by `PermissionGuard` before the service layer runs), so
+ * every method threads it (plus `app.user_id`) through
+ * `withRuntimeContext`. Per-method comments explain where that
+ * `workspaceId` comes from — an explicit method parameter where one is
+ * already available and more trustworthy than ambient context, or the
+ * ambient `ExecutionContext` (set by `RequestContextInterceptor` from
+ * `PermissionGuard`'s resolved `WORKSPACE_CONTEXT_REQUEST_KEY`) otherwise.
  */
 @Injectable()
 export class DrizzleTeamRepository implements TeamRepositoryPort {
+  /**
+   * Called only from `TeamService.loadTargetMembership`, i.e. after
+   * `PermissionGuard` has already run and `RequestContextInterceptor` has
+   * ambient context active — no explicit workspaceId parameter exists on
+   * this method, so read both values from context.
+   */
   findMembershipById(membershipId: string): Promise<MembershipRow | undefined> {
-    return findMembershipById(getDb(), membershipId);
+    const ctx = getContext();
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId: ctx?.workspaceId as string | undefined },
+      (db) => findMembershipById(db, membershipId),
+    );
   }
 
+  /**
+   * Called ONLY from `PermissionGuard.canActivate` (via
+   * `PermissionResolverService.findActiveMembership`) — BEFORE
+   * `RequestContextInterceptor` runs (Guards execute before Interceptors),
+   * so no ambient context exists yet. Both `userId`/`workspaceId` are
+   * already explicit parameters here — use them directly rather than
+   * (unavailable) ambient context.
+   */
   findMembershipByUserAndWorkspace(userId: string, workspaceId: string): Promise<MembershipRow | undefined> {
-    return findActiveOrAnyMembership(getDb(), workspaceId, userId);
+    return withRuntimeContext({ userId, workspaceId }, (db) => findActiveOrAnyMembership(db, workspaceId, userId));
   }
 
+  /** Backs `GET /team`; `workspaceId` is an explicit, guard-verified parameter — prefer it over ambient context. */
   listMembershipsForWorkspace(workspaceId: string): Promise<MembershipRow[]> {
-    return listMembershipsForWorkspace(getDb(), workspaceId);
+    const ctx = getContext();
+    return withRuntimeContext({ userId: ctx?.userId, workspaceId }, (db) => listMembershipsForWorkspace(db, workspaceId));
   }
 
-  listActiveGrants(membershipId: string): Promise<GrantWithScopes[]> {
-    return listActiveGrantsForMembership(getDb(), membershipId);
+  /**
+   * Called ONLY from `PermissionResolverService.resolveEffectivePermissions`,
+   * itself only reachable from `PermissionGuard` — i.e. before
+   * `RequestContextInterceptor` runs. `workspaceId` is passed explicitly by
+   * the resolver (see `PermissionResolverService`) for exactly this reason;
+   * fall back to ambient context only for callers/tests that omit it.
+   */
+  listActiveGrants(membershipId: string, workspaceId?: string): Promise<GrantWithScopes[]> {
+    const ctx = getContext();
+    const resolvedWorkspaceId = workspaceId ?? (ctx?.workspaceId as string | undefined);
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId: resolvedWorkspaceId },
+      (db) => listActiveGrantsForMembership(db, membershipId),
+    );
   }
 
+  /** `params.workspaceId` is an explicit, guard-verified parameter — prefer it over ambient context. */
   replaceMembershipGrants(params: {
     workspaceId: string;
     membershipId: string;
     createdByUserId: string;
     desiredGrants: DesiredGrantInput[];
   }): Promise<{ before: GrantWithScopes[]; after: GrantWithScopes[] }> {
-    return replaceMembershipGrants(getDb(), params);
+    const ctx = getContext();
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId: params.workspaceId },
+      (db) => replaceMembershipGrants(db, params),
+    );
   }
 
+  /**
+   * Called only from `TeamService.disableMembership`, after
+   * `loadTargetMembership` has already verified the target belongs to the
+   * caller's own (ambient-context) workspace — no explicit workspaceId
+   * parameter exists on this method, so read both values from context.
+   */
   disableMembership(membershipId: string): Promise<MembershipRow> {
-    return disableMembership(getDb(), membershipId);
+    const ctx = getContext();
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId: ctx?.workspaceId as string | undefined },
+      (db) => disableMembership(db, membershipId),
+    );
   }
 
+  /** `input.workspaceId` is an explicit, guard-verified parameter — prefer it over ambient context. */
   insertAuditEvent(input: AuditEventInput): Promise<AuditEventRow> {
-    return insertAuditEvent(getDb(), input);
+    const ctx = getContext();
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId: input.workspaceId },
+      (db) => insertAuditEvent(db, input),
+    );
   }
 
+  /**
+   * Phase 2 testing/foundation helper — NOT reachable from any public HTTP
+   * route (see packages/database's `createMembershipForTesting` doc
+   * comment). Uses the plain (unscoped) `getDb()` connection directly:
+   * fixture/test-arrangement helpers are expected to run against a
+   * privileged connection in the new RLS integration tests (seed via the
+   * admin connection, then attempt access with the restricted runtime
+   * connection under test) — this is standard RLS-test practice and is not
+   * part of the runtime API request path this security delta hardens.
+   */
   createMembershipForTesting(input: {
     workspaceId: string;
     userId: string;

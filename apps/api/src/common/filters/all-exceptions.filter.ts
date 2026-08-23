@@ -1,6 +1,9 @@
 import { ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpStatus } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { createLogger } from "@academic-precision/observability";
 import { REQUEST_ID_HEADER } from "../middleware/request-id.middleware";
+
+const logger = createLogger("api:unhandled-exceptions");
 
 /**
  * Global exception filter mapping every thrown error to the approved API
@@ -10,6 +13,13 @@ import { REQUEST_ID_HEADER } from "../middleware/request-id.middleware";
  *   "error": { "code": "STRING_CODE", "message": "human message", "details": {} },
  *   "requestId": "req_..."
  * }
+ *
+ * Any exception that isn't a recognized `ApiException`/`HttpException` maps
+ * to a generic 500 `INTERNAL_SERVER_ERROR` in the response body (per API
+ * Contract §12 — the client never sees stack traces/internals), but is
+ * logged server-side with its requestId so it's actually diagnosable —
+ * silently swallowing unexpected 500s makes production incidents
+ * undebuggable.
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -21,6 +31,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const requestId = String(request.headers[REQUEST_ID_HEADER] ?? "req_unknown");
 
     const { status, code, message, details } = this.mapException(exception);
+
+    if (!(exception instanceof HttpException)) {
+      logger.error({ err: exception, requestId, path: request.url }, "Unhandled exception");
+    }
 
     response.status(status).send({
       error: { code, message, details },

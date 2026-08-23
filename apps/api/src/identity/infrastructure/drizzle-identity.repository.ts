@@ -1,38 +1,84 @@
 import { Injectable } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import {
   completeOnboarding,
   createUserWorkspaceMembership,
   findMembership,
-  getDb,
   listMembershipsForUser,
+  withRuntimeContext,
   type MembershipWithWorkspace,
   type OnboardingCompleteInput,
   type ProvisionedIdentity,
   type ProvisionInput,
   type WorkspaceRow,
 } from "@academic-precision/database";
+import { getContext } from "@academic-precision/observability";
 import type { IdentityRepositoryPort } from "../application/ports/identity-repository.port";
 
 /**
  * Real (PostgreSQL/Drizzle) implementation of {@link IdentityRepositoryPort}.
  * Thin adapter only — all persistence/transaction logic lives in
  * packages/database (single source of truth, reused by any future caller).
+ *
+ * Every method threads `app.user_id`/`app.workspace_id` into the RLS
+ * Security Delta's `withRuntimeContext` — see per-method comments for which
+ * context values each one runs under and why.
  */
 @Injectable()
 export class DrizzleIdentityRepository implements IdentityRepositoryPort {
+  /**
+   * Pre-generates the workspace's id (Node's built-in `crypto.randomUUID()`
+   * — no new dependency needed) BEFORE the insert, so `app.workspace_id`
+   * can be `SET LOCAL`'d to it up front: the 0005 tenant-isolation RLS
+   * policy's `WITH CHECK` (same expression as `USING`, since it has no
+   * explicit `FOR` clause) would otherwise reject the INSERT because the id
+   * isn't known — and couldn't be `SET LOCAL`'d — until after the row
+   * exists. `userId` is also set (`input.authUserId`) so the memberships
+   * insert's `WITH CHECK` (`user_id = current_setting('app.user_id')`) is
+   * satisfiable for the owner's own membership row. When this call instead
+   * hits the idempotent "already provisioned" branch, the pregenerated id
+   * is simply unused for the read-back — that path relies on the new
+   * `memberships_self_read`/`workspaces_self_membership_read` policies
+   * (keyed on `app.user_id`, not `app.workspace_id`).
+   */
   provision(input: ProvisionInput): Promise<ProvisionedIdentity> {
-    return createUserWorkspaceMembership(getDb(), input);
+    const pregeneratedWorkspaceId = randomUUID();
+    return withRuntimeContext(
+      { userId: input.authUserId, workspaceId: pregeneratedWorkspaceId },
+      (db) => createUserWorkspaceMembership(db, input, pregeneratedWorkspaceId),
+    );
   }
 
+  /**
+   * Backs `GET /me`: fundamentally cross-workspace-by-self-identity (a
+   * user's memberships may span multiple workspaces at once), so only
+   * `app.user_id` is set — never require a single `workspaceId` here. This
+   * relies on the `memberships_self_read`/`workspaces_self_membership_read`
+   * self-access policies, not the 0005 workspace-scoped ones.
+   */
   listMemberships(userId: string): Promise<MembershipWithWorkspace[]> {
-    return listMembershipsForUser(getDb(), userId);
+    return withRuntimeContext({ userId }, (db) => listMembershipsForUser(db, userId));
   }
 
+  /**
+   * Backs `GET /me/workspaces/:id/context`: checks one specific workspace,
+   * already available as an explicit, guard-verified parameter — set both
+   * `app.user_id` and `app.workspace_id` to it.
+   */
   findMembership(workspaceId: string, userId: string): Promise<MembershipWithWorkspace | undefined> {
-    return findMembership(getDb(), workspaceId, userId);
+    return withRuntimeContext({ userId, workspaceId }, (db) => findMembership(db, workspaceId, userId));
   }
 
+  /**
+   * Updates the target workspace row directly; `input.workspaceId` is
+   * already an explicit, more-trustworthy parameter than whatever happens
+   * to be in ambient request context, so it wins.
+   */
   completeOnboarding(input: OnboardingCompleteInput): Promise<WorkspaceRow> {
-    return completeOnboarding(getDb(), input);
+    const ctx = getContext();
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId: input.workspaceId },
+      (db) => completeOnboarding(db, input),
+    );
   }
 }

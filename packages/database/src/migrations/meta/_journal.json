@@ -29,6 +29,20 @@
       "when": 1787437600000,
       "tag": "0005_rls_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787437700000,
+      "tag": "0006_runtime_role_least_privilege",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787437800000,
+      "tag": "0007_fix_rls_empty_string_guc",
+      "breakpoints": true
     }
   ]
 }

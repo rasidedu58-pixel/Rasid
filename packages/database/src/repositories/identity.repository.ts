@@ -86,10 +86,24 @@ async function loadProvisionedIdentity(
  * Idempotently ensures a User + owner Workspace + owner Membership exist
  * for the given verified Supabase auth user id. Safe under concurrent
  * duplicate calls — see module-level concurrency note above.
+ *
+ * `pregeneratedWorkspaceId`: since the 0005 tenant-isolation RLS policies
+ * apply the same expression to `WITH CHECK` as `USING` (a policy declared
+ * without an explicit `FOR` clause governs INSERT too), an INSERT whose
+ * `workspace_id` doesn't match the already-`SET LOCAL`'d `app.workspace_id`
+ * is rejected by RLS for the least-privilege runtime role. The caller (see
+ * `DrizzleIdentityRepository.provision`) pre-generates this id and sets
+ * `app.workspace_id` to it via `withRuntimeContext` BEFORE this function's
+ * transaction runs, so the new workspace/membership rows' `workspace_id`
+ * always matches what RLS expects — even though this id is only used when
+ * a NEW workspace actually gets created below (the idempotent
+ * already-provisioned branch reads back existing rows instead, relying on
+ * the `*_self_read` RLS policies keyed on `app.user_id`, not this id).
  */
 export async function createUserWorkspaceMembership(
   db: Db,
   input: ProvisionInput,
+  pregeneratedWorkspaceId: string,
 ): Promise<ProvisionedIdentity> {
   return db.transaction(async (tx) => {
     const insertedUsers = await tx
@@ -121,6 +135,7 @@ export async function createUserWorkspaceMembership(
     const [newWorkspace] = await tx
       .insert(workspaces)
       .values({
+        id: pregeneratedWorkspaceId,
         ownerUserId: newUser.id,
         name: input.fullName,
         workspaceType: DEFAULT_WORKSPACE_TYPE,

@@ -14,7 +14,19 @@ const serverEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "staging", "production", "test"]).optional(),
   PORT: z.coerce.number().int().positive().optional(),
 
+  /**
+   * Runtime application connection string, using the least-privilege
+   * `app_runtime` Postgres role (NOBYPASSRLS) — used by apps/api at request
+   * time. See packages/database's RLS Security Delta migration
+   * (0006_runtime_role_least_privilege.sql).
+   */
   DATABASE_URL: z.string().optional(),
+  /**
+   * Privileged connection string (table-owning `postgres` role) used ONLY
+   * for running migrations (`pnpm db:migrate` / `drizzle-kit generate`) —
+   * never used by request-serving application code.
+   */
+  MIGRATION_DATABASE_URL: z.string().optional(),
 
   /**
    * Base Supabase project URL. Also used server-side to derive the JWKS
