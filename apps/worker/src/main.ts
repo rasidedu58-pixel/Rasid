@@ -43,9 +43,7 @@ function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
   });
 }
 
-async function runPollingLoop(state: { stopped: boolean }): Promise<void> {
-  const workerDb = getWorkerDb();
-
+async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<typeof getWorkerDb>): Promise<void> {
   while (!state.stopped) {
     const bootId = randomUUID();
     try {
@@ -74,7 +72,30 @@ function bootstrap(): void {
     logger.info({ bootId }, "Academic Precision worker starting (Phase 7 — outbox dispatcher).");
   });
 
-  const loopPromise = runPollingLoop(state);
+  // Resolved SYNCHRONOUSLY, before any connection opens or the polling loop
+  // starts — `getWorkerDb()` throws immediately (via `getWorkerDatabaseUrl()`)
+  // if `WORKER_DATABASE_URL` is unset. Deliberately NOT called from inside
+  // `runPollingLoop` (an async function): a throw there would surface as an
+  // unhandled promise rejection with a generic stack trace instead of a
+  // clean, explicit fail-fast. There is no fallback to `DATABASE_URL`
+  // (app_runtime's narrower, wrong-shaped grants) or `MIGRATION_DATABASE_URL`
+  // (the privileged/BYPASSRLS role) — either would silently run the worker
+  // under the wrong identity instead of failing loudly.
+  let workerDb: ReturnType<typeof getWorkerDb>;
+  try {
+    workerDb = getWorkerDb();
+  } catch (error) {
+    logger.error(
+      { error },
+      "FATAL: WORKER_DATABASE_URL is not configured (or invalid). The worker requires its own " +
+        "dedicated app_worker connection — see packages/database/src/migrations/README.md's " +
+        "'Three connection strings' section for provisioning steps. Refusing to start; will NOT " +
+        "fall back to DATABASE_URL or MIGRATION_DATABASE_URL.",
+    );
+    process.exit(1);
+  }
+
+  const loopPromise = runPollingLoop(state, workerDb);
 
   registerGracefulShutdown(logger, async () => {
     state.stopped = true;
@@ -86,4 +107,12 @@ function bootstrap(): void {
   });
 }
 
-bootstrap();
+export { bootstrap, runPollingLoop };
+
+// `require.main === module` (CommonJS — this package compiles to CommonJS,
+// see tsconfig.json) guards the real process bootstrap so this module can
+// be safely `import`ed from a test (see `main.test.ts`) without it
+// auto-connecting to a database or calling `process.exit`.
+if (require.main === module) {
+  bootstrap();
+}

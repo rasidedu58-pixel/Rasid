@@ -10,10 +10,10 @@ environment's `DATABASE_URL`.
 Phase 0 ships this directory empty (placeholder schema only) — real migrations
 begin once the approved domain schema is implemented in a later phase.
 
-## Two connection strings (RLS Security Delta)
+## Three connection strings (RLS Security Delta + Phase 7 Worker Boundary)
 
-As of `0006_runtime_role_least_privilege.sql`, this package uses **two**
-separate connection strings, never one:
+As of `0032_app_worker_role.sql`, this package uses **three** separate
+connection strings, never fewer, and never one standing in for another:
 
 - `DATABASE_URL` — the RUNTIME application connection, used by `apps/api` at
   request time. Authenticates as the least-privilege `app_runtime` Postgres
@@ -23,20 +23,65 @@ separate connection strings, never one:
   `pnpm db:migrate` / `drizzle-kit generate`. Authenticates as the
   table-owning `postgres` role (BYPASSRLS by virtue of ownership), which is
   required to run DDL. Never used by request-serving application code.
+- `WORKER_DATABASE_URL` — used ONLY by `apps/worker`'s outbox dispatcher
+  (`packages/database/src/worker/outbox-dispatcher.ts`). Authenticates as
+  the dedicated, least-privilege `app_worker` Postgres role
+  (`NOBYPASSRLS`, see `0032_app_worker_role.sql`). This is a genuinely
+  THIRD role, not a reuse of `app_runtime` or `postgres`: `app_runtime`
+  has never had UPDATE on `outbox_events` (`0024_outbox_events.sql`'s own
+  boundary — "status transitions belong to a future worker phase and its
+  own role"), and widening it just to make a worker easy to bolt on would
+  give every HTTP request-serving connection a capability it never needs.
+  `app_worker` gets its own narrower grants instead (outbox claim/process
+  + read/write only the domain tables the rule engine touches — see
+  `0032`/`0033`'s own comments for the exact list).
 
-`0006` creates the `app_runtime` role with `NOLOGIN` — no password is ever
-committed to source control. Enable it per environment with a one-time,
-out-of-band statement run directly against that environment's database
-(value stored only in the deployment's secret store / local `.env`, never
-in git):
+### Provisioning a role's password per environment
+
+`0006` creates `app_runtime` and `0032` creates `app_worker`, both with
+`NOLOGIN` — **no password is ever committed to source control, and no
+migration file itself contains a password.** Enable each role with a
+one-time, out-of-band statement run directly against that environment's
+database (the generated password is stored ONLY in that environment's
+secret store / local `.env`, never in git, never in a migration):
 
 ```sql
-ALTER ROLE app_runtime WITH LOGIN PASSWORD '<secret, generated per environment>';
+ALTER ROLE app_runtime WITH LOGIN PASSWORD '<generated-secret>';
+ALTER ROLE app_worker  WITH LOGIN PASSWORD '<generated-secret>';
 ```
 
-After that, set `DATABASE_URL` for that environment to
-`postgresql://app_runtime.<project-ref>:<password>@<host>:5432/postgres`
-(Supabase's Session Pooler accepts custom roles via the same
-`<role>.<project-ref>` username convention already used for `postgres`),
-and set `MIGRATION_DATABASE_URL` to the existing privileged `postgres`
-connection string.
+Generate a fresh, sufficiently random secret per role per environment
+(e.g. `openssl rand -base64 24`, or your secret manager's own generator) —
+never reuse one role's password for another role, and never reuse a
+password across environments (local/staging/production each get their
+own `ALTER ROLE ... PASSWORD` run against their own database).
+
+### Expected connection-string format (Supabase Session Pooler)
+
+Supabase's Session Pooler (Supavisor) accepts custom roles via the same
+`<role>.<project-ref>` username convention already used for `postgres` —
+the ONLY thing that changes between the three connection strings is the
+role prefix and password; host/port/database stay the same:
+
+```text
+DATABASE_URL=postgresql://app_runtime.<project-ref>:<app_runtime-password>@<host>:5432/postgres
+MIGRATION_DATABASE_URL=postgresql://postgres.<project-ref>:<postgres-password>@<host>:5432/postgres
+WORKER_DATABASE_URL=postgresql://app_worker.<project-ref>:<app_worker-password>@<host>:5432/postgres
+```
+
+A bare `app_worker` username (no `.<project-ref>` suffix) will fail to
+connect through the pooler with `no tenant identifier provided` — the
+suffix is required, exactly as it already is for `app_runtime`.
+
+### Fail-fast, not fallback
+
+`apps/worker` reads `WORKER_DATABASE_URL` via
+`packages/database/src/env.ts`'s `getWorkerDatabaseUrl()`, and
+`apps/worker/src/main.ts` resolves it synchronously at the very start of
+`bootstrap()` — before opening any connection or entering the polling
+loop. If it is unset, the worker logs a clear error naming the missing
+variable and exits with a non-zero status immediately. It never falls
+back to `DATABASE_URL` (which would silently reuse `app_runtime`'s
+narrower, wrong-shaped grants) or to `MIGRATION_DATABASE_URL` (which
+would silently grant the worker `BYPASSRLS`/table-owner privileges it
+must never have).
