@@ -190,7 +190,7 @@ export class SessionModeController {
   }
 
   @Get(":id/review")
-  @RequirePermission("groups.view")
+  @RequirePermission("attendance.read")
   @ApiOperation({ summary: "Server-computed canComplete/missing (GET /api/v1/sessions/:id/review)" })
   review(
     @CurrentUser() user: VerifiedSupabaseToken,

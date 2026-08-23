@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDb, withRuntimeContext } from "@academic-precision/database";
+import { closeDb, completeSessionTransaction, findFeatureFlagEnabled, withRuntimeContext } from "@academic-precision/database";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const MIGRATION_DATABASE_URL = process.env.MIGRATION_DATABASE_URL;
@@ -224,5 +224,70 @@ describe.skipIf(!hasLiveCreds)("Phase 5 Session Mode Security (live Postgres)", 
       admin`INSERT INTO session_records (id, workspace_id, group_month_id, session_id, enrollment_id, exam_status, exam_score)
         VALUES (${randomUUID()}, ${workspaceAId}, ${groupMonthAId}, ${sessionAId}, ${enrollmentAId}, 'ABSENT_FROM_EXAM', 0)`,
     ).rejects.toThrow(/violates check constraint/i);
+  });
+
+  describe("Phase 5 Closure Delta", () => {
+    it("8. feature_flags: complete_session_with_missing_records is seeded false, real DB-backed, app_runtime SELECT-only", async () => {
+      const enabled = await withRuntimeContext({}, (db) => findFeatureFlagEnabled(db, "complete_session_with_missing_records"));
+      expect(enabled).toBe(false);
+
+      // No write grant — app_runtime cannot flip it (no management surface authorized yet).
+      await expect(
+        withRuntimeContext({}, (db) =>
+          db.execute(sql`UPDATE feature_flags SET enabled = true WHERE key = 'complete_session_with_missing_records'`),
+        ),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    it("9. completeSessionTransaction inserts a SessionCompleted outbox_events row in the SAME transaction (ADR-018)", async () => {
+      const [before] = await admin`SELECT version FROM sessions WHERE id = ${sessionCId}`;
+      const result = await withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+        completeSessionTransaction(db, { sessionId: sessionCId, expectedVersion: before.version }),
+      );
+      expect(result).not.toBe("VERSION_CONFLICT");
+      expect((result as { status: string }).status).toBe("COMPLETED");
+
+      const outboxRows = await admin`SELECT * FROM outbox_events WHERE aggregate_id = ${sessionCId} AND event_type = 'SessionCompleted'`;
+      expect(outboxRows).toHaveLength(1);
+      expect(outboxRows[0]!.status).toBe("PENDING");
+      expect(outboxRows[0]!.workspace_id).toBe(workspaceAId);
+
+      await admin`DELETE FROM outbox_events WHERE aggregate_id = ${sessionCId}`;
+    });
+
+    it("10. RLS blocks cross-workspace SELECT on outbox_events for app_runtime", async () => {
+      const id = randomUUID();
+      await admin`INSERT INTO outbox_events (id, workspace_id, event_type, aggregate_type, aggregate_id, payload)
+        VALUES (${id}, ${workspaceAId}, 'SessionCompleted', 'Session', ${sessionAId}, '{}'::jsonb)`;
+
+      const foreignRows = await withRuntimeContext({ workspaceId: workspaceBId }, (db) =>
+        db.execute(sql`SELECT * FROM outbox_events WHERE id = ${id}`),
+      );
+      expect(foreignRows).toHaveLength(0);
+
+      const ownRows = await withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+        db.execute(sql`SELECT * FROM outbox_events WHERE id = ${id}`),
+      );
+      expect(ownRows).toHaveLength(1);
+
+      await admin`DELETE FROM outbox_events WHERE id = ${id}`;
+    });
+
+    it("11. app_runtime has no UPDATE/DELETE grant on outbox_events (no consumer/worker wired yet)", async () => {
+      const id = randomUUID();
+      await admin`INSERT INTO outbox_events (id, workspace_id, event_type, aggregate_type, aggregate_id, payload)
+        VALUES (${id}, ${workspaceAId}, 'SessionCompleted', 'Session', ${sessionAId}, '{}'::jsonb)`;
+
+      await expect(
+        withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+          db.execute(sql`UPDATE outbox_events SET status = 'PROCESSED' WHERE id = ${id}`),
+        ),
+      ).rejects.toThrow(/permission denied/i);
+      await expect(
+        withRuntimeContext({ workspaceId: workspaceAId }, (db) => db.execute(sql`DELETE FROM outbox_events WHERE id = ${id}`)),
+      ).rejects.toThrow(/permission denied/i);
+
+      await admin`DELETE FROM outbox_events WHERE id = ${id}`;
+    });
   });
 });

@@ -1,12 +1,52 @@
 /**
- * Schema module: outbox
+ * Schema module: outbox_events
  *
- * Reserved for Phase N schema — not implemented in Phase 0.
+ * Phase 5 Closure Delta — pulled forward from the Database Schema's
+ * illustrative migration plan (`0016_outbox_idempotency`, §21) NOW because
+ * Technical Architecture ADR-018 ("Internal Domain Events + Transactional
+ * Outbox من البداية — APPROVED") and the Implementation Plan's own Phase 5
+ * deliverable line ("Complete Session transaction + outbox; Attention
+ * calculation downstream event-driven") both name it as Phase-5-owned
+ * infrastructure, not a later phase — unlike `idempotency_records`, which
+ * Phase 3 pulled forward for its OWN unrelated reason (CreateMonth's
+ * Idempotency-Key), `outbox_events` was never actually deferred by any
+ * governing doc; Phase 5's original skip ("no outbox_events table exists
+ * yet") was a shortcut, not the approved design.
  *
- * This file is a structural placeholder only, matching the module layout
- * approved in the Database Schema v1.0 document (section 20). It exists so
- * the package folder structure is correct and the package compiles. It
- * deliberately does NOT define any table, column, index, or relation —
- * that is authorized in a later phase against the approved schema.
+ * Infrastructure ONLY in this delta — `SessionCompleted` rows are written
+ * transactionally alongside session completion, but NO consumer/worker
+ * reads or processes them yet (Attention Engine is explicitly out of scope
+ * until a later phase). Rows accumulate in PENDING status; a future
+ * worker phase owns dispatch/processing and its own DB role.
  */
-export {};
+import { sql } from "drizzle-orm";
+import { check, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+
+export const outboxEvents = pgTable(
+  "outbox_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    /** NULL = system-level event (not tied to a single workspace) — none exist yet in practice, but the column allows it per Database Schema §11.2. */
+    workspaceId: uuid("workspace_id"),
+    eventType: text("event_type").notNull(),
+    aggregateType: text("aggregate_type").notNull(),
+    aggregateId: uuid("aggregate_id").notNull(),
+    payload: jsonb("payload").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().default(sql`now()`),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().default(sql`now()`),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    /** Sanitized — never raw stack traces/secrets (Database Schema §11.2). */
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => [
+    check("outbox_events_status_check", sql`${table.status} IN ('PENDING', 'PROCESSING', 'PROCESSED', 'FAILED')`),
+    index("outbox_events_status_available_at_idx")
+      .on(table.status, table.availableAt)
+      .where(sql`${table.status} IN ('PENDING', 'FAILED')`),
+  ],
+);

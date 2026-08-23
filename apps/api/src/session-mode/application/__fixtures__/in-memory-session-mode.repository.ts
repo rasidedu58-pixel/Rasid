@@ -40,6 +40,8 @@ export class InMemorySessionModeRepository implements SessionModeRepositoryPort 
   readonly sessionExamsById = new Map<string, SessionExamRow>();
   readonly idempotencyById = new Map<string, IdempotencyRecordRow>();
   workspaceTimezone: string | undefined = "Africa/Cairo";
+  /** Mirrors migration 0023's seed (`complete_session_with_missing_records` = false) — tests flip this directly. */
+  readonly featureFlags = new Map<string, boolean>([["complete_session_with_missing_records", false]]);
 
   constructor(private readonly shared: InMemoryStudentsRepository) {}
 
@@ -328,6 +330,12 @@ export class InMemorySessionModeRepository implements SessionModeRepositoryPort 
     };
     this.sessionExamsById.set(existing.id, updated);
     return updated;
+  }
+
+  // ---- Feature flags ----
+
+  async findFeatureFlagEnabled(key: string): Promise<boolean | undefined> {
+    return this.featureFlags.get(key);
   }
 
   // ---- Complete ----

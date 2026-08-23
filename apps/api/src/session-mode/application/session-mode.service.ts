@@ -43,16 +43,20 @@ const COMPLETED = "COMPLETED";
 const COMPLETE_SESSION_OPERATION = "CompleteSession";
 
 /**
- * Product Decision (hardcoded, not configurable in Phase 5): PRD §34 names
- * `complete_session_with_missing_records` a feature flag, default False —
- * but no column/endpoint exists anywhere in the approved API Contract §9.4
- * registry to change it per-workspace. Until such a surface is authorized,
- * this stays a fixed application constant rather than an invented DB column
- * or admin endpoint.
+ * Phase 5 Closure Delta: `complete_session_with_missing_records` is now a
+ * real, stored global flag (`feature_flags` table, migration 0023 — default
+ * `false`) read via `SessionModeRepositoryPort.findFeatureFlagEnabled`, NOT
+ * a hardcoded constant. `computeReview` reads it exactly once per call and
+ * is the ONLY place either `getReview` or `completeSession` consult it —
+ * both endpoints funnel through this same method, so `canComplete` and the
+ * completion gate can never disagree about the flag's value within one
+ * request. No management/admin endpoint exists yet to change it (out of
+ * this delta's scope) — only the read side is wired.
  */
-const COMPLETE_SESSION_WITH_MISSING_RECORDS = false;
+const COMPLETE_SESSION_WITH_MISSING_RECORDS_FLAG_KEY = "complete_session_with_missing_records";
+const COMPLETE_SESSION_WITH_MISSING_RECORDS_DEFAULT = false;
 
-type ScopedPermission = "attendance.read" | "attendance.write" | "homework.write" | "exams.write" | "students.view_basic" | "groups.view";
+type ScopedPermission = "attendance.read" | "attendance.write" | "homework.write" | "exams.write" | "students.view_basic";
 
 interface ReviewComputation {
   eligibleEnrollmentIds: string[];
@@ -366,7 +370,16 @@ export class SessionModeService {
     workspaceContext: WorkspaceContext,
     id: string,
   ): Promise<SessionReviewResponse> {
-    const { session, groupMonth } = await this.loadSessionInScope(authUser, workspaceContext, id, "groups.view");
+    // Phase 5 Closure Delta item 3: was "groups.view" (mirroring Phase 3's
+    // generic "Scoped read" precedent) — re-examined against PRD §35's own
+    // worked persona ("مساعد سنتر: scope=Group A؛ attendance.write,
+    // payments.record, students.view_basic" — no groups.view granted at
+    // all), which would leave that exact assistant unable to review their
+    // own session before completing it, even though their attendance.write
+    // grant already gates /start and /complete. "attendance.read" (implied
+    // by attendance.write via the catalog's own dependency closure) is the
+    // correct existing-catalog key — no new permission invented.
+    const { session, groupMonth } = await this.loadSessionInScope(authUser, workspaceContext, id, "attendance.read");
     const review = await this.computeReview(session, groupMonth, workspaceContext.workspaceId);
     return {
       attendanceSummary: review.attendanceSummary,
@@ -416,12 +429,19 @@ export class SessionModeService {
     }
 
     const review = await this.computeReview(before, groupMonth, workspaceContext.workspaceId);
-    if (!COMPLETE_SESSION_WITH_MISSING_RECORDS && !review.canComplete) {
+    if (!review.canComplete) {
       throw new SessionRecordsMissingException(undefined, {
         missingRecords: review.missingRecords,
         blockingReasons: review.blockingReasons,
       });
     }
+    // PRD §34: "If True [complete_session_with_missing_records]: confirmation
+    // + gaps remain in Missing Records + AuditEvent." `review.canComplete`
+    // can be true DESPITE `missingRecords` being non-empty when the flag is
+    // enabled (computeReview never hides gaps behind the flag — only
+    // whether they BLOCK completion) — that combination is exactly
+    // "completed with gaps" and gets flagged in the audit event below.
+    const completedWithGaps = review.missingRecords.length > 0;
 
     const idempotencyRow =
       existingRecord ??
@@ -464,7 +484,9 @@ export class SessionModeService {
       entityType: "session",
       entityId: result.id,
       beforeJson: { status: before.status },
-      afterJson: { status: result.status },
+      afterJson: completedWithGaps
+        ? { status: result.status, completedWithGaps: true, missingRecords: review.missingRecords }
+        : { status: result.status },
       correlationId,
     });
 
@@ -554,9 +576,16 @@ export class SessionModeService {
       }
     }
 
+    // Single source of truth: both getReview and completeSession call THIS
+    // method, and this is the only place the flag is read — they can never
+    // disagree about its value within one request.
+    const allowMissingRecords =
+      (await this.repository.findFeatureFlagEnabled(COMPLETE_SESSION_WITH_MISSING_RECORDS_FLAG_KEY)) ??
+      COMPLETE_SESSION_WITH_MISSING_RECORDS_DEFAULT;
+
     const blockingReasons: string[] = [];
     if (session.status !== IN_PROGRESS) blockingReasons.push("SESSION_NOT_IN_PROGRESS");
-    if (!COMPLETE_SESSION_WITH_MISSING_RECORDS && missingRecords.length > 0) {
+    if (!allowMissingRecords && missingRecords.length > 0) {
       blockingReasons.push("SESSION_RECORDS_MISSING");
     }
 

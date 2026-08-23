@@ -22,6 +22,8 @@ import { sessionRecords } from "../schema/session-records";
 import { enrollments } from "../schema/enrollments";
 import { students } from "../schema/students";
 import { auditEvents } from "../schema/audit";
+import { featureFlags } from "../schema/feature-flags";
+import { outboxEvents } from "../schema/outbox";
 import type { Db } from "./identity.repository";
 import type { SessionRow } from "./scheduling.repository";
 
@@ -463,8 +465,38 @@ export async function completeSessionTransaction(
       .set({ status: "COMPLETED", completedAt: new Date(), version: input.expectedVersion + 1, updatedAt: new Date() })
       .where(and(eq(sessions.id, input.sessionId), eq(sessions.version, input.expectedVersion)))
       .returning();
-    return updated ?? VERSION_CONFLICT;
+    if (!updated) return VERSION_CONFLICT;
+
+    // Technical Architecture ADR-018 + Database Schema §17.2 step 7 — the
+    // Session/records final state and its OutboxEvent commit together or
+    // roll back together. No consumer processes this yet (Attention Engine
+    // is a later phase) — it accumulates as PENDING infrastructure.
+    await tx.insert(outboxEvents).values({
+      workspaceId: updated.workspaceId,
+      eventType: "SessionCompleted",
+      aggregateType: "Session",
+      aggregateId: updated.id,
+      payload: { sessionId: updated.id, groupMonthId: updated.groupMonthId, completedAt: updated.completedAt },
+    });
+
+    return updated;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Feature flags (Phase 5 Closure Delta)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads a single global flag's `enabled` value. Returns `undefined` when
+ * the key has no row (defensive — the caller decides the fallback; the
+ * approved default is `false` for `complete_session_with_missing_records`,
+ * seeded by migration 0023, so this should only be `undefined` if that seed
+ * is ever missing).
+ */
+export async function findFeatureFlagEnabled(db: Db, key: string): Promise<boolean | undefined> {
+  const [row] = await db.select({ enabled: featureFlags.enabled }).from(featureFlags).where(eq(featureFlags.key, key)).limit(1);
+  return row?.enabled;
 }
 
 // ---------------------------------------------------------------------------

@@ -148,6 +148,20 @@
       "when": 1787439300000,
       "tag": "0022_rls_phase5",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1787439400000,
+      "tag": "0023_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787439500000,
+      "tag": "0024_outbox_events",
+      "breakpoints": true
     }
   ]
 }

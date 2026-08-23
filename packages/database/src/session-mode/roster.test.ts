@@ -47,6 +47,33 @@ describe("Session roster eligibility (Phase 5)", () => {
     expect(eligible).toBe(true);
   });
 
+  describe("ended_at is compared as a precise instant, NOT a truncated calendar day (Closure Delta item 2)", () => {
+    it("includes a student whose session happened BEFORE the ended_at instant, even on the SAME calendar day", () => {
+      const eligible = isEnrollmentEligibleForSession({
+        enrollment: { enrollmentId: "e1", joinDate: "2026-08-01", endedAt: new Date("2026-08-10T20:00:00Z") },
+        sessionScheduledAt: new Date("2026-08-10T05:00:00Z"), // same day, earlier instant
+        workspaceTimezone: TZ,
+      });
+      expect(eligible).toBe(true);
+    });
+
+    it("excludes a student whose session happened AT OR AFTER the ended_at instant, even on the SAME calendar day", () => {
+      const atInstant = isEnrollmentEligibleForSession({
+        enrollment: { enrollmentId: "e1", joinDate: "2026-08-01", endedAt: new Date("2026-08-10T05:00:00Z") },
+        sessionScheduledAt: new Date("2026-08-10T05:00:00Z"), // exact same instant
+        workspaceTimezone: TZ,
+      });
+      expect(atInstant).toBe(false);
+
+      const afterInstant = isEnrollmentEligibleForSession({
+        enrollment: { enrollmentId: "e1", joinDate: "2026-08-01", endedAt: new Date("2026-08-10T05:00:00Z") },
+        sessionScheduledAt: new Date("2026-08-10T20:00:00Z"), // same day, later instant
+        workspaceTimezone: TZ,
+      });
+      expect(afterInstant).toBe(false);
+    });
+  });
+
   it("deriveEligibleEnrollmentIds returns each eligible enrollment exactly once", () => {
     const ids = deriveEligibleEnrollmentIds({
       enrollments: [

@@ -3,19 +3,29 @@
  * `scheduling/proration.ts`'s convention (pure, timezone-aware, no DB
  * access) so it is independently unit-testable.
  *
- * Eligibility rule: an Enrollment is on a Session's roster iff the
- * Session's LOCAL calendar day (workspace timezone) is on/after the
- * Enrollment's `join_date` (PRD's own "join-date eligibility... same-day
- * session eligible" rule, §18/AC-06) AND, when the Enrollment has since
- * ended (`ended_at` set — WITHDRAWN/TRANSFERRED/STOPPED), the Session's
- * local day is STRICTLY BEFORE the local day the Enrollment ended on.
+ * Eligibility rule (Phase 5 Closure Delta — re-derived from the Database
+ * Schema's own field types, see item 2 of the closure delta):
  *
- * The `ended_at` half is a necessary technical interpretation, not a
- * literal quote from the governing docs (only join_date eligibility is
- * spelled out there) — resolving it any other way would mean a withdrawn/
- * transferred student stays on every future roster of a group they already
- * left, which contradicts the roster's own purpose. Documented explicitly
- * in the Phase 5 completion report.
+ * 1. Join side: `join_date` is a `date` column (Database Schema §7.1) — it
+ *    has no time-of-day of its own, so it MUST be compared as a calendar
+ *    day in the workspace's timezone against the Session's own local day.
+ *    PRD's "join-date eligibility... same-day session eligible" rule
+ *    (§18/AC-06) makes the boundary explicit: `sessionDay >= joinDay` is
+ *    eligible.
+ * 2. End side: `ended_at` is a real `timestamptz` (Database Schema §7.1),
+ *    not a date — comparing it as a calendar day would silently invent a
+ *    same-day-inclusion/exclusion rule the governing docs never state (they
+ *    only say "timestamptz NULL — —", no note either way). The
+ *    schema-correct comparison is therefore a precise INSTANT comparison
+ *    against the Session's own precise `scheduled_at` instant, with no day
+ *    truncation on either side: `sessionScheduledAt < endedAt` is eligible.
+ *
+ * Caveat (documented, not "fixed" here — out of this delta's scope): Phase
+ * 4's `POST /enrollments/:id/withdraw` stores `effectiveDate` as UTC
+ * midnight of the given calendar date (`${effectiveDate}T00:00:00Z`), not a
+ * workspace-timezone-aware instant. That is a Phase 4 representation
+ * choice for `ended_at`, independent of this function's own (correct, per
+ * the column's declared type) instant-vs-instant comparison rule.
  */
 import { DateTime } from "luxon";
 
@@ -35,9 +45,8 @@ export function isEnrollmentEligibleForSession(params: {
   const joinDay = DateTime.fromISO(params.enrollment.joinDate, { zone: params.workspaceTimezone }).startOf("day");
   if (sessionDay < joinDay) return false;
 
-  if (params.enrollment.endedAt) {
-    const endedDay = DateTime.fromJSDate(params.enrollment.endedAt, { zone: params.workspaceTimezone }).startOf("day");
-    if (sessionDay >= endedDay) return false;
+  if (params.enrollment.endedAt && params.sessionScheduledAt >= params.enrollment.endedAt) {
+    return false;
   }
 
   return true;

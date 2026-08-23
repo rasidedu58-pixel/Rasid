@@ -6,9 +6,11 @@
  * schedule_rules), `sessions`, and `idempotency` (idempotency_records) are
  * implemented as of Phase 3. `students`, `guardians` (guardians +
  * student_guardians), `qrCredentials`, and `enrollments` are implemented as
- * of Phase 4. `sessionExams` and `sessionRecords` are implemented as of
- * Phase 5 — see each module's own comment. All other modules remain
- * structural placeholders reserved for later phases.
+ * of Phase 4. `sessionExams`, `sessionRecords`, `outbox` (pulled forward in
+ * the Phase 5 Closure Delta), and `featureFlags` (new in the Phase 5
+ * Closure Delta) are implemented as of Phase 5 — see each module's own
+ * comment. All other modules remain structural placeholders reserved for
+ * later phases.
  */
 export * as identity from "./identity";
 export * as workspaces from "./workspaces";
@@ -30,3 +32,4 @@ export * as notifications from "./notifications";
 export * as audit from "./audit";
 export * as outbox from "./outbox";
 export * as idempotency from "./idempotency";
+export * as featureFlags from "./feature-flags";

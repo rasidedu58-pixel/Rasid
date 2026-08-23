@@ -6,6 +6,7 @@ import {
   completeIdempotencyRecord,
   completeSessionTransaction,
   failIdempotencyRecord,
+  findFeatureFlagEnabled,
   findGroupById,
   findGroupMonthById,
   findIdempotencyRecord,
@@ -117,6 +118,12 @@ export class DrizzleSessionModeRepository implements SessionModeRepositoryPort {
 
   upsertSessionExamTransaction(input: UpsertSessionExamInput) {
     return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => upsertSessionExamTransaction(db, input));
+  }
+
+  findFeatureFlagEnabled(key: string): Promise<boolean | undefined> {
+    // Global table (no workspace_id, no RLS) — a bare workspaceId-less
+    // runtime context is fine here.
+    return withRuntimeContext(this.runtimeCtx(), (db) => findFeatureFlagEnabled(db, key));
   }
 
   completeSessionTransaction(input: { sessionId: string; expectedVersion: number }) {

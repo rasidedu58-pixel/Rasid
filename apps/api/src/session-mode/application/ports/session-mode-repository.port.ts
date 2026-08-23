@@ -71,6 +71,9 @@ export interface SessionModeRepositoryPort {
 
   upsertSessionExamTransaction(input: UpsertSessionExamInput): Promise<SessionExamRow | typeof VERSION_CONFLICT>;
 
+  /** Phase 5 Closure Delta — global feature flag read (e.g. `complete_session_with_missing_records`). `undefined` when the key has no row. */
+  findFeatureFlagEnabled(key: string): Promise<boolean | undefined>;
+
   completeSessionTransaction(input: {
     sessionId: string;
     expectedVersion: number;

@@ -214,6 +214,54 @@ describe("SessionModeService", () => {
     });
   });
 
+  describe("feature flag: complete_session_with_missing_records (Closure Delta item 1)", () => {
+    it("flag=false (default): review.canComplete and complete's own gate agree — both block on missing records", async () => {
+      const session = seedSession();
+      await seedStudentWithEnrollment("طالب", "2026-08-01");
+      await service.startSession(owner, ownerContext, session.id, { version: session.version }, null);
+
+      const review = await service.getReview(owner, ownerContext, session.id);
+      expect(review.canComplete).toBe(false);
+      expect(review.missingRecords.length).toBeGreaterThan(0);
+
+      await expect(
+        service.completeSession(owner, ownerContext, session.id, "flag-false-key", { version: session.version + 1 }, null),
+      ).rejects.toBeInstanceOf(SessionRecordsMissingException);
+    });
+
+    it("flag=true: review.canComplete agrees with complete succeeding DESPITE missing records — gaps stay visible, audited", async () => {
+      repo.featureFlags.set("complete_session_with_missing_records", true);
+
+      const session = seedSession();
+      const { enrollment } = await seedStudentWithEnrollment("طالب", "2026-08-01");
+      const { session: started } = await service.startSession(owner, ownerContext, session.id, { version: session.version }, null);
+      // Only attendance recorded — homework left missing on purpose.
+      const afterAttendance = await service.putAttendance(owner, ownerContext, session.id, {
+        sessionVersion: started.version,
+        records: [{ enrollmentId: enrollment.id, status: "PRESENT" }],
+      });
+
+      const review = await service.getReview(owner, ownerContext, session.id);
+      expect(review.canComplete).toBe(true); // same source as complete() below — must agree
+      expect(review.missingRecords).toHaveLength(1); // gaps remain VISIBLE, not hidden by the flag
+      expect(review.missingRecords[0]!.missing).toEqual(["HOMEWORK"]);
+
+      const completed = await service.completeSession(
+        owner,
+        ownerContext,
+        session.id,
+        "flag-true-key",
+        { version: afterAttendance.sessionVersion },
+        null,
+      );
+      expect(completed.session.status).toBe("COMPLETED");
+
+      const auditEvent = repo.auditEvents.at(-1)!;
+      expect(auditEvent.action).toBe("session.completed");
+      expect((auditEvent.afterJson as { completedWithGaps?: boolean }).completedWithGaps).toBe(true);
+    });
+  });
+
   describe("complete — idempotency", () => {
     it("a second call with the SAME Idempotency-Key returns the cached response and does not re-run effects", async () => {
       const session = seedSession();
