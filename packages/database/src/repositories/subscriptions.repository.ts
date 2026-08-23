@@ -11,7 +11,7 @@
  * scheduled expiry scan (the latter called by the outbox dispatcher's own
  * worker polling loop, `app_worker` role, never `app_runtime`).
  */
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 import { entitlements, ownerTrialGrants, subscriptions } from "../schema/subscriptions";
 import { auditEvents } from "../schema/audit";
 import { outboxEvents } from "../schema/outbox";
@@ -54,21 +54,19 @@ export function findSubscriptionByProviderSubscriptionId(
     .then((r) => r[0]);
 }
 
-/** The CURRENT entitlement row per capability (latest `effective_from`) — append-only table, never updated, so "current" is derived at read time rather than flagged by a column. */
+/**
+ * The CURRENT entitlement row per capability. Phase 8 Closure Delta #2:
+ * "current" is looked up via `effective_to IS NULL` (the OPEN row) — not
+ * "latest effective_from wins" — backed by the DB-level
+ * `entitlements_workspace_capability_open_unique` partial unique index
+ * (migration 0040), which guarantees at most one open row per
+ * (workspace, capability) exists at all.
+ */
 export async function listCurrentEntitlementsForWorkspace(db: Db, workspaceId: string): Promise<EntitlementRow[]> {
-  const rows = await db
+  return db
     .select()
     .from(entitlements)
-    .where(eq(entitlements.workspaceId, workspaceId))
-    .orderBy(desc(entitlements.effectiveFrom));
-  const seen = new Set<string>();
-  const current: EntitlementRow[] = [];
-  for (const row of rows) {
-    if (seen.has(row.capability)) continue;
-    seen.add(row.capability);
-    current.push(row);
-  }
-  return current;
+    .where(and(eq(entitlements.workspaceId, workspaceId), isNull(entitlements.effectiveTo)));
 }
 
 /** The workspace's current ALLOWED capabilities only — used by `GET /me/workspaces/:id/context`'s `entitlements` field (a caller only needs to know what it CAN do). */
@@ -85,8 +83,13 @@ export async function findCurrentEntitlement(
   const [row] = await db
     .select()
     .from(entitlements)
-    .where(and(eq(entitlements.workspaceId, workspaceId), eq(entitlements.capability, capability)))
-    .orderBy(desc(entitlements.effectiveFrom))
+    .where(
+      and(
+        eq(entitlements.workspaceId, workspaceId),
+        eq(entitlements.capability, capability),
+        isNull(entitlements.effectiveTo),
+      ),
+    )
     .limit(1);
   return row;
 }
@@ -109,12 +112,48 @@ export interface ProvisionSubscriptionResult {
   isTrial: boolean;
 }
 
-async function insertEntitlementSnapshot(
+/**
+ * Phase 8 Closure Delta #2 — append+CLOSE, in one transaction:
+ * 1. Close the currently-open row (`effective_to = transitionTime`) for
+ *    each capability being recomputed. A brand new workspace has no open
+ *    rows yet — this UPDATE simply affects 0 rows, never an error.
+ * 2. Insert the new snapshot row (`effective_from = transitionTime`,
+ *    `effective_to = NULL`).
+ *
+ * Both statements run on the SAME `tx` the caller is already inside
+ * (`provisionSubscriptionForNewWorkspaceTransaction`'s workspace-creation
+ * transaction, or `updateSubscriptionStateTransaction`'s own transaction) —
+ * if either statement fails, or the caller's Subscription UPDATE conflicts,
+ * the whole transaction rolls back and NEITHER the close nor the insert
+ * commits (proven by `subscriptions-billing-security.integration.test.ts`).
+ * `transitionTime` is passed in by the caller (not read via `now()` here)
+ * so the closed row's `effective_to` and the new row's `effective_from`
+ * are the EXACT same instant — no gap, no overlap.
+ */
+async function recomputeEntitlementSnapshot(
   tx: Db,
-  params: { workspaceId: string; state: SubscriptionState; sourceType: "SUBSCRIPTION" | "TRIAL" | "ADMIN"; sourceId: string | null },
+  params: {
+    workspaceId: string;
+    state: SubscriptionState;
+    sourceType: "SUBSCRIPTION" | "TRIAL" | "ADMIN";
+    sourceId: string | null;
+    transitionTime: Date;
+  },
 ): Promise<void> {
   const snapshot = resolveEntitlementSnapshot(params.state);
   const capabilities = Object.keys(snapshot) as Capability[];
+
+  await tx
+    .update(entitlements)
+    .set({ effectiveTo: params.transitionTime, updatedAt: params.transitionTime })
+    .where(
+      and(
+        eq(entitlements.workspaceId, params.workspaceId),
+        inArray(entitlements.capability, capabilities),
+        isNull(entitlements.effectiveTo),
+      ),
+    );
+
   await tx.insert(entitlements).values(
     capabilities.map((capability) => ({
       workspaceId: params.workspaceId,
@@ -122,6 +161,8 @@ async function insertEntitlementSnapshot(
       state: snapshot[capability] as EntitlementState,
       sourceType: params.sourceType,
       sourceId: params.sourceId,
+      effectiveFrom: params.transitionTime,
+      effectiveTo: null,
     })),
   );
 }
@@ -144,10 +185,18 @@ export async function provisionSubscriptionForNewWorkspaceTransaction(
 
   if (input.email) {
     const emailHash = hashOwnerEmail(input.email);
+    // Deliberately UNTARGETED `ON CONFLICT DO NOTHING` — Closure Delta #1
+    // added `UNIQUE(first_user_id)` alongside the pre-existing
+    // `UNIQUE(email_hash)`. Targeting only one column would let a conflict
+    // on the OTHER column raise a hard error instead of the intended
+    // "not eligible" no-op; omitting the target means Postgres treats a
+    // violation of EITHER constraint the same way — no insert, empty
+    // `RETURNING`. This is what makes "same owner, changed email" and "new
+    // owner, previously-used email" both correctly block a second trial.
     const inserted = await tx
       .insert(ownerTrialGrants)
       .values({ emailHash, firstUserId: input.ownerUserId, firstWorkspaceId: input.workspaceId })
-      .onConflictDoNothing({ target: ownerTrialGrants.emailHash })
+      .onConflictDoNothing()
       .returning();
     isTrial = inserted.length > 0;
   }
@@ -168,11 +217,12 @@ export async function provisionSubscriptionForNewWorkspaceTransaction(
     .returning();
   if (!subscription) throw new Error("Failed to insert subscriptions row.");
 
-  await insertEntitlementSnapshot(tx, {
+  await recomputeEntitlementSnapshot(tx, {
     workspaceId: input.workspaceId,
     state,
     sourceType: "TRIAL",
     sourceId: subscription.id,
+    transitionTime: now,
   });
 
   await tx.insert(auditEvents).values({
@@ -242,9 +292,14 @@ export async function updateSubscriptionStateTransaction(
   input: UpdateSubscriptionStateInput,
 ): Promise<SubscriptionRow | typeof SUBSCRIPTION_VERSION_CONFLICT> {
   return db.transaction(async (tx) => {
+    // ONE instant shared by the Subscription row's own `updated_at` AND the
+    // entitlement close/insert pair below — the close's `effective_to` and
+    // the new row's `effective_from` must be the exact same value, not
+    // merely close in time.
+    const transitionTime = new Date();
     const patch: Partial<typeof subscriptions.$inferInsert> = {
       state: input.nextState,
-      updatedAt: new Date(),
+      updatedAt: transitionTime,
       version: input.expectedVersion + 1,
     };
     if (input.periodStart !== undefined) patch.periodStart = input.periodStart;
@@ -260,11 +315,12 @@ export async function updateSubscriptionStateTransaction(
       .returning();
     if (!updated) return SUBSCRIPTION_VERSION_CONFLICT;
 
-    await insertEntitlementSnapshot(tx, {
+    await recomputeEntitlementSnapshot(tx, {
       workspaceId: updated.workspaceId,
       state: input.nextState,
       sourceType: input.sourceType,
       sourceId: input.sourceId,
+      transitionTime,
     });
 
     await tx.insert(auditEvents).values({

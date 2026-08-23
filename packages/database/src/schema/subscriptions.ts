@@ -24,7 +24,7 @@
  * migration 0037's own comment for why it carries no RLS policy).
  */
 import { sql } from "drizzle-orm";
-import { boolean, check, index, integer, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, index, integer, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { workspaces } from "./workspaces";
 import { users } from "./identity";
 
@@ -85,7 +85,17 @@ export const entitlements = pgTable(
     sourceType: text("source_type").notNull(),
     sourceId: text("source_id"),
     effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull().default(sql`now()`),
-    /** NULL = still current. Append-only history (§10.2's own effective_from/to fields) — a new row is inserted for every recompute; the CURRENT value per (workspace, capability) is the row with the latest `effective_from`. Never UPDATEd — see migration 0037. */
+    /**
+     * NULL = still current (the open row). Phase 8 Closure Delta #2 —
+     * append+CLOSE, not pure append: every recompute closes the
+     * PREVIOUSLY-open row (`effective_to = transition_time`) in the same
+     * transaction that inserts the new open row
+     * (`effective_from = transition_time`, `effective_to = NULL`). History
+     * is otherwise immutable — the only ever UPDATE is this one-time close,
+     * restricted at the grant level to exactly this column (+ `updated_at`)
+     * — see migration 0040. "Current" is looked up via
+     * `effective_to IS NULL`, never "latest effective_from wins".
+     */
     effectiveTo: timestamp("effective_to", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
@@ -102,6 +112,12 @@ export const entitlements = pgTable(
       table.capability,
       table.effectiveFrom,
     ),
+    // Closure Delta #2: at most ONE open row per (workspace, capability) at
+    // the DB level — the append+close transaction's own correctness backed
+    // by a constraint, not just application discipline. Migration 0040.
+    uniqueIndex("entitlements_workspace_capability_open_unique")
+      .on(table.workspaceId, table.capability)
+      .where(sql`${table.effectiveTo} IS NULL`),
   ],
 );
 
@@ -113,7 +129,17 @@ export const ownerTrialGrants = pgTable(
       .default(sql`gen_random_uuid()`),
     /** SHA-256 hex digest of the normalized (lowercased, trimmed) signup email — never the raw email, see module doc comment. */
     emailHash: text("email_hash").notNull(),
-    /** Informational only — the user/workspace that FIRST consumed the ordinary trial for this identity. Never used for the eligibility check itself (that's `email_hash` alone), and never updated after insert. */
+    /**
+     * The user that FIRST consumed the ordinary trial for this identity.
+     * Phase 8 Closure Delta #1: also carries its own `UNIQUE` constraint
+     * (alongside `email_hash`'s) — the approved rule is "one ordinary trial
+     * per WORKSPACE OWNER", the stable identity, not merely the verified
+     * email used at the moment of signup. Both constraints together mean an
+     * insert is rejected if EITHER the same user OR the same verified email
+     * has already consumed a trial — see `subscriptions.repository.ts`'s
+     * plain (untargeted) `ON CONFLICT DO NOTHING`, which catches a
+     * violation on either column.
+     */
     firstUserId: uuid("first_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -122,5 +148,8 @@ export const ownerTrialGrants = pgTable(
       .references(() => workspaces.id, { onDelete: "restrict" }),
     grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
-  (table) => [unique("owner_trial_grants_email_hash_unique").on(table.emailHash)],
+  (table) => [
+    unique("owner_trial_grants_email_hash_unique").on(table.emailHash),
+    unique("owner_trial_grants_first_user_id_unique").on(table.firstUserId),
+  ],
 );

@@ -1,0 +1,15 @@
+-- Phase 8 Closure Delta #1 — Trial ownership integrity.
+--
+-- `owner_trial_grants` previously enforced anti-abuse via `UNIQUE(email_hash)`
+-- alone. The approved rule is "one ordinary trial per WORKSPACE OWNER" — the
+-- STABLE owner identity (`users.id`), not merely the verified email used at
+-- signup time. Adding `UNIQUE(first_user_id)` alongside the existing
+-- `UNIQUE(email_hash)` closes the remaining gap: the SAME owner changing
+-- their verified email between workspace creations must not be able to
+-- receive a second ordinary trial. Both constraints together, combined with
+-- a plain (untargeted) `ON CONFLICT DO NOTHING` at the call site (see
+-- `subscriptions.repository.ts`), reject an insert that collides on EITHER
+-- column — the email-hash boundary (delete/recreate with the same email) is
+-- unchanged, and no raw email is stored either way.
+--> statement-breakpoint
+ALTER TABLE "owner_trial_grants" ADD CONSTRAINT "owner_trial_grants_first_user_id_unique" UNIQUE("first_user_id");

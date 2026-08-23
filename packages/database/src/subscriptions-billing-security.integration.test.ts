@@ -1,5 +1,7 @@
 /**
  * Phase 8 — Subscription & Entitlements real-Postgres integration tests.
+ * Extended by the Phase 8 Closure Delta (trial ownership integrity +
+ * entitlement temporal integrity).
  *
  * Mirrors `./attention-followup-security.integration.test.ts` exactly: two
  * distinct real connections (`MIGRATION_DATABASE_URL` admin / `DATABASE_URL`
@@ -11,11 +13,13 @@
  * a pure in-memory unit test cannot: Trial works for its full 14 days,
  * Cancel-at-period-end does not stop service before `period_end`, Expired
  * blocks operational entitlements while billing/history stay reachable,
- * cross-workspace RLS isolation for `subscriptions`/`entitlements`, and the
- * one-ordinary-trial-per-owner-email anti-abuse rule surviving even a brand
- * new Workspace + a brand new `users.id`.
+ * cross-workspace RLS isolation for `subscriptions`/`entitlements`, the
+ * one-ordinary-trial-per-owner-IDENTITY anti-abuse rule (both `UNIQUE`
+ * constraints on `owner_trial_grants`), and the append+close entitlement
+ * temporal model (DB-level partial unique index + column-restricted grants)
+ * added by the Closure Delta.
  *
- * Requires migrations 0001-0038 to already be applied against the target
+ * Requires migrations 0001-0040 to already be applied against the target
  * database, and `WORKER_DATABASE_URL` (app_worker role, LOGIN enabled) in
  * addition to the usual DATABASE_URL/MIGRATION_DATABASE_URL.
  */
@@ -119,39 +123,177 @@ describe.skipIf(!hasLiveCreds)("Phase 8 Subscriptions/Entitlements Security (liv
     expect(entitlements.every((e) => e.state === "ALLOWED")).toBe(true);
   });
 
-  it("4: one ordinary 14-day trial per WORKSPACE OWNER (owner_trial_grants), not merely per workspace — a second workspace under the SAME email never gets a second trial", async () => {
-    const secondWorkspaceId = randomUUID();
-    const secondOwnerUserId = randomUUID(); // a genuinely different users.id row — proves the block is keyed on the verified email identity, not the user row
-    await admin`INSERT INTO users (id, full_name, email_display, status) VALUES
-      (${secondOwnerUserId}, 'Billing Test User A (second account)', 'billing-test-a@example.test', 'ACTIVE')`;
-    await admin`INSERT INTO workspaces
-      (id, owner_user_id, name, workspace_type, locale, timezone, due_date_policy, status) VALUES
-      (${secondWorkspaceId}, ${secondOwnerUserId}, 'Billing Test Workspace A2', 'TEACHER', 'ar-EG', 'Africa/Cairo', 'PER_GROUP', 'ACTIVE')`;
-
-    try {
-      const result = await withRuntimeContext({ workspaceId: secondWorkspaceId }, (tx) =>
+  describe("4: Closure Delta #1 — one ordinary trial per WORKSPACE OWNER (both UNIQUE(email_hash) AND UNIQUE(first_user_id))", () => {
+    /** Provisions a scratch user+workspace, runs provisioning, returns the result, and ALWAYS cleans up its own rows regardless of outcome. */
+    async function provisionScratch(params: {
+      userId: string;
+      userLabel: string;
+      workspaceId: string;
+      workspaceLabel: string;
+      email: string | null;
+    }): Promise<Awaited<ReturnType<typeof provisionSubscriptionForNewWorkspaceTransaction>>> {
+      await admin`INSERT INTO users (id, full_name, email_display, status) VALUES
+        (${params.userId}, ${params.userLabel}, ${params.email ?? "no-email@example.test"}, 'ACTIVE')`;
+      await admin`INSERT INTO workspaces
+        (id, owner_user_id, name, workspace_type, locale, timezone, due_date_policy, status) VALUES
+        (${params.workspaceId}, ${params.userId}, ${params.workspaceLabel}, 'TEACHER', 'ar-EG', 'Africa/Cairo', 'PER_GROUP', 'ACTIVE')`;
+      return withRuntimeContext({ workspaceId: params.workspaceId }, (tx) =>
         provisionSubscriptionForNewWorkspaceTransaction(tx, {
-          workspaceId: secondWorkspaceId,
-          ownerUserId: secondOwnerUserId,
-          email: "billing-test-a@example.test", // SAME normalized email as test 1's workspace A
+          workspaceId: params.workspaceId,
+          ownerUserId: params.userId,
+          email: params.email,
         }),
       );
-      expect(result.isTrial).toBe(false);
-      expect(result.subscription.state).toBe("EXPIRED"); // reuses Expired mechanics, no invented bypass state
-      expect(result.subscription.periodStart!.getTime()).toBe(result.subscription.periodEnd!.getTime());
-
-      const entitlements = await withRuntimeContext({ workspaceId: secondWorkspaceId }, (tx) =>
-        listCurrentEntitlementsForWorkspace(tx, secondWorkspaceId),
-      );
-      expect(entitlements.every((e) => e.state === "BLOCKED")).toBe(true);
-    } finally {
-      await admin`DELETE FROM outbox_events WHERE workspace_id = ${secondWorkspaceId}`;
-      await admin`DELETE FROM audit_events WHERE workspace_id = ${secondWorkspaceId}`;
-      await admin`DELETE FROM entitlements WHERE workspace_id = ${secondWorkspaceId}`;
-      await admin`DELETE FROM subscriptions WHERE workspace_id = ${secondWorkspaceId}`;
-      await admin`DELETE FROM workspaces WHERE id = ${secondWorkspaceId}`;
-      await admin`DELETE FROM users WHERE id = ${secondOwnerUserId}`;
     }
+
+    async function cleanupScratch(userId: string, workspaceId: string): Promise<void> {
+      await admin`DELETE FROM outbox_events WHERE workspace_id = ${workspaceId}`;
+      await admin`DELETE FROM audit_events WHERE workspace_id = ${workspaceId}`;
+      await admin`DELETE FROM entitlements WHERE workspace_id = ${workspaceId}`;
+      await admin`DELETE FROM subscriptions WHERE workspace_id = ${workspaceId}`;
+      // owner_trial_grants FKs to BOTH workspaces AND users (restrict) — must
+      // clear it before either parent row can be deleted.
+      await admin`DELETE FROM owner_trial_grants WHERE first_workspace_id = ${workspaceId} OR first_user_id = ${userId}`;
+      await admin`DELETE FROM workspaces WHERE id = ${workspaceId}`;
+      await admin`DELETE FROM users WHERE id = ${userId}`;
+    }
+
+    it("4.1: same user + same email, provisioned twice (two workspaces) → exactly one trial", async () => {
+      const ownerUserId = randomUUID();
+      const workspace1Id = randomUUID();
+      const workspace2Id = randomUUID();
+      const email = "closure-delta-4-1@example.test";
+      try {
+        // First workspace for this owner: real trial.
+        const first = await provisionScratch({
+          userId: ownerUserId,
+          userLabel: "Closure Delta 4.1 Owner",
+          workspaceId: workspace1Id,
+          workspaceLabel: "Closure Delta 4.1 WS1",
+          email,
+        });
+        expect(first.isTrial).toBe(true);
+
+        // Second workspace, SAME owner, SAME email → blocked (first_user_id AND email_hash both already consumed).
+        await admin`INSERT INTO workspaces
+          (id, owner_user_id, name, workspace_type, locale, timezone, due_date_policy, status) VALUES
+          (${workspace2Id}, ${ownerUserId}, 'Closure Delta 4.1 WS2', 'TEACHER', 'ar-EG', 'Africa/Cairo', 'PER_GROUP', 'ACTIVE')`;
+        const second = await withRuntimeContext({ workspaceId: workspace2Id }, (tx) =>
+          provisionSubscriptionForNewWorkspaceTransaction(tx, { workspaceId: workspace2Id, ownerUserId, email }),
+        );
+        expect(second.isTrial).toBe(false);
+        expect(second.subscription.state).toBe("EXPIRED");
+      } finally {
+        // workspace2 (owner_user_id = ownerUserId) must be gone BEFORE
+        // cleanupScratch deletes the user row itself, or the user delete
+        // hits workspaces_owner_user_id_users_id_fk.
+        await admin`DELETE FROM outbox_events WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM audit_events WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM entitlements WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM subscriptions WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM workspaces WHERE id = ${workspace2Id}`;
+        await cleanupScratch(ownerUserId, workspace1Id);
+      }
+    });
+
+    it("4.2: same user + a DIFFERENT (changed) verified email on a second workspace → still no second trial (UNIQUE(first_user_id) is what blocks it)", async () => {
+      const ownerUserId = randomUUID();
+      const workspace1Id = randomUUID();
+      const workspace2Id = randomUUID();
+      try {
+        const first = await provisionScratch({
+          userId: ownerUserId,
+          userLabel: "Closure Delta 4.2 Owner",
+          workspaceId: workspace1Id,
+          workspaceLabel: "Closure Delta 4.2 WS1",
+          email: "closure-delta-4-2-old@example.test",
+        });
+        expect(first.isTrial).toBe(true);
+
+        await admin`INSERT INTO workspaces
+          (id, owner_user_id, name, workspace_type, locale, timezone, due_date_policy, status) VALUES
+          (${workspace2Id}, ${ownerUserId}, 'Closure Delta 4.2 WS2', 'TEACHER', 'ar-EG', 'Africa/Cairo', 'PER_GROUP', 'ACTIVE')`;
+        const second = await withRuntimeContext({ workspaceId: workspace2Id }, (tx) =>
+          provisionSubscriptionForNewWorkspaceTransaction(tx, {
+            workspaceId: workspace2Id,
+            ownerUserId, // SAME owner
+            email: "closure-delta-4-2-new@example.test", // genuinely DIFFERENT verified email
+          }),
+        );
+        expect(second.isTrial).toBe(false);
+        expect(second.subscription.state).toBe("EXPIRED");
+
+        const grants = await admin`SELECT count(*)::int AS c FROM owner_trial_grants WHERE first_user_id = ${ownerUserId}`;
+        expect(grants[0]!.c).toBe(1); // still just the ONE original grant row — no second row was ever inserted for this owner
+      } finally {
+        // workspace2 (owner_user_id = ownerUserId) must be gone BEFORE
+        // cleanupScratch deletes the user row itself, or the user delete
+        // hits workspaces_owner_user_id_users_id_fk.
+        await admin`DELETE FROM outbox_events WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM audit_events WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM entitlements WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM subscriptions WHERE workspace_id = ${workspace2Id}`;
+        await admin`DELETE FROM workspaces WHERE id = ${workspace2Id}`;
+        await cleanupScratch(ownerUserId, workspace1Id);
+      }
+    });
+
+    it("4.3: a genuinely NEW user + a PREVIOUSLY-used verified email → no second trial (UNIQUE(email_hash) is what blocks it)", async () => {
+      const firstOwnerUserId = randomUUID();
+      const firstWorkspaceId = randomUUID();
+      const secondOwnerUserId = randomUUID();
+      const secondWorkspaceId = randomUUID();
+      const sharedEmail = "closure-delta-4-3@example.test";
+      try {
+        const first = await provisionScratch({
+          userId: firstOwnerUserId,
+          userLabel: "Closure Delta 4.3 Owner 1",
+          workspaceId: firstWorkspaceId,
+          workspaceLabel: "Closure Delta 4.3 WS1",
+          email: sharedEmail,
+        });
+        expect(first.isTrial).toBe(true);
+
+        // A genuinely different users.id row (simulates delete-account-and-recreate) reusing the SAME verified email.
+        const second = await provisionScratch({
+          userId: secondOwnerUserId,
+          userLabel: "Closure Delta 4.3 Owner 2 (recreated)",
+          workspaceId: secondWorkspaceId,
+          workspaceLabel: "Closure Delta 4.3 WS2",
+          email: sharedEmail,
+        });
+        expect(second.isTrial).toBe(false);
+        expect(second.subscription.state).toBe("EXPIRED");
+
+        const entitlements = await withRuntimeContext({ workspaceId: secondWorkspaceId }, (tx) =>
+          listCurrentEntitlementsForWorkspace(tx, secondWorkspaceId),
+        );
+        expect(entitlements.every((e) => e.state === "BLOCKED")).toBe(true);
+      } finally {
+        await cleanupScratch(firstOwnerUserId, firstWorkspaceId);
+        await cleanupScratch(secondOwnerUserId, secondWorkspaceId);
+      }
+    });
+
+    it("4.4: a genuinely NEW user + a genuinely NEW verified email → trial allowed", async () => {
+      const ownerUserId = randomUUID();
+      const workspaceId = randomUUID();
+      try {
+        const result = await provisionScratch({
+          userId: ownerUserId,
+          userLabel: "Closure Delta 4.4 Owner",
+          workspaceId,
+          workspaceLabel: "Closure Delta 4.4 WS",
+          email: "closure-delta-4-4@example.test",
+        });
+        expect(result.isTrial).toBe(true);
+        expect(result.subscription.state).toBe("TRIAL");
+        const entitlements = await withRuntimeContext({ workspaceId }, (tx) => listCurrentEntitlementsForWorkspace(tx, workspaceId));
+        expect(entitlements.every((e) => e.state === "ALLOWED")).toBe(true);
+      } finally {
+        await cleanupScratch(ownerUserId, workspaceId);
+      }
+    });
   });
 
   it("2: Trial expiry — a TRIAL whose period_end has passed is picked up by the scheduled expiry scan and blocks operational entitlements", async () => {
@@ -220,12 +362,122 @@ describe.skipIf(!hasLiveCreds)("Phase 8 Subscriptions/Entitlements Security (liv
     expect(result.scanned).toBeGreaterThanOrEqual(0);
   });
 
-  it("entitlements are genuinely append-only: multiple state transitions leave every historical row intact, only the latest effective_from wins at read time", async () => {
-    const rows = await admin`SELECT id FROM entitlements WHERE workspace_id = ${workspaceAId} ORDER BY effective_from ASC`;
-    // 3 transitions so far (TRIAL provisioning, EXPIRED-by-scan, CANCELLED_AT_PERIOD_END) × 4 capabilities each = 12 rows minimum, none deleted/updated.
-    expect(rows.length).toBeGreaterThanOrEqual(12);
-    const updateAttempt = await admin`SELECT count(*)::int AS c FROM entitlements WHERE workspace_id = ${workspaceAId} AND effective_to IS NOT NULL`;
-    expect(updateAttempt[0]!.c).toBe(0); // effective_to is documented as always-null in this implementation
+  describe("Closure Delta #2 — entitlement temporal integrity (append+close)", () => {
+    // By this point workspaceA has gone through 3 real transitions: TRIAL
+    // (provisioning) -> EXPIRED (expiry scan) -> CANCELLED_AT_PERIOD_END
+    // (manual update in test '3') — 3 x 4 capabilities = 12 rows total, 8
+    // closed + 4 open.
+
+    it("exactly one OPEN entitlement row per capability after multiple state transitions, and it's the one returned by listCurrentEntitlementsForWorkspace", async () => {
+      const openRows = await admin`SELECT capability FROM entitlements WHERE workspace_id = ${workspaceAId} AND effective_to IS NULL ORDER BY capability`;
+      expect(openRows.map((r) => r.capability as string)).toEqual(
+        ["CORE_OPERATIONS", "CREATE_MONTH", "REPORT_EXPORT", "TEAM_MANAGEMENT"].sort(),
+      );
+
+      const current = await withRuntimeContext({ workspaceId: workspaceAId }, (tx) => listCurrentEntitlementsForWorkspace(tx, workspaceAId));
+      expect(current).toHaveLength(4);
+      expect(current.every((e) => e.effectiveTo === null)).toBe(true);
+      expect(current.every((e) => e.state === "ALLOWED")).toBe(true); // latest transition was CANCELLED_AT_PERIOD_END -> full operations
+    });
+
+    it("every PREVIOUS (non-open) row has a non-null effective_to, and nothing was deleted", async () => {
+      const allRows = await admin`SELECT effective_to FROM entitlements WHERE workspace_id = ${workspaceAId}`;
+      expect(allRows.length).toBeGreaterThanOrEqual(12);
+      const closedRows = allRows.filter((r) => r.effective_to !== null);
+      expect(closedRows.length).toBeGreaterThanOrEqual(8); // 2 closed transitions x 4 capabilities
+    });
+
+    it("time ranges do not overlap: for each capability, a closed row's effective_to equals the NEXT row's effective_from exactly", async () => {
+      const rows = await admin`
+        SELECT capability, effective_from, effective_to
+        FROM entitlements
+        WHERE workspace_id = ${workspaceAId}
+        ORDER BY capability, effective_from ASC`;
+      const byCapability = new Map<string, { effective_from: Date; effective_to: Date | null }[]>();
+      for (const row of rows) {
+        const list = byCapability.get(row.capability as string) ?? [];
+        list.push({ effective_from: row.effective_from as Date, effective_to: row.effective_to as Date | null });
+        byCapability.set(row.capability as string, list);
+      }
+      expect(byCapability.size).toBe(4);
+      for (const [, ranges] of byCapability) {
+        expect(ranges.length).toBeGreaterThanOrEqual(3);
+        for (let i = 0; i < ranges.length - 1; i++) {
+          // The row's own close time must equal the NEXT row's own open time — no gap, no overlap.
+          expect(ranges[i]!.effective_to?.getTime()).toBe(ranges[i + 1]!.effective_from.getTime());
+        }
+        // Only the LAST range in the ordered list is open.
+        expect(ranges[ranges.length - 1]!.effective_to).toBeNull();
+        for (let i = 0; i < ranges.length - 1; i++) {
+          expect(ranges[i]!.effective_to).not.toBeNull();
+        }
+      }
+    });
+
+    it("a FAILED subscription transition (version conflict) leaves entitlements completely untouched — no partial close, no partial insert", async () => {
+      const before = await admin`SELECT id, effective_from, effective_to FROM entitlements WHERE workspace_id = ${workspaceAId} ORDER BY effective_from ASC`;
+      const current = await withRuntimeContext({ workspaceId: workspaceAId }, (tx) => findSubscriptionByWorkspaceId(tx, workspaceAId));
+
+      const result = await withRuntimeContext({ workspaceId: workspaceAId }, (tx) =>
+        updateSubscriptionStateTransaction(tx, {
+          id: current!.id,
+          workspaceId: workspaceAId,
+          expectedVersion: current!.version + 999, // deliberately stale/wrong
+          nextState: "ACTIVE",
+          sourceType: "SUBSCRIPTION",
+          sourceId: null,
+          actorUserId: userAId,
+          actorMembershipId: null,
+        }),
+      );
+      expect(result).toBe("SUBSCRIPTION_VERSION_CONFLICT");
+
+      const after = await admin`SELECT id, effective_from, effective_to FROM entitlements WHERE workspace_id = ${workspaceAId} ORDER BY effective_from ASC`;
+      expect(after).toEqual(before); // byte-for-byte identical — the failed subscription UPDATE never reached the entitlement close/insert pair
+    });
+
+    it("app_runtime cannot arbitrarily rewrite historical entitlement state — column-level GRANT permits closing effective_to only, never state/capability", async () => {
+      const closedRow = await admin`SELECT id FROM entitlements WHERE workspace_id = ${workspaceAId} AND effective_to IS NOT NULL LIMIT 1`;
+      expect(closedRow.length).toBe(1);
+      const closedRowId = closedRow[0]!.id as string;
+
+      await expect(
+        withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+          db.execute(sql`UPDATE entitlements SET state = 'BLOCKED' WHERE id = ${closedRowId}`),
+        ),
+      ).rejects.toThrow(/permission denied/i);
+
+      await expect(
+        withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+          db.execute(sql`UPDATE entitlements SET capability = 'CORE_OPERATIONS' WHERE id = ${closedRowId}`),
+        ),
+      ).rejects.toThrow(/permission denied/i);
+
+      // The one column it DOES have — effective_to — still succeeds (this is the exact grant the append+close transaction itself relies on).
+      const readBack = await admin`SELECT effective_to FROM entitlements WHERE id = ${closedRowId}`;
+      const effectiveToIso = (readBack[0]!.effective_to as Date).toISOString();
+      await expect(
+        withRuntimeContext({ workspaceId: workspaceAId }, (db) =>
+          db.execute(sql`UPDATE entitlements SET effective_to = ${effectiveToIso} WHERE id = ${closedRowId}`),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it("app_worker is likewise restricted to the same column-level UPDATE on entitlements (never arbitrary rewrite)", async () => {
+      const closedRow = await admin`SELECT id FROM entitlements WHERE workspace_id = ${workspaceAId} AND effective_to IS NOT NULL LIMIT 1`;
+      const closedRowId = closedRow[0]!.id as string;
+      const workerDb = getWorkerDb();
+      await expect(workerDb.execute(sql`UPDATE entitlements SET state = 'BLOCKED' WHERE id = ${closedRowId}`)).rejects.toThrow(
+        /permission denied/i,
+      );
+    });
+
+    it("RLS isolation remains intact after the temporal-integrity delta: workspace B still sees zero of workspace A's entitlement rows, open or closed", async () => {
+      const rowsForB = await withRuntimeContext({ workspaceId: workspaceBId }, (db) =>
+        db.execute(sql`SELECT * FROM entitlements WHERE workspace_id = ${workspaceAId}`),
+      );
+      expect(rowsForB).toHaveLength(0);
+    });
   });
 
   it("12: RLS cross-workspace isolation — workspace B never sees workspace A's Subscription/Entitlements, and vice versa", async () => {

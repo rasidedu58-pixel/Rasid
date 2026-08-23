@@ -260,6 +260,20 @@
       "when": 1787440900000,
       "tag": "0038_app_worker_subscriptions_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787441000000,
+      "tag": "0039_owner_trial_grants_first_user_id_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787441100000,
+      "tag": "0040_entitlements_temporal_integrity",
+      "breakpoints": true
     }
   ]
 }
