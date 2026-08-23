@@ -37,7 +37,6 @@ import {
 } from "@academic-precision/database";
 import {
   CarryForwardDueDayUnresolvedException,
-  CarryForwardFeeMethodRequiredException,
   IdempotencyConflictException,
   MonthAlreadyExistsException,
   MonthCreateFailedException,
@@ -316,7 +315,11 @@ export class SchedulingService {
 
     // Carry-Forward preview stats (Phase 6 Closure Delta) — only meaningful
     // on the `sourceMonthId` path; `selectedGroupIds` groups have no prior
-    // month, so these stay genuinely zero (not fabricated).
+    // month, so these stay genuinely zero (not fabricated). `join_fee_policy`
+    // (including ASK_EVERY_TIME) governs an actual mid-month join and never
+    // applies to carry-forward (Product Decision — Carry-Forward Fee Rule),
+    // so preview never fails because of it — every continuing student is
+    // always billed the GroupMonth's full monthly fee.
     let studentsContinuing = 0;
     let studentsExcluded = 0;
     let studentsTransferred = 0;
@@ -325,12 +328,6 @@ export class SchedulingService {
     for (const spec of groupSpecs) {
       if (!spec.sourceGroupMonthId) continue;
       const stats = await this.repository.getCarryForwardStats(spec.sourceGroupMonthId);
-      if (stats.continuing > 0 && spec.joinFeePolicy === "ASK_EVERY_TIME") {
-        // Fail fast at preview time — confirm would definitely fail this
-        // group anyway (see runCreateMonthTransaction's own guard); no
-        // point issuing a preview token that can never be confirmed.
-        throw new CarryForwardFeeMethodRequiredException(undefined, { groupId: spec.groupId });
-      }
       studentsContinuing += stats.continuing;
       studentsExcluded += stats.excluded;
       studentsTransferred += stats.transferred;
@@ -447,10 +444,6 @@ export class SchedulingService {
     if (result === "MONTH_ALREADY_EXISTS") {
       await this.repository.failIdempotencyRecord(idempotencyRow.id);
       throw new MonthAlreadyExistsException();
-    }
-    if (result === "CARRY_FORWARD_FEE_METHOD_REQUIRED") {
-      await this.repository.failIdempotencyRecord(idempotencyRow.id);
-      throw new CarryForwardFeeMethodRequiredException();
     }
     if (result === "CARRY_FORWARD_DUE_DAY_UNRESOLVED") {
       await this.repository.failIdempotencyRecord(idempotencyRow.id);

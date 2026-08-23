@@ -73,12 +73,7 @@ export interface SchedulingRepositoryPort {
   // CreateMonth
   runCreateMonthTransaction(
     input: CreateMonthTransactionInput,
-  ): Promise<
-    | CreateMonthTransactionResult
-    | "MONTH_ALREADY_EXISTS"
-    | "CARRY_FORWARD_FEE_METHOD_REQUIRED"
-    | "CARRY_FORWARD_DUE_DAY_UNRESOLVED"
-  >;
+  ): Promise<CreateMonthTransactionResult | "MONTH_ALREADY_EXISTS" | "CARRY_FORWARD_DUE_DAY_UNRESOLVED">;
 
   // Carry-Forward preview stats
   getCarryForwardStats(sourceGroupMonthId: string): Promise<CarryForwardStats>;

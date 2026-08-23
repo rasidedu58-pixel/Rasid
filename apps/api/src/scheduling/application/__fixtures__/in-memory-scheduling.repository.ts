@@ -23,10 +23,8 @@ import {
 } from "@academic-precision/database";
 import type { SchedulingRepositoryPort } from "../ports/scheduling-repository.port";
 
-const CARRY_FORWARD_FEE_METHOD_REQUIRED = "CARRY_FORWARD_FEE_METHOD_REQUIRED" as const;
 const CARRY_FORWARD_DUE_DAY_UNRESOLVED = "CARRY_FORWARD_DUE_DAY_UNRESOLVED" as const;
 
-class CarryForwardFeeMethodRequiredMarker extends Error {}
 class CarryForwardDueDayUnresolvedMarker extends Error {}
 
 /**
@@ -464,18 +462,12 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
 
   async runCreateMonthTransaction(
     input: CreateMonthTransactionInput,
-  ): Promise<
-    | CreateMonthTransactionResult
-    | "MONTH_ALREADY_EXISTS"
-    | typeof CARRY_FORWARD_FEE_METHOD_REQUIRED
-    | typeof CARRY_FORWARD_DUE_DAY_UNRESOLVED
-  > {
+  ): Promise<CreateMonthTransactionResult | "MONTH_ALREADY_EXISTS" | typeof CARRY_FORWARD_DUE_DAY_UNRESOLVED> {
     const snap = this.snapshot();
     try {
       return this.runCreateMonthTransactionInner(input);
     } catch (err) {
       this.restore(snap);
-      if (err instanceof CarryForwardFeeMethodRequiredMarker) return CARRY_FORWARD_FEE_METHOD_REQUIRED;
       if (err instanceof CarryForwardDueDayUnresolvedMarker) return CARRY_FORWARD_DUE_DAY_UNRESOLVED;
       throw err;
     }
@@ -566,10 +558,9 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
           (e) => e.groupMonthId === spec.sourceGroupMonthId && e.status === "ACTIVE",
         );
 
-        if (sourceEnrollments.length > 0 && spec.joinFeePolicy === "ASK_EVERY_TIME") {
-          throw new CarryForwardFeeMethodRequiredMarker(spec.groupId);
-        }
-
+        // join_fee_policy (including ASK_EVERY_TIME) never applies to
+        // carry-forward — a continuing enrollment always gets the full
+        // monthly fee (Product Decision — Carry-Forward Fee Rule).
         const dueDay = spec.dueDay ?? this.workspaceUnifiedDueDay ?? null;
 
         for (const source of sourceEnrollments) {

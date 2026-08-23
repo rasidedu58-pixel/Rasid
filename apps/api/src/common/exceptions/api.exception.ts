@@ -215,23 +215,11 @@ export class ObligationNotPayableException extends ApiException {
 }
 
 /**
- * 422 — Phase 6 Closure Delta (CreateMonth Carry-Forward): a carried-forward
- * group uses `joinFeePolicy = ASK_EVERY_TIME`, which by its own definition
- * requires an explicit human answer per student — no default exists and no
- * reviewer is present during an automated CreateMonth confirm. The whole
- * month-creation transaction aborts and rolls back rather than silently
- * picking a fee.
+ * 422 — Phase 6 Closure Delta: a carried-forward group has no resolvable due
+ * day (neither its own `dueDay` nor the workspace's `unifiedDueDay` is
+ * set), so no obligation `due_date` can be computed for its continuing
+ * students.
  */
-export class CarryForwardFeeMethodRequiredException extends ApiException {
-  constructor(
-    message = "توجد مجموعة مُرحّلة تستخدم سياسة رسوم (اسأل في كل مرة)، ولا يمكن ترحيل طلابها المستمرين تلقائيًا دون تحديد صريح لكل طالب.",
-    details?: Record<string, unknown>,
-  ) {
-    super(422, "CARRY_FORWARD_FEE_METHOD_REQUIRED", message, details);
-  }
-}
-
-/** 422 — Phase 6 Closure Delta: a carried-forward group has no resolvable due day (neither its own `dueDay` nor the workspace's `unifiedDueDay` is set), so no obligation `due_date` can be computed for its continuing students. */
 export class CarryForwardDueDayUnresolvedException extends ApiException {
   constructor(
     message = "تعذر تحديد يوم استحقاق الرسوم لمجموعة مُرحّلة، ولا يمكن إنشاء استحقاقات طلابها المستمرين.",

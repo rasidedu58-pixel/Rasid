@@ -547,22 +547,15 @@ export interface CreateMonthTransactionResult {
   enrollmentCount: number;
 }
 
-export const CARRY_FORWARD_FEE_METHOD_REQUIRED = "CARRY_FORWARD_FEE_METHOD_REQUIRED" as const;
 export const CARRY_FORWARD_DUE_DAY_UNRESOLVED = "CARRY_FORWARD_DUE_DAY_UNRESOLVED" as const;
 
 /**
  * Thrown INSIDE the transaction to force a full rollback ("no half-created
- * month") when a carried-forward group cannot be resolved automatically.
+ * month") when a carried-forward group's due day cannot be resolved.
  * Caught by `runCreateMonthTransaction`'s own try/catch (mirrors
  * `session-mode.repository.ts`'s marker-error convention) and converted to
  * a sentinel string return value — never surfaces as a raw 500.
  */
-class CarryForwardFeeMethodRequiredMarker extends Error {
-  constructor(public readonly groupId: string) {
-    super(CARRY_FORWARD_FEE_METHOD_REQUIRED);
-  }
-}
-
 class CarryForwardDueDayUnresolvedMarker extends Error {
   constructor(public readonly groupId: string) {
     super(CARRY_FORWARD_DUE_DAY_UNRESOLVED);
@@ -590,18 +583,16 @@ class CarryForwardDueDayUnresolvedMarker extends Error {
  *   student_id, new group_month_id, join_date = the new month's first
  *   calendar day, status ACTIVE, fee_method FULL_MONTH) — never a reused or
  *   reactivated enrollment id.
- * - Fee rule (no doc states this explicitly for carry-forward — PRD §33
- *   proration and `join_fee_policy` are both written only for mid-month
- *   joins): a continuing student is present from day 1 of the new month, so
- *   REMAINING_SESSIONS mathematically collapses to the same value as
- *   FULL_MONTH (every session is "eligible") — both `FULL` and `REMAINING`
- *   join_fee_policy therefore charge the group's full `baseFeeMinor`,
- *   calculationBasis `FULL_MONTH`, WITHOUT invoking the proration engine
- *   (which was never specified for this context). `ASK_EVERY_TIME` has no
- *   default by its own definition and no reviewer exists during an
- *   automated confirm — it aborts the WHOLE transaction via
- *   `CarryForwardFeeMethodRequiredMarker` rather than silently picking a
- *   value.
+ * - Fee rule (Product Decision — Carry-Forward Fee Rule): a carry-forward
+ *   Enrollment is, by definition, an enrollment from the FIRST DAY of the
+ *   new month — never a mid-month join. `join_fee_policy`
+ *   (FULL/REMAINING/ASK_EVERY_TIME) governs an ACTUAL mid-month join
+ *   decision and simply does not apply here. Every continuing enrollment
+ *   therefore gets a FinancialObligation for the GroupMonth's full monthly
+ *   fee (`baseFeeMinor`, calculationBasis `FULL_MONTH`), regardless of the
+ *   group's `join_fee_policy` value — INCLUDING `ASK_EVERY_TIME`, which
+ *   never blocks or asks anything on this path. No proration engine is
+ *   ever invoked for carry-forward.
  * - The new FinancialObligation is created via the SAME
  *   `upsertObligationForEnrollment` used by manual Enrollment create/
  *   transfer, inside this SAME `tx` — amount_paid always starts at 0,
@@ -620,16 +611,10 @@ class CarryForwardDueDayUnresolvedMarker extends Error {
 export async function runCreateMonthTransaction(
   db: Db,
   input: CreateMonthTransactionInput,
-): Promise<
-  | CreateMonthTransactionResult
-  | "MONTH_ALREADY_EXISTS"
-  | typeof CARRY_FORWARD_FEE_METHOD_REQUIRED
-  | typeof CARRY_FORWARD_DUE_DAY_UNRESOLVED
-> {
+): Promise<CreateMonthTransactionResult | "MONTH_ALREADY_EXISTS" | typeof CARRY_FORWARD_DUE_DAY_UNRESOLVED> {
   try {
     return await runCreateMonthTransactionInner(db, input);
   } catch (err) {
-    if (err instanceof CarryForwardFeeMethodRequiredMarker) return CARRY_FORWARD_FEE_METHOD_REQUIRED;
     if (err instanceof CarryForwardDueDayUnresolvedMarker) return CARRY_FORWARD_DUE_DAY_UNRESOLVED;
     throw err;
   }
@@ -753,12 +738,12 @@ async function runCreateMonthTransactionInner(
           .from(enrollments)
           .where(and(eq(enrollments.groupMonthId, spec.sourceGroupMonthId), eq(enrollments.status, "ACTIVE")));
 
-        if (sourceEnrollments.length > 0 && spec.joinFeePolicy === "ASK_EVERY_TIME") {
-          // No default exists for this policy by its own definition, and no
-          // human reviewer is present during an automated confirm — abort
-          // the WHOLE month rather than silently pick FULL_MONTH.
-          throw new CarryForwardFeeMethodRequiredMarker(spec.groupId);
-        }
+        // `join_fee_policy` (including ASK_EVERY_TIME) governs an ACTUAL
+        // mid-month join decision and does not apply to carry-forward — a
+        // continuing enrollment is, by definition, effective from day 1 of
+        // the new month, so it always gets the full monthly fee regardless
+        // of the group's join_fee_policy value (Product Decision —
+        // Carry-Forward Fee Rule).
 
         const dueDay = spec.dueDay ?? workspaceRow?.unifiedDueDay ?? null;
 

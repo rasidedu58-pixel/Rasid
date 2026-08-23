@@ -1,8 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  CarryForwardDueDayUnresolvedException,
-  CarryForwardFeeMethodRequiredException,
-} from "../../common/exceptions/api.exception";
+import { CarryForwardDueDayUnresolvedException } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { PermissionResolverService } from "../../team/application/permission-resolver.service";
@@ -15,11 +12,16 @@ const WORKSPACE_A = "workspace-a";
 
 /**
  * Phase 6 Closure Delta — CreateMonth Carry-Forward Integration. Covers the
- * 12 mandatory scenarios from the user's spec. Atomicity ("no half-created
- * month") is asserted here against the in-memory double's own snapshot/
- * restore simulation of a real Postgres transaction rollback; TRUE
- * transactional atomicity is additionally proven against live Supabase in
- * `packages/database/src/carry-forward-security.integration.test.ts`.
+ * 12 mandatory scenarios from the user's original spec, PLUS the amended
+ * Product Decision — Carry-Forward Fee Rule: ASK_EVERY_TIME never blocks
+ * carry-forward (test 9a); every continuing enrollment always gets the
+ * GroupMonth's full monthly fee, calculationBasis FULL_MONTH, no proration
+ * engine involved; join_fee_policy/ASK_EVERY_TIME still governs an actual
+ * mid-month join normally (test 4). Atomicity ("no half-created month") is
+ * asserted here against the in-memory double's own snapshot/restore
+ * simulation of a real Postgres transaction rollback; TRUE transactional
+ * atomicity is additionally proven against live Supabase in
+ * `packages/database/src/carry-forward.integration.test.ts`.
  */
 describe("SchedulingService — CreateMonth Carry-Forward", () => {
   let repo: InMemorySchedulingRepository;
@@ -186,16 +188,26 @@ describe("SchedulingService — CreateMonth Carry-Forward", () => {
     expect(totalEnrollmentsUnderNewGroupMonths).toHaveLength(1); // not duplicated
   });
 
-  it("9a: ASK_EVERY_TIME with continuing students fails fast at PREVIEW time (no preview token issued, no rows created)", async () => {
-    const { sourceGroupMonth } = seedSourceMonth({ joinFeePolicy: "ASK_EVERY_TIME" });
+  it("9a (Product Decision — Carry-Forward Fee Rule): ASK_EVERY_TIME never blocks carry-forward — preview succeeds and CreateMonth confirms normally for continuing students", async () => {
+    const { sourceGroupMonth } = seedSourceMonth({ joinFeePolicy: "ASK_EVERY_TIME", baseFeeMinor: 40000 });
     repo.seedEnrollment({ workspaceId: WORKSPACE_A, studentId: "student-1", groupMonthId: sourceGroupMonth.id, status: "ACTIVE" });
     const sourceMonthId = (await repo.listOperatingMonths(WORKSPACE_A))[0]!.id;
 
-    await expect(
-      service.previewCreateMonth(ownerContext, { targetYear: 2026, targetMonth: 8, sourceMonthId }),
-    ).rejects.toBeInstanceOf(CarryForwardFeeMethodRequiredException);
+    // 1. continuing student + ASK_EVERY_TIME → the month is created successfully.
+    const preview = await service.previewCreateMonth(ownerContext, { targetYear: 2026, targetMonth: 8, sourceMonthId });
+    expect(preview.students).toEqual({ continuing: 1, excluded: 0, transferred: 0 });
+    const confirmed = await service.confirmCreateMonth(owner, ownerContext, randomUUID(), { previewToken: preview.previewToken }, null);
+    expect(confirmed.enrollmentCount).toBe(1);
 
-    expect((await repo.listOperatingMonths(WORKSPACE_A)).filter((m) => m.year === 2026 && m.month === 8)).toHaveLength(0);
+    // 2. obligation = full GroupMonth fee (not blocked, not zero, not asked).
+    const obligation = [...repo.obligationsById.values()][0]!;
+    expect(obligation.baseFeeMinor).toBe(40000);
+    expect(obligation.netDueMinor).toBe(40000);
+    expect(obligation.remainingMinor).toBe(40000);
+    expect(obligation.amountPaidMinor).toBe(0);
+
+    // 3. no proration in carry-forward — calculationBasis stays FULL_MONTH, never REMAINING_SESSIONS.
+    expect(obligation.calculationBasis).toBe("FULL_MONTH");
   });
 
   it("9b: an unresolvable due day (group has none, workspace unifiedDueDay is null) rolls back the WHOLE month — no half-created month", async () => {
@@ -212,6 +224,28 @@ describe("SchedulingService — CreateMonth Carry-Forward", () => {
     expect(repo.groupMonthsById.size).toBe(1); // only the original source group_month
     expect(repo.enrollmentsById.size).toBe(1); // only the original source enrollment — no orphaned carried row
     expect(repo.obligationsById.size).toBe(0);
+  });
+
+  it("4 (Product Decision — Carry-Forward Fee Rule): join_fee_policy/ASK_EVERY_TIME still applies normally to an ACTUAL mid-month join — this delta never touches manual Enrollment create/transfer", async () => {
+    // Regular (non-carry-forward) enrollment creation lives entirely in
+    // EnrollmentsService/students.repository.ts, which this delta does not
+    // modify — `enrollments.service.spec.ts`'s own "ASK_EVERY_TIME requires
+    // an explicit feeMethod" test (unchanged, still passing) is the
+    // authoritative proof. Here we only assert the structural fact this
+    // delta is responsible for: a `selectedGroupIds` CreateMonth spec (a
+    // brand-new group with no `sourceGroupMonthId` — never a carry-forward)
+    // is untouched by the carry-forward code path at all.
+    const freshGroup = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Fresh ASK_EVERY_TIME group" });
+    const preview = await service.previewCreateMonth(ownerContext, {
+      targetYear: 2026,
+      targetMonth: 8,
+      selectedGroupIds: [freshGroup.id],
+      groupInitialConfig: {
+        [freshGroup.id]: { baseFeeMinor: 10000, currencyCode: "EGP", duePolicy: "PER_GROUP", joinFeePolicy: "ASK_EVERY_TIME", scheduleRules: [] },
+      },
+    });
+    const confirmed = await service.confirmCreateMonth(owner, ownerContext, randomUUID(), { previewToken: preview.previewToken }, null);
+    expect(confirmed.enrollmentCount).toBe(0); // no source month to carry from — nothing carried, nothing to ask about here either
   });
 
   it("10: RLS/workspace isolation — carry-forward never reads/writes across workspaces (structural: every query is scoped by the caller's own repository instance/workspaceId)", async () => {

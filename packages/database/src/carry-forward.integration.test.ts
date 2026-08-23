@@ -22,7 +22,6 @@
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { sql } from "drizzle-orm";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, runCreateMonthTransaction, withRuntimeContext } from "@academic-precision/database";
@@ -206,7 +205,7 @@ describe.skipIf(!hasLiveCreds)("Phase 6 Closure Delta — CreateMonth Carry-Forw
     expect(outbox).toHaveLength(1);
   });
 
-  it("5+9: an ASK_EVERY_TIME group with continuing students rolls back the WHOLE month — no operating_month, group_month, enrollment, or obligation is left behind", async () => {
+  it("Product Decision — Carry-Forward Fee Rule: an ASK_EVERY_TIME group with continuing students succeeds — full GroupMonth fee, no proration, real Enrollment+Obligation rows committed", async () => {
     const targetYear = 2027;
     const targetMonth = 1;
 
@@ -222,7 +221,7 @@ describe.skipIf(!hasLiveCreds)("Phase 6 Closure Delta — CreateMonth Carry-Forw
           {
             groupId: groupBId,
             locationId: null,
-            baseFeeMinor: 60000,
+            baseFeeMinor: 70000,
             currencyCode: "EGP",
             duePolicy: "PER_GROUP",
             dueDay: 15,
@@ -234,22 +233,33 @@ describe.skipIf(!hasLiveCreds)("Phase 6 Closure Delta — CreateMonth Carry-Forw
       }),
     );
 
-    expect(result).toBe("CARRY_FORWARD_FEE_METHOD_REQUIRED");
+    if (typeof result === "string") throw new Error(`Expected a full result, got sentinel: ${result}`);
+    expect(result.enrollmentCount).toBe(1); // studentBActive carried despite ASK_EVERY_TIME
 
-    const leaked = await admin`SELECT * FROM operating_months WHERE workspace_id = ${workspaceBId} AND year = ${targetYear} AND month = ${targetMonth}`;
-    expect(leaked).toHaveLength(0);
-    const leakedEnrollments = await admin`SELECT * FROM enrollments WHERE workspace_id = ${workspaceBId} AND id != ${enrollmentBActiveId}`;
-    expect(leakedEnrollments).toHaveLength(0);
+    const newGroupMonth = result.groupMonths[0]!;
+    const carried = await admin`SELECT * FROM enrollments WHERE group_month_id = ${newGroupMonth.id}`;
+    expect(carried).toHaveLength(1);
+    expect(carried[0]!.student_id).toBe(studentBActiveId);
+
+    const obligation = await admin`SELECT * FROM financial_obligations WHERE enrollment_id = ${carried[0]!.id}`;
+    expect(obligation).toHaveLength(1);
+    expect(Number(obligation[0]!.base_fee_minor)).toBe(70000); // full GroupMonth fee, never asked/blocked
+    expect(Number(obligation[0]!.amount_paid_minor)).toBe(0);
+    expect(obligation[0]!.calculation_basis).toBe("FULL_MONTH"); // no proration
   });
 
   it("6+8: workspace isolation — carrying forward workspace A's source month never touches workspace B's enrollments/obligations", async () => {
     // (Already implicitly proven by test 1's enrollmentCount === 2, restricted
     // to workspace A's own source group_month.) Explicit check: workspace B's
-    // original enrollment is completely unaffected by workspace A's confirm.
+    // original enrollment is completely unaffected by workspace A's confirm,
+    // and workspace B's own carry-forward (previous test) only ever produced
+    // rows scoped to workspace B — never leaked into workspace A's data.
     const untouchedB = await admin`SELECT * FROM enrollments WHERE id = ${enrollmentBActiveId}`;
     expect(untouchedB).toHaveLength(1);
     expect(untouchedB[0]!.status).toBe("ACTIVE");
     const bObligations = await admin`SELECT * FROM financial_obligations WHERE workspace_id = ${workspaceBId}`;
-    expect(bObligations).toHaveLength(0); // never created for B by workspace A's transaction
+    expect(bObligations.every((o) => o.workspace_id === workspaceBId)).toBe(true);
+    const crossLeak = await admin`SELECT * FROM financial_obligations WHERE workspace_id = ${workspaceAId} AND enrollment_id IN (SELECT id FROM enrollments WHERE workspace_id = ${workspaceBId})`;
+    expect(crossLeak).toHaveLength(0);
   });
 });
