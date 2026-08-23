@@ -172,6 +172,9 @@ importers:
       '@academic-precision/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@academic-precision/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@academic-precision/observability':
         specifier: workspace:*
         version: link:../../packages/observability

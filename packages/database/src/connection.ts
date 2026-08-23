@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
-import { getDatabaseUrl } from "./env";
+import { getDatabaseUrl, getWorkerDatabaseUrl } from "./env";
 import * as schema from "./schema/index";
 
 /**
@@ -32,6 +32,49 @@ export async function closeDb(): Promise<void> {
     client = undefined;
     db = undefined;
   }
+  if (workerClient) {
+    await workerClient.end({ timeout: 5 });
+    workerClient = undefined;
+    workerDb = undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Worker connection (Phase 7) — a SEPARATE singleton, authenticating as the
+// dedicated least-privilege `app_worker` role (never `app_runtime`, never
+// the migration/admin role). See migrations/0032_app_worker_role.sql for
+// the full rationale.
+// ---------------------------------------------------------------------------
+
+let workerClient: Sql | undefined;
+let workerDb: PostgresJsDatabase<typeof schema> | undefined;
+
+export function getWorkerDb(): PostgresJsDatabase<typeof schema> {
+  if (!workerDb) {
+    workerClient = postgres(getWorkerDatabaseUrl(), { max: 5 });
+    workerDb = drizzle(workerClient, { schema });
+  }
+  return workerDb;
+}
+
+/**
+ * Worker-role equivalent of {@link withRuntimeContext} — runs `callback`
+ * inside a transaction on the `app_worker` connection with
+ * `app.workspace_id` set via `SET LOCAL` for the lifetime of that
+ * transaction. The outbox dispatcher calls this ONCE it has read an
+ * event's own `workspace_id` (outbox claiming itself happens outside any
+ * workspace context — see the worker-only RLS policies in 0032 — since the
+ * dispatcher doesn't know which workspace an event belongs to until it
+ * reads the row).
+ */
+export function withWorkerRuntimeContext<T>(
+  params: { workspaceId: string },
+  callback: (scopedDb: PostgresJsDatabase<typeof schema>) => Promise<T>,
+): Promise<T> {
+  return getWorkerDb().transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.workspace_id', ${params.workspaceId}, true)`);
+    return callback(tx as unknown as PostgresJsDatabase<typeof schema>);
+  });
 }
 
 /**

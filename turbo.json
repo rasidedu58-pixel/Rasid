@@ -14,7 +14,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["DATABASE_URL", "MIGRATION_DATABASE_URL"]
+      "env": ["DATABASE_URL", "MIGRATION_DATABASE_URL", "WORKER_DATABASE_URL"]
     },
     "dev": {
       "cache": false,

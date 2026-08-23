@@ -1,35 +1,88 @@
 import { createLogger, runWithContext } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
+import { closeDb, getWorkerDb, processPendingOutboxEvents } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
 
 /**
- * Standalone worker process bootstrap.
+ * Standalone worker process bootstrap — Phase 7.
  *
- * Phase 0 foundation only: no real queue/job is registered yet (no session
- * generation, attention evaluation, billing, or reports). This proves the
- * process boots, logs with correlation context, and shuts down gracefully.
- * Later phases register BullMQ workers here using
- * `src/queue/connection.ts`'s `createRedisConnection()`.
+ * Runs the outbox dispatcher (packages/database/src/worker/outbox-
+ * dispatcher.ts) on the dedicated, least-privilege `app_worker` connection
+ * (never `app_runtime`, never the migration/admin role — see migrations/
+ * 0032_app_worker_role.sql). Deliberately a SEQUENTIAL await-based polling
+ * loop, NOT `setInterval`: `setInterval` would let a slow poll cycle
+ * overlap with the next tick, letting two cycles race to claim/process
+ * events concurrently on the SAME process — the explicit product
+ * requirement is a serial loop where each cycle fully awaits the previous
+ * one before scheduling the next, with backoff on empty/errored cycles and
+ * a graceful-shutdown path that lets an in-flight cycle finish before the
+ * process exits.
  */
 const logger = createLogger("academic-precision-worker");
 
+const POLL_EVENT_TYPES = ["SessionCompleted"];
+const IDLE_POLL_DELAY_MS = 5_000; // nothing was claimed — wait a bit before checking again.
+const ACTIVE_POLL_DELAY_MS = 250; // something WAS claimed — check again soon, more may be waiting.
+const ERROR_POLL_DELAY_MS = 15_000; // an unexpected (non-event-scoped) error — back off harder.
+const MAX_EVENTS_PER_CYCLE = 20;
+
+function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    // Best-effort early wake-up on shutdown so the loop can exit promptly
+    // rather than waiting out the full delay.
+    const check = setInterval(() => {
+      if (signal.stopped) {
+        clearTimeout(timer);
+        clearInterval(check);
+        resolve();
+      }
+    }, 100);
+    timer.unref?.();
+    check.unref?.();
+  });
+}
+
+async function runPollingLoop(state: { stopped: boolean }): Promise<void> {
+  const workerDb = getWorkerDb();
+
+  while (!state.stopped) {
+    const bootId = randomUUID();
+    try {
+      const result = await runWithContext({ jobId: bootId }, () =>
+        processPendingOutboxEvents(workerDb, { eventTypes: POLL_EVENT_TYPES, maxEvents: MAX_EVENTS_PER_CYCLE }),
+      );
+
+      if (result.claimed === 0) {
+        await sleep(IDLE_POLL_DELAY_MS, state);
+      } else {
+        logger.info({ ...result }, "Outbox dispatch cycle completed.");
+        await sleep(ACTIVE_POLL_DELAY_MS, state);
+      }
+    } catch (error) {
+      logger.error({ error }, "Outbox dispatch cycle failed unexpectedly — backing off.");
+      await sleep(ERROR_POLL_DELAY_MS, state);
+    }
+  }
+}
+
 function bootstrap(): void {
   const bootId = randomUUID();
+  const state = { stopped: false };
 
   runWithContext({ jobId: bootId }, () => {
-    logger.info({ bootId }, "Academic Precision worker starting (Phase 0 foundation).");
+    logger.info({ bootId }, "Academic Precision worker starting (Phase 7 — outbox dispatcher).");
   });
 
-  // Keeps the process alive as a long-running worker. Later phases replace
-  // this with real BullMQ worker(s) consuming from the Redis connection
-  // factory in src/queue/connection.ts.
-  const heartbeat = setInterval(() => {
-    logger.debug("Worker heartbeat — no queues registered in Phase 0.");
-  }, 60_000);
+  const loopPromise = runPollingLoop(state);
 
   registerGracefulShutdown(logger, async () => {
-    clearInterval(heartbeat);
-    // No live connections/queues to close yet in Phase 0.
+    state.stopped = true;
+    // Let the in-flight poll cycle (if any) finish its current
+    // claim+process transaction before closing the connection — never cut
+    // a transaction off mid-flight.
+    await loopPromise;
+    await closeDb();
   });
 }
 

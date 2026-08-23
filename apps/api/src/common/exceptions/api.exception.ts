@@ -228,3 +228,17 @@ export class CarryForwardDueDayUnresolvedException extends ApiException {
     super(422, "CARRY_FORWARD_DUE_DAY_UNRESOLVED", message, details);
   }
 }
+
+/** 409 — Phase 7, API Contract §12: an AttentionCase/ScheduledFollowUp status transition is not allowed from its current state. Returns the current state so the caller can reconcile. */
+export class AttentionCaseInvalidStateException extends ApiException {
+  constructor(message = "الإجراء غير صالح لحالة الحالة الحالية.", details?: Record<string, unknown>) {
+    super(409, "ATTENTION_CASE_INVALID_STATE", message, details);
+  }
+}
+
+/** 409 — Phase 7, API Contract §12: a ScheduledFollowUp status transition (complete/reschedule) is not allowed from its current state (e.g. already DONE/CANCELLED). */
+export class FollowupInvalidStateException extends ApiException {
+  constructor(message = "الإجراء غير صالح لحالة المتابعة الحالية.", details?: Record<string, unknown>) {
+    super(409, "FOLLOWUP_INVALID_STATE", message, details);
+  }
+}

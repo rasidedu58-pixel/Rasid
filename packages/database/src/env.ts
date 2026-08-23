@@ -22,6 +22,16 @@ import { z } from "zod";
 const databaseEnvSchema = z.object({
   DATABASE_URL: z.string().optional(),
   MIGRATION_DATABASE_URL: z.string().optional(),
+  /**
+   * Phase 7 — the dedicated, least-privilege `app_worker` connection
+   * string (see migrations/0032_app_worker_role.sql), used ONLY by
+   * `apps/worker`'s outbox dispatcher. Deliberately a SEPARATE role from
+   * `app_runtime`: `app_runtime` has never had UPDATE on `outbox_events`
+   * (0024's own comment — "status transitions belong to a future worker
+   * phase and its own role"), and this env var is that role's own
+   * connection, not a widened runtime one.
+   */
+  WORKER_DATABASE_URL: z.string().optional(),
 });
 
 export function loadDatabaseEnv(
@@ -66,4 +76,23 @@ export function getMigrationDatabaseUrl(
     );
   }
   return url;
+}
+
+/**
+ * Returns a validated `WORKER_DATABASE_URL` (the dedicated, least-privilege
+ * `app_worker` connection — see migrations/0032_app_worker_role.sql),
+ * throwing only when something actually tries to connect without one
+ * configured. Never call this at module import time.
+ */
+export function getWorkerDatabaseUrl(
+  source: Record<string, string | undefined> = typeof process !== "undefined" ? process.env : {},
+): string {
+  const { WORKER_DATABASE_URL } = loadDatabaseEnv(source);
+  if (!WORKER_DATABASE_URL) {
+    throw new Error(
+      "WORKER_DATABASE_URL is not set. Configure it (the app_worker role's own connection string) " +
+        "before starting the outbox dispatcher.",
+    );
+  }
+  return WORKER_DATABASE_URL;
 }

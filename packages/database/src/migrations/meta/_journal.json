@@ -190,6 +190,41 @@
       "when": 1787439900000,
       "tag": "0028_rls_phase6",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787440000000,
+      "tag": "0029_attention_cases_reasons_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787440100000,
+      "tag": "0030_contact_logs_scheduled_followups",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787440200000,
+      "tag": "0031_rls_attention_followup",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787440300000,
+      "tag": "0032_app_worker_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787440400000,
+      "tag": "0033_app_worker_groups_grant",
+      "breakpoints": true
     }
   ]
 }

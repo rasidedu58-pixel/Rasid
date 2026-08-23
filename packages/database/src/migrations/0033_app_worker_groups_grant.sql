@@ -1,0 +1,15 @@
+-- Phase 7 fix — found during live integration testing. The
+-- `attention_reasons_enforce_same_workspace_group_trigger` (0029) runs as
+-- SECURITY INVOKER (the Postgres default for trigger functions), so it
+-- executes with the PRIVILEGES OF WHOEVER TRIGGERED IT — for a rule-engine
+-- INSERT into `attention_reasons`, that is `app_worker`. The trigger body
+-- does `SELECT 1 FROM groups ...` to verify the referenced group belongs
+-- to the same workspace, but 0032 never granted `app_worker` SELECT on
+-- `groups` at all — every real rule-engine evaluation therefore failed
+-- with "permission denied for table groups" the moment it tried to insert
+-- a Reason. `groups` is read-only for the worker either way (it never
+-- writes groups), so this is a strict least-privilege addition, not a
+-- widening beyond what the rule engine's own trigger dependency already
+-- requires.
+--> statement-breakpoint
+GRANT SELECT ON public.groups TO app_worker;
