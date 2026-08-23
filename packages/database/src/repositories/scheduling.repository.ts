@@ -20,7 +20,10 @@ import { sessions } from "../schema/sessions";
 import { idempotencyRecords } from "../schema/idempotency";
 import { auditEvents } from "../schema/audit";
 import { workspaces } from "../schema/workspaces";
-import type { Db } from "./identity.repository";
+// `WorkspaceRow` is already exported by identity.repository.ts (same
+// underlying `workspaces` table) — re-used here (not redeclared) to avoid
+// a duplicate-export name collision at the package barrel.
+import type { Db, WorkspaceRow } from "./identity.repository";
 import {
   generateSessionOccurrencesForRules,
   type ScheduleRuleInput,
@@ -54,6 +57,11 @@ export async function findWorkspaceTimezone(db: Db, workspaceId: string): Promis
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
   return rows[0]?.timezone;
+}
+
+/** Phase 6 — full workspace row, needed for `due_date_policy`/`unified_due_day` when resolving an obligation's due_date. */
+export function findWorkspaceById(db: Db, id: string): Promise<WorkspaceRow | undefined> {
+  return db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1).then((rows) => rows[0]);
 }
 
 export function findGroupById(db: Db, groupId: string): Promise<GroupRow | undefined> {

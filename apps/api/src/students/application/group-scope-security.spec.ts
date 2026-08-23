@@ -84,6 +84,13 @@ describe("Student Group-Scope Security Delta", () => {
       joinDate: "2026-08-01",
       status: "ACTIVE",
       feeMethod: "FULL_MONTH",
+      obligation: {
+        baseFeeMinor: 60000,
+        currencyCode: "EGP",
+        dueDate: "2026-08-15",
+        calculationBasis: "FULL_MONTH",
+        calculationSnapshotJson: null,
+      },
     });
     return created;
   }

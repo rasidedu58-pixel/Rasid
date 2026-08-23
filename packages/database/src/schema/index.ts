@@ -8,9 +8,10 @@
  * student_guardians), `qrCredentials`, and `enrollments` are implemented as
  * of Phase 4. `sessionExams`, `sessionRecords`, `outbox` (pulled forward in
  * the Phase 5 Closure Delta), and `featureFlags` (new in the Phase 5
- * Closure Delta) are implemented as of Phase 5 — see each module's own
- * comment. All other modules remain structural placeholders reserved for
- * later phases.
+ * Closure Delta) are implemented as of Phase 5. `finance`
+ * (financial_obligations, payments, payment_reversals) is implemented as of
+ * Phase 6 — see each module's own comment. All other modules remain
+ * structural placeholders reserved for later phases.
  */
 export * as identity from "./identity";
 export * as workspaces from "./workspaces";

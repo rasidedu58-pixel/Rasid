@@ -7,9 +7,12 @@ import {
   findGroupById,
   findGroupMonthById,
   findGuardianById,
+  findObligationByEnrollmentId,
+  findOperatingMonthById,
   findQrByTokenHash,
   findStudentById,
   findStudentGuardianById,
+  findWorkspaceById,
   findWorkspaceTimezone,
   generateUniqueStudentCode,
   insertGuardian,
@@ -30,6 +33,7 @@ import {
   withRuntimeContext,
   type CreateOrReactivateEnrollmentInput,
   type EnrollmentRow,
+  type FinancialObligationRow,
   type GroupMonthRow,
   type GroupRow,
   type GuardianRow,
@@ -37,6 +41,7 @@ import {
   type InsertStudentGuardianInput,
   type InsertStudentInput,
   type IssueQrInput,
+  type OperatingMonthRow,
   type QrCredentialRow,
   type ReissueQrInput,
   type SessionRow,
@@ -49,6 +54,7 @@ import {
   type UpdateStudentGuardianInput,
   type UpdateStudentInput,
   type WithdrawEnrollmentInput,
+  type WorkspaceRow,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
 import type { StudentsRepositoryPort } from "../application/ports/students-repository.port";
@@ -72,6 +78,10 @@ export class DrizzleStudentsRepository implements StudentsRepositoryPort {
     return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => findWorkspaceTimezone(db, workspaceId));
   }
 
+  findWorkspaceById(id: string): Promise<WorkspaceRow | undefined> {
+    return withRuntimeContext(this.runtimeCtx(id), (db) => findWorkspaceById(db, id));
+  }
+
   findGroupMonthById(id: string): Promise<GroupMonthRow | undefined> {
     return withRuntimeContext(this.runtimeCtx(), (db) => findGroupMonthById(db, id));
   }
@@ -82,6 +92,10 @@ export class DrizzleStudentsRepository implements StudentsRepositoryPort {
 
   listSessionsForGroupMonth(groupMonthId: string): Promise<SessionRow[]> {
     return withRuntimeContext(this.runtimeCtx(), (db) => listSessionsForGroupMonth(db, groupMonthId));
+  }
+
+  findOperatingMonthById(id: string): Promise<OperatingMonthRow | undefined> {
+    return withRuntimeContext(this.runtimeCtx(), (db) => findOperatingMonthById(db, id));
   }
 
   generateUniqueStudentCode(workspaceId: string): Promise<string> {
@@ -170,7 +184,7 @@ export class DrizzleStudentsRepository implements StudentsRepositoryPort {
 
   createOrReactivateEnrollmentTransaction(
     input: CreateOrReactivateEnrollmentInput,
-  ): Promise<{ enrollment: EnrollmentRow; reactivated: boolean }> {
+  ): Promise<{ enrollment: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow }> {
     return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) =>
       createOrReactivateEnrollmentTransaction(db, input),
     );
@@ -182,10 +196,16 @@ export class DrizzleStudentsRepository implements StudentsRepositoryPort {
 
   transferEnrollmentTransaction(
     input: TransferEnrollmentTransactionInput,
-  ): Promise<{ source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean } | undefined> {
+  ): Promise<
+    { source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow } | undefined
+  > {
     return withRuntimeContext(this.runtimeCtx(input.targetWorkspaceId), (db) =>
       transferEnrollmentTransaction(db, input),
     );
+  }
+
+  findObligationByEnrollmentId(enrollmentId: string): Promise<FinancialObligationRow | undefined> {
+    return withRuntimeContext(this.runtimeCtx(), (db) => findObligationByEnrollmentId(db, enrollmentId));
   }
 
   insertAuditEvent(input: StudentsAuditEventInput): Promise<void> {

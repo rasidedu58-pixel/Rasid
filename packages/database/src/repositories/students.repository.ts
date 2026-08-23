@@ -19,6 +19,12 @@ import type { Db } from "./identity.repository";
 // underlying `sessions` table) — re-used here (not redeclared) to avoid a
 // duplicate-export name collision at the package barrel.
 import type { SessionRow } from "./scheduling.repository";
+// Phase 6 — the Enrollment+Obligation transaction combines both writes in
+// ONE db.transaction(); `upsertObligationForEnrollment` is a plain
+// (non-transaction-opening) helper designed to run inside an ALREADY-open
+// tx, exactly like session-mode.repository.ts's own cross-file reuse of
+// scheduling.repository.ts's idempotency helpers.
+import { upsertObligationForEnrollment, type FinancialObligationRow, type ObligationTerms } from "./finance.repository";
 
 export type StudentRow = typeof students.$inferSelect;
 export type GuardianRow = typeof guardians.$inferSelect;
@@ -513,6 +519,8 @@ export interface CreateOrReactivateEnrollmentInput {
   status: "PENDING" | "ACTIVE";
   feeMethod: "FULL_MONTH" | "CUSTOM" | "REMAINING_SESSIONS";
   customFeeMinor?: number | null;
+  /** Phase 6 — the FinancialObligation terms for this join; see `upsertObligationForEnrollment`'s own doc comment for the create-vs-refresh-vs-leave-alone rule. */
+  obligation: ObligationTerms;
 }
 
 /**
@@ -523,11 +531,16 @@ export interface CreateOrReactivateEnrollmentInput {
  * being inserted, which the UNIQUE constraint would reject anyway. This is
  * the explicit "clean re-activation path, not a raw 500 on unique
  * violation" the phase brief calls for.
+ *
+ * Phase 6: also upserts the Enrollment's FinancialObligation in the SAME
+ * transaction — "Enrollment + obligation transaction" per API Contract
+ * §9.5's own endpoint description (previously deferred — Phase 4 pre-
+ * authorized scoping decision #1, closed now).
  */
 export async function createOrReactivateEnrollmentTransaction(
   db: Db,
   input: CreateOrReactivateEnrollmentInput,
-): Promise<{ enrollment: EnrollmentRow; reactivated: boolean }> {
+): Promise<{ enrollment: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow }> {
   return db.transaction(async (tx) => {
     const [existing] = await tx
       .select()
@@ -535,6 +548,8 @@ export async function createOrReactivateEnrollmentTransaction(
       .where(and(eq(enrollments.studentId, input.studentId), eq(enrollments.groupMonthId, input.groupMonthId)))
       .limit(1);
 
+    let enrollment: EnrollmentRow;
+    let reactivated: boolean;
     if (existing) {
       const [updated] = await tx
         .update(enrollments)
@@ -551,23 +566,33 @@ export async function createOrReactivateEnrollmentTransaction(
         .where(eq(enrollments.id, existing.id))
         .returning();
       if (!updated) throw new Error("Failed to reactivate enrollments row.");
-      return { enrollment: updated, reactivated: true };
+      enrollment = updated;
+      reactivated = true;
+    } else {
+      const [inserted] = await tx
+        .insert(enrollments)
+        .values({
+          workspaceId: input.workspaceId,
+          studentId: input.studentId,
+          groupMonthId: input.groupMonthId,
+          joinDate: input.joinDate,
+          status: input.status,
+          feeMethod: input.feeMethod,
+          customFeeMinor: input.customFeeMinor ?? null,
+        })
+        .returning();
+      if (!inserted) throw new Error("Failed to insert enrollments row.");
+      enrollment = inserted;
+      reactivated = false;
     }
 
-    const [inserted] = await tx
-      .insert(enrollments)
-      .values({
-        workspaceId: input.workspaceId,
-        studentId: input.studentId,
-        groupMonthId: input.groupMonthId,
-        joinDate: input.joinDate,
-        status: input.status,
-        feeMethod: input.feeMethod,
-        customFeeMinor: input.customFeeMinor ?? null,
-      })
-      .returning();
-    if (!inserted) throw new Error("Failed to insert enrollments row.");
-    return { enrollment: inserted, reactivated: false };
+    const { obligation } = await upsertObligationForEnrollment(tx, {
+      workspaceId: input.workspaceId,
+      enrollmentId: enrollment.id,
+      ...input.obligation,
+    });
+
+    return { enrollment, reactivated, obligation };
   });
 }
 
@@ -603,17 +628,21 @@ export interface TransferEnrollmentTransactionInput {
   status: "PENDING" | "ACTIVE";
   feeMethod: "FULL_MONTH" | "CUSTOM" | "REMAINING_SESSIONS";
   customFeeMinor?: number | null;
+  /** Phase 6 — obligation terms for the TARGET enrollment only; the source enrollment's own obligation (if any) is deliberately left untouched — same "old debt stays independent, never auto-adjusted" reasoning as withdrawal. */
+  obligation: ObligationTerms;
 }
 
 /**
  * Transactionally ends the source enrollment (status=TRANSFERRED,
  * end_reason='TRANSFER') and creates/reactivates the target enrollment for
  * the SAME student_id — Student identity never changes across a transfer.
+ * Phase 6: also upserts the TARGET's FinancialObligation in the same
+ * transaction (see `CreateOrReactivateEnrollmentInput`'s doc comment).
  */
 export async function transferEnrollmentTransaction(
   db: Db,
   input: TransferEnrollmentTransactionInput,
-): Promise<{ source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean } | undefined> {
+): Promise<{ source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow } | undefined> {
   return db.transaction(async (tx) => {
     const [source] = await tx
       .select()
@@ -681,7 +710,13 @@ export async function transferEnrollmentTransaction(
       target = insertedTarget;
     }
 
-    return { source: updatedSource, target, reactivated };
+    const { obligation } = await upsertObligationForEnrollment(tx, {
+      workspaceId: input.targetWorkspaceId,
+      enrollmentId: target.id,
+      ...input.obligation,
+    });
+
+    return { source: updatedSource, target, reactivated, obligation };
   });
 }
 

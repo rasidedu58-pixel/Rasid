@@ -1,6 +1,7 @@
 import type {
   CreateOrReactivateEnrollmentInput,
   EnrollmentRow,
+  FinancialObligationRow,
   GroupMonthRow,
   GroupRow,
   GuardianRow,
@@ -8,6 +9,7 @@ import type {
   InsertStudentGuardianInput,
   InsertStudentInput,
   IssueQrInput,
+  OperatingMonthRow,
   QrCredentialRow,
   ReissueQrInput,
   SessionRow,
@@ -20,6 +22,7 @@ import type {
   UpdateStudentGuardianInput,
   UpdateStudentInput,
   WithdrawEnrollmentInput,
+  WorkspaceRow,
 } from "@academic-precision/database";
 
 /**
@@ -37,11 +40,15 @@ import type {
  */
 export interface StudentsRepositoryPort {
   findWorkspaceTimezone(workspaceId: string): Promise<string | undefined>;
+  /** Phase 6 — full workspace row, for due_date_policy/unified_due_day resolution. */
+  findWorkspaceById(id: string): Promise<WorkspaceRow | undefined>;
 
   // GroupMonth/Group reads (enrollment scope + fee/schedule context)
   findGroupMonthById(id: string): Promise<GroupMonthRow | undefined>;
   findGroupById(id: string): Promise<GroupRow | undefined>;
   listSessionsForGroupMonth(groupMonthId: string): Promise<SessionRow[]>;
+  /** Phase 6 — for obligation due_date resolution (operating month year/month). */
+  findOperatingMonthById(id: string): Promise<OperatingMonthRow | undefined>;
 
   // Students
   generateUniqueStudentCode(workspaceId: string): Promise<string>;
@@ -87,11 +94,15 @@ export interface StudentsRepositoryPort {
   ): Promise<EnrollmentRow | undefined>;
   createOrReactivateEnrollmentTransaction(
     input: CreateOrReactivateEnrollmentInput,
-  ): Promise<{ enrollment: EnrollmentRow; reactivated: boolean }>;
+  ): Promise<{ enrollment: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow }>;
   withdrawEnrollment(input: WithdrawEnrollmentInput): Promise<EnrollmentRow | undefined>;
   transferEnrollmentTransaction(
     input: TransferEnrollmentTransactionInput,
-  ): Promise<{ source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean } | undefined>;
+  ): Promise<
+    { source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow } | undefined
+  >;
+  /** Phase 6 — read the Enrollment's obligation (e.g. to echo it on withdraw, or for Student 360). */
+  findObligationByEnrollmentId(enrollmentId: string): Promise<FinancialObligationRow | undefined>;
 
   // Audit
   insertAuditEvent(input: StudentsAuditEventInput): Promise<void>;

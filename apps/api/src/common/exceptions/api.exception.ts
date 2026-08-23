@@ -185,3 +185,31 @@ export class ExamScoreOutOfRangeException extends ApiException {
     super(422, "EXAM_SCORE_OUT_OF_RANGE", message, details);
   }
 }
+
+/** 422 — API Contract §12: payment amount <= 0 or currency mismatch. */
+export class PaymentInvalidAmountException extends ApiException {
+  constructor(message = "مبلغ الدفعة غير صالح.", details?: Record<string, unknown>) {
+    super(422, "PAYMENT_INVALID_AMOUNT", message, details);
+  }
+}
+
+/** 422 — API Contract §12: amount > obligation's remaining balance. No overpayment/credit balance in V1. */
+export class PaymentExceedsRemainingException extends ApiException {
+  constructor(message = "المبلغ أكبر من المتبقي على هذا الاستحقاق.", details?: Record<string, unknown>) {
+    super(422, "PAYMENT_EXCEEDS_REMAINING", message, details);
+  }
+}
+
+/** 409 — API Contract §12: a Payment may be reversed at most once (V1). */
+export class PaymentAlreadyReversedException extends ApiException {
+  constructor(message = "تم عكس هذه الدفعة بالفعل.", details?: Record<string, unknown>) {
+    super(409, "PAYMENT_ALREADY_REVERSED", message, details);
+  }
+}
+
+/** 409 — API Contract §12: the obligation's current state does not allow a payment (e.g. already PAID). */
+export class ObligationNotPayableException extends ApiException {
+  constructor(message = "لا يمكن تسجيل دفعة على هذا الاستحقاق في حالته الحالية.", details?: Record<string, unknown>) {
+    super(409, "OBLIGATION_NOT_PAYABLE", message, details);
+  }
+}

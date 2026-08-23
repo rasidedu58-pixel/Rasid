@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   CreateOrReactivateEnrollmentInput,
   EnrollmentRow,
+  FinancialObligationRow,
   GroupMonthRow,
   GroupRow,
   GuardianRow,
@@ -9,6 +10,8 @@ import type {
   InsertStudentGuardianInput,
   InsertStudentInput,
   IssueQrInput,
+  ObligationTerms,
+  OperatingMonthRow,
   QrCredentialRow,
   ReissueQrInput,
   SessionRow,
@@ -21,6 +24,7 @@ import type {
   UpdateStudentGuardianInput,
   UpdateStudentInput,
   WithdrawEnrollmentInput,
+  WorkspaceRow,
 } from "@academic-precision/database";
 import type { StudentsRepositoryPort } from "../ports/students-repository.port";
 
@@ -39,6 +43,9 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
   readonly groupsById = new Map<string, GroupRow>();
   readonly groupMonthsById = new Map<string, GroupMonthRow>();
   readonly sessionsById = new Map<string, SessionRow>();
+  readonly workspacesById = new Map<string, WorkspaceRow>();
+  readonly operatingMonthsById = new Map<string, OperatingMonthRow>();
+  readonly obligationsById = new Map<string, FinancialObligationRow>();
   readonly auditEvents: StudentsAuditEventInput[] = [];
   workspaceTimezone = "Africa/Cairo";
 
@@ -47,6 +54,50 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
   }
 
   // ---- seeding helpers -----------------------------------------------
+
+  /** Phase 6 — auto-seeded by `seedGroupMonth` when not already present, so pre-Phase-6 tests never need to know about it. */
+  seedWorkspace(input: Partial<WorkspaceRow> & { id: string }): WorkspaceRow {
+    const now = this.now();
+    const row: WorkspaceRow = {
+      id: input.id,
+      ownerUserId: input.ownerUserId ?? "u-owner",
+      name: input.name ?? "Workspace",
+      workspaceType: input.workspaceType ?? "TEACHER",
+      locale: input.locale ?? "ar-EG",
+      timezone: input.timezone ?? this.workspaceTimezone,
+      dueDatePolicy: input.dueDatePolicy ?? "PER_GROUP",
+      unifiedDueDay: input.unifiedDueDay ?? null,
+      status: input.status ?? "ACTIVE",
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now,
+      archivedAt: input.archivedAt ?? null,
+    };
+    this.workspacesById.set(row.id, row);
+    return row;
+  }
+
+  private ensureWorkspace(workspaceId: string): WorkspaceRow {
+    return this.workspacesById.get(workspaceId) ?? this.seedWorkspace({ id: workspaceId });
+  }
+
+  /** Phase 6 — auto-seeded by `seedGroupMonth` (year 2026/month 8 default) when not already present. */
+  seedOperatingMonth(input: Partial<OperatingMonthRow> & { workspaceId: string }): OperatingMonthRow {
+    const now = this.now();
+    const row: OperatingMonthRow = {
+      id: input.id ?? randomUUID(),
+      workspaceId: input.workspaceId,
+      year: input.year ?? 2026,
+      month: input.month ?? 8,
+      status: input.status ?? "CURRENT",
+      createdByUserId: input.createdByUserId ?? "u-owner",
+      createdAt: input.createdAt ?? now,
+      activatedAt: input.activatedAt ?? null,
+      archivedAt: input.archivedAt ?? null,
+      version: input.version ?? 1,
+    };
+    this.operatingMonthsById.set(row.id, row);
+    return row;
+  }
 
   seedGroup(input: Partial<GroupRow> & { workspaceId: string; name: string }): GroupRow {
     const now = this.now();
@@ -70,17 +121,24 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
   seedGroupMonth(
     input: Partial<GroupMonthRow> & { workspaceId: string; groupId: string; operatingMonthId?: string },
   ): GroupMonthRow {
+    // Phase 6: obligation due_date resolution needs a real workspace + a
+    // real operating month with year/month — auto-seed both with sensible
+    // defaults so every pre-Phase-6 test (which only ever passed
+    // workspaceId/groupId) keeps working unchanged.
+    this.ensureWorkspace(input.workspaceId);
+    const operatingMonthId = input.operatingMonthId ?? this.seedOperatingMonth({ workspaceId: input.workspaceId }).id;
+
     const now = this.now();
     const row: GroupMonthRow = {
       id: input.id ?? randomUUID(),
       workspaceId: input.workspaceId,
       groupId: input.groupId,
-      operatingMonthId: input.operatingMonthId ?? randomUUID(),
+      operatingMonthId,
       locationId: input.locationId ?? null,
       baseFeeMinor: input.baseFeeMinor ?? 60000,
       currencyCode: input.currencyCode ?? "EGP",
       duePolicy: input.duePolicy ?? "PER_GROUP",
-      dueDay: input.dueDay ?? null,
+      dueDay: input.dueDay ?? 15,
       joinFeePolicy: input.joinFeePolicy ?? "ASK_EVERY_TIME",
       monthlyStatus: input.monthlyStatus ?? "ACTIVE",
       createdAt: input.createdAt ?? now,
@@ -133,6 +191,34 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
     return row;
   }
 
+  /** Phase 6 — direct obligation seeding for Finance tests that don't need a full Enrollment flow. */
+  seedObligation(
+    input: Partial<FinancialObligationRow> & { workspaceId: string; enrollmentId: string; netDueMinor: number },
+  ): FinancialObligationRow {
+    const now = this.now();
+    const row: FinancialObligationRow = {
+      id: input.id ?? randomUUID(),
+      workspaceId: input.workspaceId,
+      enrollmentId: input.enrollmentId,
+      currencyCode: input.currencyCode ?? "EGP",
+      baseFeeMinor: input.baseFeeMinor ?? input.netDueMinor,
+      discountMinor: input.discountMinor ?? 0,
+      waiverMinor: input.waiverMinor ?? 0,
+      netDueMinor: input.netDueMinor,
+      dueDate: input.dueDate ?? "2026-08-15",
+      amountPaidMinor: input.amountPaidMinor ?? 0,
+      remainingMinor: input.remainingMinor ?? input.netDueMinor - (input.amountPaidMinor ?? 0),
+      status: input.status ?? "UNPAID",
+      calculationBasis: input.calculationBasis ?? "FULL_MONTH",
+      calculationSnapshotJson: input.calculationSnapshotJson ?? null,
+      createdAt: input.createdAt ?? now,
+      updatedAt: input.updatedAt ?? now,
+      version: input.version ?? 1,
+    };
+    this.obligationsById.set(row.id, row);
+    return row;
+  }
+
   seedGuardian(input: Partial<GuardianRow> & { workspaceId: string; phone: string; normalizedPhone: string }): GuardianRow {
     const now = this.now();
     const row: GuardianRow = {
@@ -154,6 +240,18 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
 
   async findWorkspaceTimezone(): Promise<string | undefined> {
     return this.workspaceTimezone;
+  }
+
+  async findWorkspaceById(id: string): Promise<WorkspaceRow | undefined> {
+    return this.workspacesById.get(id);
+  }
+
+  async findOperatingMonthById(id: string): Promise<OperatingMonthRow | undefined> {
+    return this.operatingMonthsById.get(id);
+  }
+
+  async findObligationByEnrollmentId(enrollmentId: string): Promise<FinancialObligationRow | undefined> {
+    return [...this.obligationsById.values()].find((o) => o.enrollmentId === enrollmentId);
   }
 
   async findGroupMonthById(id: string): Promise<GroupMonthRow | undefined> {
@@ -364,15 +462,63 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
     );
   }
 
+  /** Mirrors `upsertObligationForEnrollment` (packages/database) exactly — create, refresh-if-untouched, or leave-alone-if-real-ledger-activity. */
+  private upsertObligation(workspaceId: string, enrollmentId: string, terms: ObligationTerms): FinancialObligationRow {
+    const existing = [...this.obligationsById.values()].find((o) => o.enrollmentId === enrollmentId);
+    const now = this.now();
+    if (!existing) {
+      const row: FinancialObligationRow = {
+        id: randomUUID(),
+        workspaceId,
+        enrollmentId,
+        currencyCode: terms.currencyCode,
+        baseFeeMinor: terms.baseFeeMinor,
+        discountMinor: 0,
+        waiverMinor: 0,
+        netDueMinor: terms.baseFeeMinor,
+        dueDate: terms.dueDate,
+        amountPaidMinor: 0,
+        remainingMinor: terms.baseFeeMinor,
+        status: "UNPAID",
+        calculationBasis: terms.calculationBasis,
+        calculationSnapshotJson: terms.calculationSnapshotJson,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+      };
+      this.obligationsById.set(row.id, row);
+      return row;
+    }
+    if (existing.status !== "UNPAID" || existing.amountPaidMinor !== 0) {
+      return existing; // real ledger activity — never silently touched
+    }
+    const updated: FinancialObligationRow = {
+      ...existing,
+      currencyCode: terms.currencyCode,
+      baseFeeMinor: terms.baseFeeMinor,
+      netDueMinor: terms.baseFeeMinor,
+      dueDate: terms.dueDate,
+      remainingMinor: terms.baseFeeMinor,
+      calculationBasis: terms.calculationBasis,
+      calculationSnapshotJson: terms.calculationSnapshotJson,
+      updatedAt: now,
+      version: existing.version + 1,
+    };
+    this.obligationsById.set(existing.id, updated);
+    return updated;
+  }
+
   async createOrReactivateEnrollmentTransaction(
     input: CreateOrReactivateEnrollmentInput,
-  ): Promise<{ enrollment: EnrollmentRow; reactivated: boolean }> {
+  ): Promise<{ enrollment: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow }> {
     const existing = [...this.enrollmentsById.values()].find(
       (e) => e.studentId === input.studentId && e.groupMonthId === input.groupMonthId,
     );
     const now = this.now();
+    let enrollment: EnrollmentRow;
+    let reactivated: boolean;
     if (existing) {
-      const updated: EnrollmentRow = {
+      enrollment = {
         ...existing,
         joinDate: input.joinDate,
         status: input.status,
@@ -383,26 +529,30 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
         updatedAt: now,
         version: existing.version + 1,
       };
-      this.enrollmentsById.set(existing.id, updated);
-      return { enrollment: updated, reactivated: true };
+      this.enrollmentsById.set(existing.id, enrollment);
+      reactivated = true;
+    } else {
+      enrollment = {
+        id: randomUUID(),
+        workspaceId: input.workspaceId,
+        studentId: input.studentId,
+        groupMonthId: input.groupMonthId,
+        joinDate: input.joinDate,
+        status: input.status,
+        feeMethod: input.feeMethod,
+        customFeeMinor: input.customFeeMinor ?? null,
+        endedAt: null,
+        endReason: null,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+      };
+      this.enrollmentsById.set(enrollment.id, enrollment);
+      reactivated = false;
     }
-    const row: EnrollmentRow = {
-      id: randomUUID(),
-      workspaceId: input.workspaceId,
-      studentId: input.studentId,
-      groupMonthId: input.groupMonthId,
-      joinDate: input.joinDate,
-      status: input.status,
-      feeMethod: input.feeMethod,
-      customFeeMinor: input.customFeeMinor ?? null,
-      endedAt: null,
-      endReason: null,
-      createdAt: now,
-      updatedAt: now,
-      version: 1,
-    };
-    this.enrollmentsById.set(row.id, row);
-    return { enrollment: row, reactivated: false };
+
+    const obligation = this.upsertObligation(input.workspaceId, enrollment.id, input.obligation);
+    return { enrollment, reactivated, obligation };
   }
 
   async withdrawEnrollment(input: WithdrawEnrollmentInput): Promise<EnrollmentRow | undefined> {
@@ -422,7 +572,9 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
 
   async transferEnrollmentTransaction(
     input: TransferEnrollmentTransactionInput,
-  ): Promise<{ source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean } | undefined> {
+  ): Promise<
+    { source: EnrollmentRow; target: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow } | undefined
+  > {
     const source = this.enrollmentsById.get(input.sourceEnrollmentId);
     if (!source) return undefined;
     const now = this.now();
@@ -473,7 +625,8 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
     }
     this.enrollmentsById.set(target.id, target);
 
-    return { source: updatedSource, target, reactivated };
+    const obligation = this.upsertObligation(input.targetWorkspaceId, target.id, input.obligation);
+    return { source: updatedSource, target, reactivated, obligation };
   }
 
   async insertAuditEvent(input: StudentsAuditEventInput): Promise<void> {

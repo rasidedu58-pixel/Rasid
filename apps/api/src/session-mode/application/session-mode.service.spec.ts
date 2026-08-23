@@ -65,6 +65,13 @@ describe("SessionModeService", () => {
       joinDate,
       status: "ACTIVE",
       feeMethod: "FULL_MONTH",
+      obligation: {
+        baseFeeMinor: 60000,
+        currencyCode: "EGP",
+        dueDate: "2026-08-15",
+        calculationBasis: "FULL_MONTH",
+        calculationSnapshotJson: null,
+      },
     });
     if (endedAt) {
       shared.enrollmentsById.set(enrollment.id, { ...enrollment, endedAt, status: "WITHDRAWN" });
@@ -119,6 +126,13 @@ describe("SessionModeService", () => {
         joinDate: "2026-08-01",
         status: "ACTIVE",
         feeMethod: "FULL_MONTH",
+        obligation: {
+          baseFeeMinor: 60000,
+          currencyCode: "EGP",
+          dueDate: "2026-08-15",
+          calculationBasis: "FULL_MONTH",
+          calculationSnapshotJson: null,
+        },
       });
 
       await expect(

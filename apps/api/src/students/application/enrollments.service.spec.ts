@@ -118,7 +118,13 @@ describe("EnrollmentsService", () => {
       );
       expect(created.enrollment.status).toBe("ACTIVE");
       expect(created.enrollment.feeMethod).toBe("REMAINING_SESSIONS");
-      expect((created as unknown as Record<string, unknown>).obligation).toBeUndefined();
+      // Phase 6: the obligation IS now created, in the SAME transaction,
+      // matching the exact PRD AC-07 proration result (60000 * 3 / 8).
+      expect(created.obligation.netDueMinor).toBe(22500);
+      expect(created.obligation.remainingMinor).toBe(22500);
+      expect(created.obligation.amountPaidMinor).toBe(0);
+      expect(created.obligation.status).toBe("UNPAID");
+      expect(created.obligation.calculationBasis).toBe("REMAINING_SESSIONS");
     });
 
     it("returns the PRD unavailable message when the GroupMonth has zero billable sessions", async () => {

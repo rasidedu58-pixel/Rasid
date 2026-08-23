@@ -12,9 +12,10 @@ import type {
   EnrollmentWithdrawRequest,
   EnrollmentWithdrawResponse,
   FeeMethod,
+  Obligation,
 } from "@academic-precision/contracts";
-import { PRORATION_UNAVAILABLE, computeProration } from "@academic-precision/database";
-import type { EnrollmentRow, GroupMonthRow, GroupRow } from "@academic-precision/database";
+import { PRORATION_UNAVAILABLE, computeObligationDueDate, computeProration } from "@academic-precision/database";
+import type { EnrollmentRow, FinancialObligationRow, GroupMonthRow, GroupRow, ObligationTerms } from "@academic-precision/database";
 import {
   EnrollmentNotEligibleException,
   ResourceNotFoundException,
@@ -55,9 +56,15 @@ interface TransferPreviewPayload {
  * sessions — see the phase brief's own callout and `StudentsService`'s
  * doc comment for the contrasting Student/Guardian/QR reasoning.
  *
- * Persists ONLY the `enrollments` row — no `financial_obligations` row is
- * ever written (Phase 4 pre-authorized scoping decision #1; that table
- * does not exist until Phase 6).
+ * Phase 6: `createEnrollment`/`transfer` now persist the enrollment AND its
+ * `financial_obligations` row in ONE transaction ("Enrollment + obligation
+ * transaction" — API Contract §9.5's own description; previously deferred,
+ * Phase 4 pre-authorized scoping decision #1, closed now). Obligation
+ * `due_date` resolution uses `groupMonth.dueDay ?? workspace.unifiedDueDay`
+ * — Database Schema §4.2/§5.4 marks the full UNIFIED/PER_GROUP/OVERRIDE
+ * branching itself "وفق Product mapping النهائي" (still pending), so this
+ * picks the more-specific value when set rather than inventing that
+ * branch — see `computeObligationDueDate`'s own doc comment.
  */
 @Injectable()
 export class EnrollmentsService {
@@ -146,11 +153,16 @@ export class EnrollmentsService {
       }
     }
 
+    const obligationTerms = await this.resolveObligationTerms(workspaceContext, groupMonth, plan.feeMethod, plan.calculatedDueMinor, {
+      joinDate: plan.joinDate,
+      customFeeMinor: plan.feeMethod === "CUSTOM" ? plan.customFeeMinor : null,
+    });
+
     // Documented Phase 4 status decision: ACTIVE at creation unconditionally
     // (no PENDING→ACTIVE background worker exists yet — see handoff
     // DEVIATIONS). join_date remains the authority for roster-visibility
     // logic, which is a Phase 5 (Session Mode) concern not exercised here.
-    const { enrollment, reactivated } = await this.repository.createOrReactivateEnrollmentTransaction({
+    const { enrollment, reactivated, obligation } = await this.repository.createOrReactivateEnrollmentTransaction({
       workspaceId: workspaceContext.workspaceId,
       studentId: student.id,
       groupMonthId,
@@ -158,6 +170,7 @@ export class EnrollmentsService {
       status: "ACTIVE",
       feeMethod: plan.feeMethod,
       customFeeMinor: plan.feeMethod === "CUSTOM" ? plan.customFeeMinor : null,
+      obligation: obligationTerms,
     });
 
     await this.repository.insertAuditEvent({
@@ -167,11 +180,11 @@ export class EnrollmentsService {
       action: reactivated ? "enrollment.reactivated" : "enrollment.created",
       entityType: "enrollment",
       entityId: enrollment.id,
-      afterJson: this.toEnrollmentDto(enrollment),
+      afterJson: { enrollment: this.toEnrollmentDto(enrollment), obligation: this.toObligationDto(obligation) },
       correlationId,
     });
 
-    return { enrollment: this.toEnrollmentDto(enrollment) };
+    return { enrollment: this.toEnrollmentDto(enrollment), obligation: this.toObligationDto(obligation) };
   }
 
   async withdrawEnrollment(
@@ -205,7 +218,10 @@ export class EnrollmentsService {
       correlationId,
     });
 
-    return { enrollment: this.toEnrollmentDto(updated) };
+    // Read-only echo — withdrawal never mutates the obligation itself
+    // ("old debt stays independent", same reasoning as Transfer's source).
+    const obligation = await this.repository.findObligationByEnrollmentId(updated.id);
+    return { enrollment: this.toEnrollmentDto(updated), obligation: obligation ? this.toObligationDto(obligation) : null };
   }
 
   async transferPreview(
@@ -303,6 +319,11 @@ export class EnrollmentsService {
       }
     }
 
+    const obligationTerms = await this.resolveObligationTerms(workspaceContext, target, plan.feeMethod, plan.calculatedDueMinor, {
+      joinDate: plan.joinDate,
+      transferredFromEnrollmentId: plan.sourceEnrollmentId,
+    });
+
     const result = await this.repository.transferEnrollmentTransaction({
       sourceEnrollmentId: plan.sourceEnrollmentId,
       targetGroupMonthId: plan.targetGroupMonthId,
@@ -313,6 +334,7 @@ export class EnrollmentsService {
       // preview time, re-validated here — no silent backend default.
       feeMethod: plan.feeMethod,
       customFeeMinor: null,
+      obligation: obligationTerms,
     });
     if (!result) {
       throw new ResourceNotFoundException();
@@ -325,11 +347,19 @@ export class EnrollmentsService {
       action: "enrollment.transferred",
       entityType: "enrollment",
       entityId: result.source.id,
-      afterJson: { source: this.toEnrollmentDto(result.source), target: this.toEnrollmentDto(result.target) },
+      afterJson: {
+        source: this.toEnrollmentDto(result.source),
+        target: this.toEnrollmentDto(result.target),
+        obligation: this.toObligationDto(result.obligation),
+      },
       correlationId,
     });
 
-    return { source: this.toEnrollmentDto(result.source), target: this.toEnrollmentDto(result.target) };
+    return {
+      source: this.toEnrollmentDto(result.source),
+      target: this.toEnrollmentDto(result.target),
+      obligation: this.toObligationDto(result.obligation),
+    };
   }
 
   // ---------------------------------------------------------------------
@@ -402,6 +432,76 @@ export class EnrollmentsService {
       eligibleSessions: result.eligibleSessions,
       totalBillableSessions: result.totalBillableSessions,
       rounding: result.rounding,
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // Obligation helpers (Phase 6)
+  // ---------------------------------------------------------------------
+
+  /**
+   * Builds the `financial_obligations` terms for a join/transfer:
+   * `baseFeeMinor` is the Enrollment's OWN already-resolved charge
+   * (`calculatedDueMinor` — whatever `computeDue`'s FULL_MONTH/CUSTOM/
+   * REMAINING_SESSIONS formula produced), NOT the GroupMonth's raw policy
+   * fee. `due_date` resolves `groupMonth.dueDay ?? workspace.unifiedDueDay`
+   * — see the class doc comment for why the fuller UNIFIED/PER_GROUP/
+   * OVERRIDE branching itself is intentionally NOT implemented here.
+   */
+  private async resolveObligationTerms(
+    workspaceContext: WorkspaceContext,
+    groupMonth: GroupMonthRow,
+    feeMethod: FeeMethod,
+    calculatedDueMinor: number,
+    snapshotExtra: Record<string, unknown>,
+  ): Promise<ObligationTerms> {
+    const workspace = await this.repository.findWorkspaceById(workspaceContext.workspaceId);
+    if (!workspace) {
+      throw new ValidationApiException({ _root: ["تعذر تحديد مساحة العمل."] });
+    }
+    const operatingMonth = await this.repository.findOperatingMonthById(groupMonth.operatingMonthId);
+    if (!operatingMonth) {
+      throw new ValidationApiException({ _root: ["تعذر تحديد الشهر التشغيلي لهذه المجموعة."] });
+    }
+    const workspaceTimezone = await this.repository.findWorkspaceTimezone(workspaceContext.workspaceId);
+    if (!workspaceTimezone) {
+      throw new ValidationApiException({ _root: ["تعذر تحديد المنطقة الزمنية لمساحة العمل."] });
+    }
+    const dueDay = groupMonth.dueDay ?? workspace.unifiedDueDay;
+    if (dueDay === null || dueDay === undefined) {
+      throw new ValidationApiException({ _root: ["تعذر تحديد يوم استحقاق الرسوم لهذا الشهر."] });
+    }
+    const dueDate = computeObligationDueDate({
+      year: operatingMonth.year,
+      month: operatingMonth.month,
+      dueDay,
+      workspaceTimezone,
+    });
+
+    return {
+      baseFeeMinor: calculatedDueMinor,
+      currencyCode: groupMonth.currencyCode,
+      dueDate,
+      calculationBasis: feeMethod,
+      calculationSnapshotJson: { groupMonthBaseFeeMinor: groupMonth.baseFeeMinor, feeMethod, ...snapshotExtra },
+    };
+  }
+
+  private toObligationDto(row: FinancialObligationRow): Obligation {
+    return {
+      id: row.id,
+      enrollmentId: row.enrollmentId,
+      currency: row.currencyCode,
+      baseFeeMinor: row.baseFeeMinor,
+      discountMinor: row.discountMinor,
+      waiverMinor: row.waiverMinor,
+      netDueMinor: row.netDueMinor,
+      dueDate: row.dueDate,
+      amountPaidMinor: row.amountPaidMinor,
+      remainingMinor: row.remainingMinor,
+      status: row.status as Obligation["status"],
+      calculationBasis: row.calculationBasis as Obligation["calculationBasis"],
+      version: row.version,
     };
   }
 

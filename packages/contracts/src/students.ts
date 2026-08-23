@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { cursorPageSchema } from "./pagination";
+import { obligationSchema } from "./finance";
 
 /**
  * Students / Guardians / QR / Enrollment contract types — Phase 4, API
@@ -196,10 +197,13 @@ export const enrollmentCreateRequestSchema = z.object({
 export type EnrollmentCreateRequest = z.infer<typeof enrollmentCreateRequestSchema>;
 
 /**
- * NO `obligation` key — Phase 4 pre-authorized scoping decision #1: no
- * `financial_obligations` row is ever written (Phase 6 table).
+ * Phase 6: `obligation` is now populated — API Contract §11.10's own
+ * literal example names this endpoint an "Enrollment + obligation
+ * transaction" (§9.5). Previously omitted (Phase 4 pre-authorized scoping
+ * decision #1 — `financial_obligations` didn't exist until Phase 6, now
+ * closed).
  */
-export const enrollmentCreateResponseSchema = z.object({ enrollment: enrollmentSchema });
+export const enrollmentCreateResponseSchema = z.object({ enrollment: enrollmentSchema, obligation: obligationSchema });
 export type EnrollmentCreateResponse = z.infer<typeof enrollmentCreateResponseSchema>;
 
 export const enrollmentWithdrawRequestSchema = z.object({
@@ -208,7 +212,13 @@ export const enrollmentWithdrawRequestSchema = z.object({
 });
 export type EnrollmentWithdrawRequest = z.infer<typeof enrollmentWithdrawRequestSchema>;
 
-export const enrollmentWithdrawResponseSchema = z.object({ enrollment: enrollmentSchema });
+/**
+ * Phase 6: the Enrollment's obligation is echoed back (read-only — withdraw
+ * never mutates it; "old debt stays independent" applies here too). `null`
+ * only in the defensive case no obligation row exists for this enrollment
+ * (should not happen post-Phase-6, kept nullable rather than throwing).
+ */
+export const enrollmentWithdrawResponseSchema = z.object({ enrollment: enrollmentSchema, obligation: obligationSchema.nullable() });
 export type EnrollmentWithdrawResponse = z.infer<typeof enrollmentWithdrawResponseSchema>;
 
 /**
@@ -254,5 +264,7 @@ export type EnrollmentTransferRequest = z.infer<typeof enrollmentTransferRequest
 export const enrollmentTransferResponseSchema = z.object({
   source: enrollmentSchema,
   target: enrollmentSchema,
+  /** The TARGET's obligation only — the source's own obligation (if any) is deliberately left untouched, never echoed as "changed" here. */
+  obligation: obligationSchema,
 });
 export type EnrollmentTransferResponse = z.infer<typeof enrollmentTransferResponseSchema>;
