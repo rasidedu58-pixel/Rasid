@@ -13,9 +13,10 @@
  * Phase 6. `attention` (attention_cases, attention_reasons,
  * attention_evidence) and `followup` (contact_logs, scheduled_followups)
  * are implemented as of Phase 7. `subscriptions` (subscriptions,
- * entitlements, owner_trial_grants) is implemented as of Phase 8 — see
- * each module's own comment. All other modules remain structural
- * placeholders reserved for later phases.
+ * entitlements, owner_trial_grants) is implemented as of Phase 8. `reports`
+ * (exports — metadata only, see its own module comment) and `notifications`
+ * are implemented as of Phase 9 — see each module's own comment. All other
+ * modules remain structural placeholders reserved for later phases.
  */
 export * as identity from "./identity";
 export * as workspaces from "./workspaces";
@@ -33,6 +34,7 @@ export * as finance from "./finance";
 export * as attention from "./attention";
 export * as followup from "./followup";
 export * as subscriptions from "./subscriptions";
+export * as reports from "./reports";
 export * as notifications from "./notifications";
 export * as audit from "./audit";
 export * as outbox from "./outbox";

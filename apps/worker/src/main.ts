@@ -1,6 +1,6 @@
 import { createLogger, runWithContext } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
-import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck } from "@academic-precision/database";
+import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
 
 /**
@@ -38,6 +38,11 @@ const MAX_EVENTS_PER_CYCLE = 20;
 // only actually queries when this interval has elapsed since its last run.
 const SUBSCRIPTION_EXPIRY_INTERVAL_MS = 60_000;
 
+// Phase 9 — same coarse-cadence reasoning as subscription expiry above:
+// notification generation (subscription reminders/follow-up due/missing
+// records) is never a sub-second concern.
+const NOTIFICATIONS_SCAN_INTERVAL_MS = 300_000; // 5 minutes
+
 function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -57,6 +62,7 @@ function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
 
 async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<typeof getWorkerDb>): Promise<void> {
   let lastSubscriptionExpiryCheckAt = 0;
+  let lastNotificationsScanAt = 0;
 
   while (!state.stopped) {
     const bootId = randomUUID();
@@ -76,6 +82,19 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
           // Deliberately scoped to THIS check only — a failure here must
           // never take down outbox dispatch, which already succeeded above.
           logger.error({ error }, "Subscription expiry scan failed unexpectedly — will retry next interval.");
+        }
+      }
+
+      if (Date.now() - lastNotificationsScanAt >= NOTIFICATIONS_SCAN_INTERVAL_MS) {
+        lastNotificationsScanAt = Date.now();
+        try {
+          const notificationsResult = await runWithContext({ jobId: bootId }, () => runNotificationsScan(workerDb));
+          if (notificationsResult.subscriptionCreated > 0 || notificationsResult.followupCreated > 0 || notificationsResult.missingRecordsCreated > 0) {
+            logger.info({ ...notificationsResult }, "Notifications scan completed.");
+          }
+        } catch (error) {
+          // Same isolation rationale as the subscription-expiry check above.
+          logger.error({ error }, "Notifications scan failed unexpectedly — will retry next interval.");
         }
       }
 

@@ -1,0 +1,169 @@
+import type { CollectionQueueRow } from "@academic-precision/database";
+import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
+import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { PermissionResolverService } from "../../team/application/permission-resolver.service";
+import { InMemoryTeamRepository } from "../../team/application/__fixtures__/in-memory-team.repository";
+import type { FinanceRepositoryPort } from "../../finance/application/ports/finance-repository.port";
+import type { AttentionRepositoryPort } from "../../attention/application/ports/attention-repository.port";
+import type { BillingRepositoryPort } from "../../billing/application/ports/billing-repository.port";
+import type { ActionCenterRepositoryPort } from "./ports/action-center-repository.port";
+import { ActionCenterService } from "./action-center.service";
+
+const WORKSPACE_A = "workspace-a";
+const GROUP_A = "group-a";
+
+describe("ActionCenterService", () => {
+  let teamRepo: InMemoryTeamRepository;
+  let resolver: PermissionResolverService;
+
+  let attentionCases: Array<{ id: string; status: string; priority: string; groupId: string }>;
+  let followups: Array<{ id: string; status: string; dueAt: Date; groupId: string }>;
+  let collectionRows: CollectionQueueRow[];
+  let subscriptionState: string | null;
+
+  let financeRepo: FinanceRepositoryPort;
+  let attentionRepo: AttentionRepositoryPort;
+  let billingRepo: BillingRepositoryPort;
+  let actionCenterRepo: ActionCenterRepositoryPort;
+  let service: ActionCenterService;
+
+  let owner: VerifiedSupabaseToken;
+  let ownerContext: WorkspaceContext;
+
+  beforeEach(() => {
+    teamRepo = new InMemoryTeamRepository();
+    resolver = new PermissionResolverService(teamRepo);
+    attentionCases = [];
+    followups = [];
+    collectionRows = [];
+    subscriptionState = null;
+
+    financeRepo = {
+      listCollectionQueue: async (params: { restrictToGroupIds?: string[] }) =>
+        collectionRows.filter((r) => params.restrictToGroupIds === undefined || params.restrictToGroupIds.includes(r.groupId)),
+    } as unknown as FinanceRepositoryPort;
+
+    attentionRepo = {
+      listAttentionCasesForWorkspace: async (filter: { restrictToGroupIds?: string[] }) =>
+        attentionCases
+          .filter((c) => filter.restrictToGroupIds === undefined || filter.restrictToGroupIds.includes(c.groupId))
+          .map((c) => ({ id: c.id, status: c.status, priority: c.priority, workspaceId: WORKSPACE_A, studentId: "s", openedAt: new Date(), lastQualifiedAt: new Date(), contactedAt: null, monitoringSince: null, closedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 })) as never,
+      listScheduledFollowups: async (filter: { restrictToGroupIds?: string[] }) =>
+        followups
+          .filter((f) => filter.restrictToGroupIds === undefined || filter.restrictToGroupIds.includes(f.groupId))
+          .map((f) => ({ id: f.id, status: f.status, dueAt: f.dueAt, workspaceId: WORKSPACE_A, attentionCaseId: "c", studentId: "s", assigneeMembershipId: null, sourceContactLogId: null, completedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 })) as never,
+    } as unknown as AttentionRepositoryPort;
+
+    billingRepo = {
+      findSubscriptionByWorkspaceId: async () =>
+        subscriptionState
+          ? ({
+              id: "sub-1",
+              workspaceId: WORKSPACE_A,
+              provider: "PADDLE",
+              providerCustomerId: null,
+              providerSubscriptionId: null,
+              state: subscriptionState,
+              periodStart: new Date(),
+              periodEnd: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+              cancelAtPeriodEnd: false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              version: 1,
+            } as never)
+          : undefined,
+    } as unknown as BillingRepositoryPort;
+
+    actionCenterRepo = {
+      getCurrentMonth: async () => ({ id: "month-1", year: 2026, month: 8 }),
+      listSessionsWithMissingRecords: async () => [],
+      getNextSession: async () => undefined,
+    } as unknown as ActionCenterRepositoryPort;
+
+    service = new ActionCenterService(resolver, actionCenterRepo, financeRepo, attentionRepo, billingRepo);
+
+    owner = { id: "u-owner", email: "owner@example.com" };
+    const ownerMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: owner.id, roleLabel: "OWNER" });
+    ownerContext = { workspaceId: WORKSPACE_A, membership: ownerMembership };
+  });
+
+  it("Closure correction #5: an Assistant with follow-up access but NO finance access sees Attention/Follow-ups, and Collection is OMITTED entirely (not a zeroed count)", async () => {
+    attentionCases.push({ id: "case-1", status: "NEW", priority: "HIGH", groupId: GROUP_A });
+    followups.push({ id: "f-1", status: "PENDING", dueAt: new Date(Date.now() - 60_000), groupId: GROUP_A });
+    collectionRows.push({
+      obligation: { id: "ob-1", remainingMinor: 5000, status: "UNPAID" } as never,
+      studentId: "s-1",
+      studentName: "طالب",
+      studentCode: "AP-1",
+      groupMonthId: "gm-1",
+      groupId: GROUP_A,
+    });
+
+    const assistant: VerifiedSupabaseToken = { id: "u-assistant", email: "a@example.com" };
+    const assistantMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: assistant.id, roleLabel: "ASSISTANT" });
+    await teamRepo.replaceMembershipGrants({
+      workspaceId: WORKSPACE_A,
+      membershipId: assistantMembership.id,
+      createdByUserId: owner.id,
+      desiredGrants: [{ permissionKey: "followup.read", scopeType: "SELECTED_GROUPS", groupIds: [GROUP_A] }],
+    });
+    const assistantContext: WorkspaceContext = { workspaceId: WORKSPACE_A, membership: assistantMembership };
+
+    const result = await service.getActionCenter(assistant, assistantContext);
+    expect(result.attention?.count).toBe(1);
+    expect(result.followUpsDue?.count).toBe(1);
+    expect(result.collection).toBeUndefined(); // OMITTED, not { count: 0, items: [] }
+    expect("collection" in result ? result.collection : "absent").not.toEqual({ count: 0, items: [] });
+  });
+
+  it("a caller WITH finance access (but no follow-up access) sees Collection, and Attention/FollowUps are omitted", async () => {
+    collectionRows.push({
+      obligation: { id: "ob-1", remainingMinor: 5000, status: "UNPAID" } as never,
+      studentId: "s-1",
+      studentName: "طالب",
+      studentCode: "AP-1",
+      groupMonthId: "gm-1",
+      groupId: GROUP_A,
+    });
+    const assistant: VerifiedSupabaseToken = { id: "u-finance", email: "f@example.com" };
+    const assistantMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: assistant.id, roleLabel: "ASSISTANT" });
+    await teamRepo.replaceMembershipGrants({
+      workspaceId: WORKSPACE_A,
+      membershipId: assistantMembership.id,
+      createdByUserId: owner.id,
+      desiredGrants: [{ permissionKey: "payments.view_student_status", scopeType: "SELECTED_GROUPS", groupIds: [GROUP_A] }],
+    });
+    const assistantContext: WorkspaceContext = { workspaceId: WORKSPACE_A, membership: assistantMembership };
+
+    const result = await service.getActionCenter(assistant, assistantContext);
+    expect(result.collection?.count).toBe(1);
+    expect(result.attention).toBeUndefined();
+    expect(result.followUpsDue).toBeUndefined();
+  });
+
+  it("a CLOSED attention case never appears in the actionable list", async () => {
+    attentionCases.push({ id: "case-closed", status: "CLOSED", priority: "MEDIUM", groupId: GROUP_A });
+    attentionCases.push({ id: "case-open", status: "IN_FOLLOWUP", priority: "MEDIUM", groupId: GROUP_A });
+
+    const result = await service.getActionCenter(owner, ownerContext);
+    expect(result.attention?.count).toBe(1);
+    expect(result.attention?.items.map((i) => i.entityId)).toEqual(["case-open"]);
+  });
+
+  it("subscription warning is Owner-only, and only appears for a state that actually warrants one", async () => {
+    subscriptionState = "ACTIVE";
+    const activeResult = await service.getActionCenter(owner, ownerContext);
+    expect(activeResult.subscriptionWarning).toBeUndefined(); // ACTIVE never warns
+
+    subscriptionState = "EXPIRING";
+    const expiringResult = await service.getActionCenter(owner, ownerContext);
+    expect(expiringResult.subscriptionWarning).toBeDefined();
+    expect(expiringResult.subscriptionWarning?.state).toBe("EXPIRING");
+
+    const assistant: VerifiedSupabaseToken = { id: "u-assistant", email: "a@example.com" };
+    const assistantMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: assistant.id, roleLabel: "ASSISTANT" });
+    const assistantContext: WorkspaceContext = { workspaceId: WORKSPACE_A, membership: assistantMembership };
+    const assistantResult = await service.getActionCenter(assistant, assistantContext);
+    expect(assistantResult.subscriptionWarning).toBeUndefined(); // never shown to a non-Owner
+  });
+});

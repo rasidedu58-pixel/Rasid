@@ -21,7 +21,7 @@ import type {
   SessionRosterResponse,
   SessionStartResponse,
 } from "@academic-precision/contracts";
-import { deriveEligibleEnrollmentIds, VERSION_CONFLICT, type GroupMonthRow, type RosterEnrollmentRow, type SessionExamRow, type SessionRecordRow, type SessionRow } from "@academic-precision/database";
+import { deriveEligibleEnrollmentIds, deriveMissingRecords, VERSION_CONFLICT, type GroupMonthRow, type SessionExamRow, type SessionRecordRow, type SessionRow } from "@academic-precision/database";
 import {
   BatchValidationFailedException,
   ExamScoreOutOfRangeException,
@@ -517,63 +517,25 @@ export class SessionModeService {
     const recordsByEnrollmentId = new Map(records.map((r) => [r.enrollmentId, r]));
     const exam = await this.repository.findSessionExamBySessionId(session.id);
 
-    const attendanceSummary: BatchSummary = { present: 0, absent: 0, late: 0, missing: 0 };
-    const homeworkSummary: HomeworkBatchSummary = { done: 0, partial: 0, notDone: 0, noHomework: 0, missing: 0 };
+    // Phase 9 Closure correction: the missing-records rule itself now lives
+    // in ONE place — `packages/database/src/session-mode/missing-records.ts`
+    // — reused verbatim by `reports`/`action-center` rather than being
+    // reimplemented (or, worse, approximated as "session overdue").
+    const { missingRecords, attendanceSummary, homeworkSummary } = deriveMissingRecords({
+      eligibleEnrollmentIds,
+      recordsByEnrollmentId,
+      studentNameByEnrollmentId: new Map(
+        [...enrollmentById.entries()].map(([id, enrollment]) => [id, enrollment.studentName]),
+      ),
+    });
     const examSummary = { hasExam: !!exam, scored: 0, absent: 0, missing: 0 };
-    const missingRecords: SessionReviewResponse["missingRecords"] = [];
-
     for (const enrollmentId of eligibleEnrollmentIds) {
+      // Exam is entirely OPTIONAL — never contributes to `missing`/canComplete — kept as its own pass, deliberately outside the shared missing-records function.
+      if (!exam) continue;
       const record = recordsByEnrollmentId.get(enrollmentId);
-      const missing: ("ATTENDANCE" | "HOMEWORK")[] = [];
-
-      switch (record?.attendanceStatus) {
-        case "PRESENT":
-          attendanceSummary.present += 1;
-          break;
-        case "ABSENT":
-          attendanceSummary.absent += 1;
-          break;
-        case "LATE":
-          attendanceSummary.late += 1;
-          break;
-        default:
-          attendanceSummary.missing += 1;
-          missing.push("ATTENDANCE");
-      }
-
-      switch (record?.homeworkStatus) {
-        case "DONE":
-          homeworkSummary.done += 1;
-          break;
-        case "PARTIAL":
-          homeworkSummary.partial += 1;
-          break;
-        case "NOT_DONE":
-          homeworkSummary.notDone += 1;
-          break;
-        case "NO_HOMEWORK":
-          homeworkSummary.noHomework += 1;
-          break;
-        default:
-          homeworkSummary.missing += 1;
-          missing.push("HOMEWORK");
-      }
-
-      // Exam is entirely OPTIONAL — never contributes to `missing`/canComplete.
-      if (exam) {
-        if (record?.examStatus === "SCORED") examSummary.scored += 1;
-        else if (record?.examStatus === "ABSENT_FROM_EXAM") examSummary.absent += 1;
-        else examSummary.missing += 1;
-      }
-
-      if (missing.length > 0) {
-        const enrollment = enrollmentById.get(enrollmentId);
-        missingRecords.push({
-          enrollmentId,
-          studentName: enrollment?.studentName ?? "",
-          missing,
-        });
-      }
+      if (record?.examStatus === "SCORED") examSummary.scored += 1;
+      else if (record?.examStatus === "ABSENT_FROM_EXAM") examSummary.absent += 1;
+      else examSummary.missing += 1;
     }
 
     // Single source of truth: both getReview and completeSession call THIS
