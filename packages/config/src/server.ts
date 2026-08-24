@@ -80,6 +80,17 @@ const serverEnvSchema = z.object({
   RATE_LIMIT_EXPORT_TTL_MS: z.coerce.number().int().positive().optional(),
   RATE_LIMIT_WEBHOOK_LIMIT: z.coerce.number().int().positive().optional(),
   RATE_LIMIT_WEBHOOK_TTL_MS: z.coerce.number().int().positive().optional(),
+
+  /**
+   * Phase 11 — comma-separated list of allowed browser origins for CORS
+   * (e.g. `https://app.rasid.example,http://localhost:3001`). Required for
+   * apps/web (a distinct origin — Vercel — from apps/api's Railway host) to
+   * call the API at all; the API previously had no CORS configuration,
+   * which silently blocks every cross-origin browser request. Unset in
+   * local/test — apps/api falls back to a safe localhost-only default (see
+   * main.ts), never to "allow everything".
+   */
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

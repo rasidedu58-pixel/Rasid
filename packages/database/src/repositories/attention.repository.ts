@@ -18,6 +18,7 @@ import { sessionExams } from "../schema/session-exams";
 import { sessionRecords } from "../schema/session-records";
 import { enrollments } from "../schema/enrollments";
 import { groupMonths, groups } from "../schema/groups";
+import { students } from "../schema/students";
 import { auditEvents } from "../schema/audit";
 import { outboxEvents } from "../schema/outbox";
 import type { Db } from "./identity.repository";
@@ -106,6 +107,23 @@ export async function listAttentionCasesForWorkspace(
     .where(and(...conditions))
     .orderBy(asc(attentionCases.id))
     .limit(filter.limit);
+}
+
+/**
+ * Phase 11 — a small, additive batched lookup (single `inArray` query, no
+ * N+1) so `GET /attention-cases` can include each case's student
+ * name/code without the frontend re-fetching it per row. The list query
+ * itself deliberately stays student-agnostic (it already filters by
+ * Group-Scope via `attentionReasons`, not by anything student-owned), so
+ * this is a separate, explicit, minimal join rather than baking a
+ * students join into the cursor-paginated query above.
+ */
+export function listStudentNamesByIds(db: Db, workspaceId: string, studentIds: string[]): Promise<Array<{ id: string; name: string; studentCode: string }>> {
+  if (studentIds.length === 0) return Promise.resolve([]);
+  return db
+    .select({ id: students.id, name: students.name, studentCode: students.studentCode })
+    .from(students)
+    .where(and(eq(students.workspaceId, workspaceId), inArray(students.id, studentIds)));
 }
 
 export function findScheduledFollowupById(db: Db, id: string): Promise<ScheduledFollowupRow | undefined> {

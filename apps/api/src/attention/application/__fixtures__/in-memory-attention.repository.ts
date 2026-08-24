@@ -276,6 +276,13 @@ export class InMemoryAttentionRepository implements AttentionRepositoryPort {
     return rows.slice(0, filter.limit);
   }
 
+  async listStudentNamesByIds(workspaceId: string, studentIds: string[]): Promise<Array<{ id: string; name: string; studentCode: string }>> {
+    const idSet = new Set(studentIds);
+    return [...this.studentsById.values()]
+      .filter((s) => s.workspaceId === workspaceId && idSet.has(s.id))
+      .map((s) => ({ id: s.id, name: s.name, studentCode: s.studentCode }));
+  }
+
   async updateAttentionCaseStatusWithVersion(input: {
     id: string;
     expectedVersion: number;

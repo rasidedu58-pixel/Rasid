@@ -3,16 +3,17 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Button, Field, Input } from "@academic-precision/ui";
 import { getSupabaseClient } from "../../lib/supabase-client";
+import { AuthCard } from "../../components/auth/auth-card";
 
-type LoginState = "idle" | "loading" | "authenticated" | "expired" | "locked" | "error";
+type LoginState = "idle" | "loading" | "locked" | "error";
 
 /**
- * Login shell (PRD §29.2). Generic error messaging — never confirms
- * whether an identifier exists. Session expiry is surfaced via the
- * `?expired=1` query param (set by protected pages when a server call
- * returns SESSION_EXPIRED), redirecting the user here without claiming an
- * unsaved write succeeded.
+ * Login (PRD §29.2). Generic error messaging — never confirms whether an
+ * identifier exists. Session expiry is surfaced via `?expired=1` (set by
+ * `apiRequest` when the server returns SESSION_EXPIRED/401), without
+ * claiming an unsaved write succeeded.
  */
 export default function LoginPage() {
   return (
@@ -32,7 +33,6 @@ function LoginForm() {
 
   useEffect(() => {
     if (searchParams.get("expired") === "1") {
-      setState("expired");
       setErrorMessage("انتهت الجلسة. يرجى تسجيل الدخول مجددًا.");
     }
   }, [searchParams]);
@@ -57,57 +57,51 @@ function LoginForm() {
         return;
       }
 
-      setState("authenticated");
-      router.push("/onboarding");
+      // The (app) route group's own AuthGuard resolves whether the caller
+      // already has a completed workspace (-> /dashboard) or still needs
+      // onboarding (-> redirected there itself) — login never guesses.
+      router.push("/dashboard");
     } catch {
       setState("error");
-      setErrorMessage("تعذر الاتصال بالخادم. حاول مرة أخرى.");
+      setErrorMessage("تعذّر الاتصال بالخادم. حاول مرة أخرى.");
     }
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-8">
-      <h1 className="text-xl font-semibold">تسجيل الدخول</h1>
-      <form onSubmit={onSubmit} className="flex flex-col gap-3" noValidate>
-        <label className="flex flex-col gap-1 text-sm">
-          البريد الإلكتروني
-          <input
-            className="rounded border border-slate-300 p-2"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          كلمة المرور
-          <input
-            className="rounded border border-slate-300 p-2"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
+    <AuthCard
+      title="تسجيل الدخول"
+      description="أدخل بيانات حسابك للمتابعة."
+      footer={
+        <span>
+          ليس لديك حساب؟{" "}
+          <Link href="/signup" className="font-medium text-brand hover:underline">
+            إنشاء حساب جديد
+          </Link>
+        </span>
+      }
+    >
+      <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+        <Field label="البريد الإلكتروني" htmlFor="email">
+          <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </Field>
+        <Field label="كلمة المرور" htmlFor="password">
+          <Input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </Field>
 
-        {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
+        {errorMessage ? (
+          <p className="text-sm text-danger" role="alert">
+            {errorMessage}
+          </p>
+        ) : null}
 
-        <button
-          type="submit"
-          disabled={state === "loading"}
-          className="rounded bg-slate-900 p-2 text-white disabled:opacity-50"
-        >
-          {state === "loading" ? "جارٍ الدخول..." : "دخول"}
-        </button>
-      </form>
-      <div className="flex justify-between text-sm">
-        <Link href="/forgot-password" className="text-blue-600 underline">
+        <Button type="submit" size="lg" loading={state === "loading"} disabled={state === "locked"} className="mt-1 w-full">
+          دخول
+        </Button>
+
+        <Link href="/forgot-password" className="text-center text-sm text-text-secondary hover:text-brand hover:underline">
           نسيت كلمة المرور؟
         </Link>
-        <Link href="/signup" className="text-blue-600 underline">
-          إنشاء حساب جديد
-        </Link>
-      </div>
-    </main>
+      </form>
+    </AuthCard>
   );
 }

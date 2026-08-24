@@ -99,13 +99,19 @@ export class AttentionService {
     const items = rows.slice(0, limit);
     const last = items[items.length - 1];
 
+    // Phase 11 — one batched lookup for every row's studentName/studentCode
+    // (no N+1), so the list-summary DTO is directly usable by the queue UI.
+    const studentNames = await this.repository.listStudentNamesByIds(workspaceContext.workspaceId, items.map((row) => row.studentId));
+    const studentById = new Map(studentNames.map((s) => [s.id, s]));
+
     const summaries: AttentionCaseSummary[] = [];
     for (const row of items) {
       const reasons = await this.repository.listAttentionReasonsForCase(row.id);
       const visibleReasons = this.filterReasonsToScope(reasons, restrictToGroupIds);
       const priority = computeVisiblePriority(visibleReasons.map((r) => ({ severity: r.severity as "MEDIUM" | "HIGH" })));
       if (!priority) continue; // defensive — listAttentionCasesForWorkspace already restricts to in-scope cases
-      summaries.push(this.toCaseSummaryDto(row, priority));
+      const student = studentById.get(row.studentId);
+      summaries.push(this.toCaseSummaryDto(row, priority, student?.name ?? "", student?.studentCode ?? ""));
     }
 
     return { items: summaries, page: { hasNext, nextCursor: hasNext && last ? last.id : null } };
@@ -545,10 +551,12 @@ export class AttentionService {
   // DTO mappers
   // ---------------------------------------------------------------------
 
-  private toCaseSummaryDto(row: AttentionCaseRow, visiblePriority: "MEDIUM" | "HIGH"): AttentionCaseSummary {
+  private toCaseSummaryDto(row: AttentionCaseRow, visiblePriority: "MEDIUM" | "HIGH", studentName: string, studentCode: string): AttentionCaseSummary {
     return {
       id: row.id,
       studentId: row.studentId,
+      studentName,
+      studentCode,
       status: row.status as AttentionCaseSummary["status"],
       priority: visiblePriority,
       openedAt: row.openedAt.toISOString(),

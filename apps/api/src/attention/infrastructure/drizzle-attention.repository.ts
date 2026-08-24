@@ -19,6 +19,7 @@ import {
   listGroupIdsForStudent,
   listGuardiansForStudent,
   listScheduledFollowups,
+  listStudentNamesByIds,
   rescheduleScheduledFollowupWithVersion,
   updateAttentionCaseStatusWithVersion,
   withRuntimeContext,
@@ -77,6 +78,10 @@ export class DrizzleAttentionRepository implements AttentionRepositoryPort {
     cursorId?: string;
   }): Promise<AttentionCaseRow[]> {
     return withRuntimeContext(this.runtimeCtx(filter.workspaceId), (db) => listAttentionCasesForWorkspace(db, filter));
+  }
+
+  listStudentNamesByIds(workspaceId: string, studentIds: string[]): Promise<Array<{ id: string; name: string; studentCode: string }>> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => listStudentNamesByIds(db, workspaceId, studentIds));
   }
 
   updateAttentionCaseStatusWithVersion(input: {

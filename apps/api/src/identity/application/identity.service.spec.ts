@@ -1,5 +1,8 @@
+import { PERMISSION_KEYS } from "@academic-precision/contracts";
 import { ForbiddenApiException, ResourceNotFoundException, ValidationApiException } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../infrastructure/jwt-token-verifier";
+import { PermissionResolverService } from "../../team/application/permission-resolver.service";
+import { InMemoryTeamRepository } from "../../team/application/__fixtures__/in-memory-team.repository";
 import { InMemoryIdentityRepository } from "./__fixtures__/in-memory-identity.repository";
 import { IdentityService } from "./identity.service";
 
@@ -7,11 +10,13 @@ const AUTH_USER: VerifiedSupabaseToken = { id: "auth-user-1", email: "teacher@ex
 
 describe("IdentityService", () => {
   let repository: InMemoryIdentityRepository;
+  let teamRepository: InMemoryTeamRepository;
   let service: IdentityService;
 
   beforeEach(() => {
     repository = new InMemoryIdentityRepository();
-    service = new IdentityService(repository);
+    teamRepository = new InMemoryTeamRepository();
+    service = new IdentityService(repository, new PermissionResolverService(teamRepository));
   });
 
   describe("idempotent provisioning", () => {
@@ -33,19 +38,38 @@ describe("IdentityService", () => {
   });
 
   describe("getWorkspaceContext", () => {
-    it("returns the §11.2 shape for an active member", async () => {
+    it("returns the §11.2 shape for an active member, including the OWNER's real full effective permission set (Phase 11 fix)", async () => {
       const me = await service.getMe(AUTH_USER);
       const workspaceId = me.workspaces[0]!.id;
+      // users.id === the Supabase auth user id throughout this codebase
+      // (see packages/database/src/schema/identity.ts — no DB-generated
+      // default), so seeding the team-side fixture with AUTH_USER.id is
+      // the same identity `resolveEffectivePermissions` will look up.
+      teamRepository.seedMembership({ workspaceId, userId: AUTH_USER.id, roleLabel: "OWNER" });
 
       const context = await service.getWorkspaceContext(AUTH_USER, workspaceId);
 
       expect(context.workspace.id).toBe(workspaceId);
       expect(context.membership.roleLabel).toBe("OWNER");
-      expect(context.permissions).toEqual([]); // pre-existing Phase 1 gap, not Phase 8's mandate
+      // Owner => full implicit catalog access (same resolver every write
+      // endpoint's PermissionGuard uses — see PermissionResolverService).
+      expect(context.permissions.sort()).toEqual([...PERMISSION_KEYS].sort());
       // Phase 8 — a freshly-provisioned workspace starts on its 14-day
       // TRIAL with every V1 capability ALLOWED.
       expect(context.subscriptionState).toBe("TRIAL");
       expect(context.entitlements.sort()).toEqual(["CORE_OPERATIONS", "CREATE_MONTH", "REPORT_EXPORT", "TEAM_MANAGEMENT"].sort());
+    });
+
+    it("returns an empty permission set when the caller has no ACTIVE membership on the team-repository side (defense-in-depth, not just an app_runtime RLS concern)", async () => {
+      const me = await service.getMe(AUTH_USER);
+      const workspaceId = me.workspaces[0]!.id;
+      // Deliberately NOT seeding teamRepository — mirrors a real
+      // desync-proof: getWorkspaceContext must never fabricate permissions
+      // from the identity-side membership alone.
+
+      const context = await service.getWorkspaceContext(AUTH_USER, workspaceId);
+
+      expect(context.permissions).toEqual([]);
     });
 
     it("returns safe no-leak RESOURCE_NOT_FOUND (not FORBIDDEN) for a workspace the user is not a member of", async () => {

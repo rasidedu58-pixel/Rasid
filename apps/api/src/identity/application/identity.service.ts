@@ -13,6 +13,7 @@ import {
 } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../infrastructure/jwt-token-verifier";
 import { IDENTITY_REPOSITORY, type IdentityRepositoryPort } from "./ports/identity-repository.port";
+import { PermissionResolverService } from "../../team/application/permission-resolver.service";
 
 const OWNER_ROLE_LABEL = "OWNER";
 const ACTIVE_STATUS = "ACTIVE";
@@ -25,7 +26,10 @@ const DEFAULT_FULL_NAME = "مستخدم جديد";
  */
 @Injectable()
 export class IdentityService {
-  constructor(@Inject(IDENTITY_REPOSITORY) private readonly repository: IdentityRepositoryPort) {}
+  constructor(
+    @Inject(IDENTITY_REPOSITORY) private readonly repository: IdentityRepositoryPort,
+    private readonly permissionResolver: PermissionResolverService,
+  ) {}
 
   /**
    * Idempotently ensures a User + owner Workspace + owner Membership exist
@@ -69,9 +73,10 @@ export class IdentityService {
       throw new ResourceNotFoundException();
     }
 
-    const [subscription, allowedEntitlements] = await Promise.all([
+    const [subscription, allowedEntitlements, effectiveGrants] = await Promise.all([
       this.repository.findSubscriptionByWorkspaceId(workspaceId),
       this.repository.listAllowedEntitlementsForWorkspace(workspaceId),
+      this.permissionResolver.resolveEffectivePermissions(workspaceId, authUser.id),
     ]);
 
     return {
@@ -84,11 +89,13 @@ export class IdentityService {
         id: found.membership.id,
         roleLabel: found.membership.roleLabel,
       },
-      // Phase 1 scope note (still true): the permission engine (Phase 2)
-      // was never wired into this specific response — pre-existing gap,
-      // out of Phase 8's mandate. Phase 8 wires only entitlements/
-      // subscriptionState, its own explicit deliverable.
-      permissions: [],
+      // Phase 11 fix: real effective permission keys (deduplicated — the
+      // same key can appear via more than one grant/closure edge), backed
+      // by the SAME `PermissionResolverService` every write endpoint's own
+      // `PermissionGuard` already uses. This is UI-rendering guidance only
+      // (show/hide nav and actions) — every mutation still re-checks
+      // authorization server-side on its own, unconditionally.
+      permissions: [...new Set(effectiveGrants.map((g) => g.permission))],
       entitlements: allowedEntitlements.map((e) => e.capability),
       subscriptionState: subscription?.state ?? null,
     };

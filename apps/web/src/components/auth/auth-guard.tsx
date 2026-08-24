@@ -1,0 +1,47 @@
+"use client";
+
+import { useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { LoadingRegion, ErrorState } from "@academic-precision/ui";
+import { useSession } from "../../lib/session-provider";
+import { useWorkspace } from "../../lib/workspace-provider";
+
+/**
+ * The one shared guard every authenticated route renders through (replaces
+ * the pre-Phase-11 pattern of each page re-deriving its own
+ * `supabase.auth.getSession()` effect). Centralizes: no session -> /login,
+ * session but no completed-onboarding workspace -> /onboarding, workspace
+ * context failed to load -> a real ErrorState with retry (never a blank
+ * screen).
+ */
+export function AuthGuard({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const { status: sessionStatus } = useSession();
+  const workspace = useWorkspace();
+
+  useEffect(() => {
+    if (sessionStatus === "unauthenticated") router.replace("/login");
+  }, [sessionStatus, router]);
+
+  useEffect(() => {
+    if (sessionStatus === "authenticated" && workspace.status === "no-workspace") router.replace("/onboarding");
+  }, [sessionStatus, workspace.status, router]);
+
+  if (sessionStatus === "loading" || sessionStatus === "unauthenticated") {
+    return <LoadingRegion className="min-h-screen" />;
+  }
+
+  if (workspace.status === "loading" || workspace.status === "no-workspace") {
+    return <LoadingRegion className="min-h-screen" label="جارٍ تجهيز مساحة العمل..." />;
+  }
+
+  if (workspace.status === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <ErrorState title="تعذّر تحميل بيانات مساحة العمل" onRetry={workspace.refetch} />
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}

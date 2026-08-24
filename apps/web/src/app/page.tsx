@@ -1,12 +1,19 @@
-/**
- * Minimal status/health page proving apps/web builds and renders.
- * Not a product screen — Phase 0 is infrastructure only.
- */
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { LoadingRegion } from "@academic-precision/ui";
+import { useSession } from "../lib/session-provider";
+
+/** Root route is a pure redirect — never a product screen. */
 export default function HomePage() {
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
-      <h1 className="text-2xl font-semibold">Academic Precision — Web is running</h1>
-      <p className="text-slate-500">تأسيس الحزمة البرمجية — المرحلة صفر (Phase 0 foundation)</p>
-    </main>
-  );
+  const router = useRouter();
+  const { status } = useSession();
+
+  useEffect(() => {
+    if (status === "authenticated") router.replace("/dashboard");
+    else if (status === "unauthenticated") router.replace("/login");
+  }, [status, router]);
+
+  return <LoadingRegion className="min-h-screen" />;
 }

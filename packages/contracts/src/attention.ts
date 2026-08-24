@@ -43,6 +43,10 @@ export type AttentionReasonDto = z.infer<typeof attentionReasonSchema>;
 export const attentionCaseSummarySchema = z.object({
   id: z.string().uuid(),
   studentId: z.string().uuid(),
+  // Phase 11 — batched (no N+1), so the queue is directly usable without a
+  // per-row student fetch from the frontend.
+  studentName: z.string(),
+  studentCode: z.string(),
   status: attentionCaseStatusSchema,
   priority: attentionSeveritySchema,
   openedAt: z.string(),

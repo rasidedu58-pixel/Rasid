@@ -37,6 +37,8 @@ export interface AttentionRepositoryPort {
     expectedVersion: number;
     newStatus: "IN_FOLLOWUP" | "CONTACTED" | "MONITORING" | "CLOSED";
   }): Promise<AttentionCaseRow | undefined>;
+  /** Phase 11 — batched (no N+1) student name/code lookup for the list-summary DTO. */
+  listStudentNamesByIds(workspaceId: string, studentIds: string[]): Promise<Array<{ id: string; name: string; studentCode: string }>>;
 
   // Follow-ups
   findScheduledFollowupById(id: string): Promise<ScheduledFollowupRow | undefined>;

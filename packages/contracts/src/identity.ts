@@ -33,8 +33,10 @@ export const workspaceContextResponseSchema = z.object({
     id: z.string().uuid(),
     roleLabel: z.string(),
   }),
-  // Phase 1 scope: the permission engine (Phase 2) and entitlements/
-  // subscriptions (Phase 8) are not implemented yet — always empty/null.
+  // `permissions`: the caller's real effective permission keys (Phase 11 —
+  // backed by PermissionResolverService, same resolver every write
+  // endpoint's PermissionGuard uses). `entitlements`: allowed capability
+  // keys for the workspace's current subscription (Phase 8).
   permissions: z.array(z.string()),
   entitlements: z.array(z.string()),
   subscriptionState: z.string().nullable(),

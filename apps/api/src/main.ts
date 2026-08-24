@@ -2,9 +2,35 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { loadServerEnv } from "@academic-precision/config";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { RequestContextInterceptor } from "./common/interceptors/request-context.interceptor";
+
+/**
+ * Phase 11 — apps/web (a distinct browser origin: Vercel) needs CORS to
+ * call this API (Railway) at all; there was previously no CORS
+ * configuration anywhere in this app, which silently blocks every
+ * cross-origin browser request (server-to-server calls, curl, Swagger's
+ * "Try it out" from the API's own origin were never affected — this is a
+ * browser-enforced restriction, not a server one, which is why it went
+ * unnoticed through Phases 1-10's own API-only test suites).
+ *
+ * `CORS_ALLOWED_ORIGINS` is a comma-separated allowlist (never a wildcard —
+ * this API is called with `Authorization: Bearer` + a custom
+ * `X-Workspace-Id` header, and credentialed/header-bearing cross-origin
+ * requests require an explicit origin, not `*`). Unset falls back to the
+ * local dev web app's own default port only — never "allow everything" —
+ * so a misconfigured production deploy fails closed (blocks the real
+ * frontend, loudly) rather than open.
+ */
+function resolveAllowedOrigins(): string[] {
+  const { CORS_ALLOWED_ORIGINS } = loadServerEnv();
+  if (!CORS_ALLOWED_ORIGINS) return ["http://localhost:3001"];
+  return CORS_ALLOWED_ORIGINS.split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+}
 
 const API_PREFIX = "api/v1";
 
@@ -22,6 +48,12 @@ async function bootstrap() {
   app.setGlobalPrefix(API_PREFIX);
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new RequestContextInterceptor());
+  app.enableCors({
+    origin: resolveAllowedOrigins(),
+    credentials: false, // Bearer token in a header, never a cookie — no credentialed-cookie mode needed.
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Workspace-Id", "Idempotency-Key"],
+  });
 
   // Nest/Fastify only register their own default JSON content-type parser
   // during `app.init()` (triggered internally by `app.listen()`), so a
