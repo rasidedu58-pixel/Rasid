@@ -125,3 +125,31 @@ infrastructure ceiling that must be raised (or fronted by a proper
 transaction-mode pooler) before horizontal scaling or heavier concurrent
 tooling (this package's own load tests included) can run reliably
 alongside the live application.
+
+### Phase 10 Closure Delta — this is not a viable production allocation as-is
+
+A second, independent, Postgres-level finding (not just Supavisor's pooler
+cap) confirmed during this Closure Delta: **`app_worker`'s own Postgres
+role carries `CONNECTION LIMIT 5`** (`pg_roles.rolconnlimit`), exactly
+equal to its client pool's own `max: 5`. That means `app_worker` has ZERO
+headroom of its own even in complete isolation from `app_runtime`/Supavisor
+— a single transient reconnect, a retried migration/admin script sharing
+the role, or one extra worker replica during a rolling deploy is enough to
+hit `too many connections for role "app_worker"` (reproduced directly
+during this session's own testing, not hypothetical).
+
+**RELEASE GATE — connection budget must be reconfigured with real headroom
+before horizontal scaling or meaningful production traffic.** Explicitly:
+do **not** read "`app_runtime`(10) + `app_worker`(5) = 15, and the project
+cap is 15" as a working production allocation just because the numbers
+happen to add up — that reading has already been shown, empirically, to
+leave zero room for a second instance, a migration connection, or even a
+single role's own transient reconnect. The fix is an infrastructure change
+(a larger Supabase tier and/or a dedicated transaction-mode pooler in front
+of Postgres, sized with real headroom above whatever `app_runtime`/
+`app_worker`'s combined steady-state pool usage turns out to be), not an
+arbitrary bump of the `max: 10`/`max: 5` numbers in `connection.ts` —
+raising pool sizes without raising the underlying connection ceiling only
+moves the same failure to a lower concurrency threshold. This gate is
+tracked as a pre-production requirement, not resolved by this Closure
+Delta.

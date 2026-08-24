@@ -316,6 +316,13 @@
       "when": 1787441700000,
       "tag": "0046_outbox_events_claim_index_fix",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787441800000,
+      "tag": "0047_app_worker_notifications_select",
+      "breakpoints": true
     }
   ]
 }

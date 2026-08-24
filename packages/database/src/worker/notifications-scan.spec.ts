@@ -1,101 +1,130 @@
 /**
  * Phase 10 — failure testing: worker outage LONGER than the subscription
- * reminder window (7d/3d/1d).
+ * reminder window (7d/3d/1d), plus its Closure Delta resolution.
  *
- * Pure unit test (no live DB) against `matchesReminderWindow` itself — the
- * exact function `scanSubscriptionReminders` uses to decide "is this scan
- * cycle close enough to a reminder point to fire it". This is deliberately
- * the smallest possible surface to prove the real question the Phase 10
- * correction asked: "what happens to a 7d/3d/1d reminder if the worker is
- * down for longer than the ±12h match window around that point?"
+ * Pure unit tests (no live DB) against the two decision functions
+ * `scanSubscriptionReminders` actually calls.
  *
- * Finding (documented here, not silently discovered and dropped):
- *
- * `runNotificationsScan` is called once per worker poll cycle (currently a
- * 5-minute cadence — `apps/worker/src/main.ts`). Each call re-evaluates
- * EVERY active subscription's current `hoursUntilExpiry` against all three
- * windows fresh — there is no separate "missed reminder" queue, and no
- * stored cursor of "last scan time". This means:
- *
- * - An outage SHORTER than 24h (the full ±12h window width) around a given
- *   reminder point can NEVER cause that point to be skipped: as long as one
- *   scan cycle runs while `hoursUntilExpiry` is still within ±12h of the
- *   target, it fires — proven by `matchesReminderWindow`'s own half-width
- *   design (documented already in notifications-scan.ts).
- * - An outage LONGER than 24h spanning ENTIRELY across one reminder point's
- *   window (e.g. worker down from 7d+13h until 7d-13h before periodEnd)
- *   means that SPECIFIC reminder point is permanently missed — the next
- *   scan after the worker resumes sees an `hoursUntilExpiry` already past
- *   the window, `matchesReminderWindow` correctly returns false, and
- *   `notifications_dedup_unique` means it can never be inserted retroactively
- *   (there is no backfill/catch-up code path, by design — this test proves
- *   that absence, it does not add one).
- * - The 7d/3d/1d points are independent windows, 4 and 2 days apart
- *   respectively. An outage that misses the 7d point but resumes before the
- *   3d point's own window opens still fires the 3d reminder normally — so a
- *   single missed point does not silently mean "the owner gets zero
- *   reminders for that renewal", only "one fewer of the three".
- *
- * DECISION REQUIRED (documented per the Phase 10 correction's own
- * "أو وثّق القرار المطلوب" escape hatch — this is intentionally NOT
- * resolved by adding new backfill/catch-up logic in Phase 10, since that
- * would be a product behavior change, not hardening of an already-approved
- * design):
- *
- *   Should a worker outage that spans an entire reminder window (>24h)
- *   around a subscription's 7d/3d/1d point silently skip that one
- *   reminder (current, proven behavior), or should the scan additionally
- *   catch up on any point already passed since the LAST successful scan
- *   (would require persisting a last-scan-time or a per-subscription
- *   watermark, which does not exist today)? This is a product decision,
- *   not an infrastructure one — flagged for the user, not decided here.
+ * History (kept for context, not hypothetical): the original Phase 10 pass
+ * measured and documented that `matchesReminderWindow`'s ±12h window means
+ * an outage spanning an ENTIRE window (>24h) permanently skips that one
+ * milestone, with no backfill — and flagged the product decision of
+ * whether that was acceptable. The Phase 10 Closure Delta resolved it:
+ * "missing a reminder permanently... is not acceptable" — implement a
+ * deterministic catch-up without a heavy scheduling system. That is
+ * `determineMilestoneToEmit`, which now backs the actual scan (see
+ * `notifications-scan.ts`'s own doc comment for the full rule and why it
+ * needs no separate "outage" code path — a normal on-time scan and a
+ * catch-up-after-outage scan are literally the same decision).
+ * `matchesReminderWindow` itself is kept (still correct on its own terms,
+ * still covered) but is no longer what the scan uses to decide.
  */
 import { describe, expect, it } from "vitest";
-import { matchesReminderWindow } from "./notifications-scan";
+import { matchesReminderWindow, determineMilestoneToEmit } from "./notifications-scan";
 
-describe("Phase 10 — subscription reminder window vs. worker outage duration", () => {
+describe("matchesReminderWindow (kept, no longer the scan's own decision function)", () => {
   it("an outage shorter than the window (worker resumes 6h late) still matches the 7d point", () => {
-    // periodEnd is 7 days minus 6 hours away when the worker finally polls.
-    const hoursUntilExpiry = 7 * 24 - 6;
-    expect(matchesReminderWindow(hoursUntilExpiry, 7)).toBe(true);
+    expect(matchesReminderWindow(7 * 24 - 6, 7)).toBe(true);
   });
 
   it("an outage of exactly the half-width boundary (12h late) still matches — inclusive boundary", () => {
-    const hoursUntilExpiry = 7 * 24 - 12;
-    expect(matchesReminderWindow(hoursUntilExpiry, 7)).toBe(true);
+    expect(matchesReminderWindow(7 * 24 - 12, 7)).toBe(true);
   });
 
-  it("an outage LONGER than the window (worker resumes 13h past the boundary) permanently misses the 7d point", () => {
-    const hoursUntilExpiry = 7 * 24 - 13;
-    expect(matchesReminderWindow(hoursUntilExpiry, 7)).toBe(false);
-    // Also confirm it does not accidentally match an adjacent window either
-    // (the 2-4 day gaps between points mean no double-match window overlap).
-    expect(matchesReminderWindow(hoursUntilExpiry, 3)).toBe(false);
-    expect(matchesReminderWindow(hoursUntilExpiry, 1)).toBe(false);
+  it("an outage longer than the window (13h past the boundary) no longer matches THIS window", () => {
+    expect(matchesReminderWindow(7 * 24 - 13, 7)).toBe(false);
+    expect(matchesReminderWindow(7 * 24 - 13, 3)).toBe(false);
+    expect(matchesReminderWindow(7 * 24 - 13, 1)).toBe(false);
+  });
+});
+
+describe("determineMilestoneToEmit — Phase 10 Closure Delta catch-up rule", () => {
+  const NONE_EMITTED = new Set<string>();
+
+  it("normal, on-time case: nothing crossed yet (>7 days out) — no milestone", () => {
+    expect(determineMilestoneToEmit(7 * 24 + 5, NONE_EMITTED)).toBeNull();
   });
 
-  it("a single missed 7d point does not cascade — the 3d point still fires normally once the worker resumes in time", () => {
-    // Worker was down across the entire 7d window, but back up well before
-    // the 3d window opens (3d point is 4 days after the 7d point).
-    const hoursUntilExpiryAt7dCheck = 7 * 24 - 20; // missed
-    const hoursUntilExpiryAt3dCheck = 3 * 24 - 1; // resumed, well within the 3d window
-    expect(matchesReminderWindow(hoursUntilExpiryAt7dCheck, 7)).toBe(false);
-    expect(matchesReminderWindow(hoursUntilExpiryAt3dCheck, 3)).toBe(true);
+  it("normal, on-time case: exactly at the 7d point, nothing emitted yet — emits 7d", () => {
+    const result = determineMilestoneToEmit(7 * 24 - 0.1, NONE_EMITTED);
+    expect(result?.dedupKey).toBe("7d");
   });
 
-  it("an outage spanning MULTIPLE reminder points (>4 days, e.g. 7d and 3d both missed) leaves only the 1d point as the last chance", () => {
-    // Worker down from before the 7d window opens until after the 3d window closes.
-    const hoursUntilExpiryAt7d = 7 * 24 - 20; // missed
-    const hoursUntilExpiryAt3d = 3 * 24 - 20; // also missed
-    const hoursUntilExpiryAt1d = 1 * 24 - 2; // resumed in time for the 1d point
-    expect(matchesReminderWindow(hoursUntilExpiryAt7d, 7)).toBe(false);
-    expect(matchesReminderWindow(hoursUntilExpiryAt3d, 3)).toBe(false);
-    expect(matchesReminderWindow(hoursUntilExpiryAt1d, 1)).toBe(true);
+  it("normal case: 7d already emitted, still within the 7d..3d range — emits nothing (not due again)", () => {
+    const result = determineMilestoneToEmit(7 * 24 - 5, new Set(["7d"]));
+    expect(result).toBeNull();
   });
 
-  it("verifies the exact configured half-width in hours (12h) matches the documented design", () => {
-    // Sanity check the constant this whole finding depends on hasn't silently drifted.
-    expect(matchesReminderWindow(24 * 7 - 12, 7)).toBe(true);
-    expect(matchesReminderWindow(24 * 7 - 12.01, 7)).toBe(false);
+  it("Example from the correction: worker stops at 8 days remaining, comes back at 5 days -> issues the missed 7d reminder once", () => {
+    const hoursUntilExpiry = 5 * 24;
+    const result = determineMilestoneToEmit(hoursUntilExpiry, NONE_EMITTED);
+    expect(result?.dedupKey).toBe("7d");
+  });
+
+  it("Example from the correction: worker comes back at 2 days -> emits 3d, NOT 7d+3d together (never simultaneous stale warnings)", () => {
+    const hoursUntilExpiry = 2 * 24;
+    const result = determineMilestoneToEmit(hoursUntilExpiry, NONE_EMITTED);
+    expect(result?.dedupKey).toBe("3d");
+  });
+
+  it("Example from the correction: worker comes back at 12h -> emits 1d (the last, most urgent, still-relevant milestone)", () => {
+    const hoursUntilExpiry = 12;
+    const result = determineMilestoneToEmit(hoursUntilExpiry, NONE_EMITTED);
+    expect(result?.dedupKey).toBe("1d");
+  });
+
+  it("never falls back to an older, already-skipped milestone once a more urgent one has already fired", () => {
+    // 1d already emitted (e.g. from a previous scan during/after the outage).
+    // A later scan, still deep past the 7d/3d points, must NOT retroactively
+    // emit the never-sent 3d or 7d reminders just because they're unemitted —
+    // "1d" is still the most-recent/most-relevant crossed milestone, and it's
+    // already been sent, so nothing further happens.
+    const hoursUntilExpiry = 6; // still within the 1d-crossed range
+    const result = determineMilestoneToEmit(hoursUntilExpiry, new Set(["1d"]));
+    expect(result).toBeNull();
+  });
+
+  it("DB dedup remains authoritative: re-asking for a milestone already emitted returns null even mid-outage-catch-up", () => {
+    const hoursUntilExpiry = 2 * 24; // would normally resolve to "3d"
+    const result = determineMilestoneToEmit(hoursUntilExpiry, new Set(["3d"]));
+    expect(result).toBeNull();
+  });
+
+  it("progresses correctly across a sequence of scans with no outage: 7d then 3d then 1d, one at a time, in order", () => {
+    const emitted = new Set<string>();
+
+    let result = determineMilestoneToEmit(7 * 24 - 1, emitted);
+    expect(result?.dedupKey).toBe("7d");
+    emitted.add(result!.dedupKey);
+
+    // Still within the 7d..3d range — nothing new.
+    expect(determineMilestoneToEmit(7 * 24 - 10, emitted)).toBeNull();
+
+    result = determineMilestoneToEmit(3 * 24 - 1, emitted);
+    expect(result?.dedupKey).toBe("3d");
+    emitted.add(result!.dedupKey);
+
+    expect(determineMilestoneToEmit(3 * 24 - 10, emitted)).toBeNull();
+
+    result = determineMilestoneToEmit(1 * 24 - 1, emitted);
+    expect(result?.dedupKey).toBe("1d");
+    emitted.add(result!.dedupKey);
+
+    // After 1d has fired, nothing further — including right up to expiry.
+    expect(determineMilestoneToEmit(0.5, emitted)).toBeNull();
+  });
+
+  it("does NOT send obsolete reminders once the subscription has already fully expired (hoursUntilExpiry < 0)", () => {
+    expect(determineMilestoneToEmit(-1, NONE_EMITTED)).toBeNull();
+    expect(determineMilestoneToEmit(-100, new Set(["1d"]))).toBeNull();
+  });
+
+  it("an outage spanning multiple milestones (7d AND 3d both crossed, neither emitted) emits only the more urgent 3d, never both", () => {
+    const hoursUntilExpiry = 2 * 24; // both 7d and 3d already crossed
+    const result = determineMilestoneToEmit(hoursUntilExpiry, NONE_EMITTED);
+    expect(result?.dedupKey).toBe("3d");
+    // Confirm this is a single-value result, not a list — the type itself
+    // makes "emit both" structurally impossible, not just untested.
+    expect(Object.keys(result!)).toEqual(["dedupKey", "days"]);
   });
 });

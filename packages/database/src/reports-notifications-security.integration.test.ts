@@ -293,4 +293,55 @@ describe.skipIf(!hasLiveCreds)("Phase 9 Reports/Notifications/Action Center Secu
     const rowsAfterRescan = await admin`SELECT count(*)::int AS c FROM notifications WHERE entity_type = 'session' AND entity_id = ${sessionInProgressGapId}`;
     expect(rowsAfterRescan[0]!.c).toBe(1);
   });
+
+  it("Phase 10 Closure Delta — subscription reminder catch-up: a worker outage past the 7d point emits the missed 7d reminder once, real end-to-end via runNotificationsScan", async () => {
+    const subscriptionId = randomUUID();
+    // periodEnd 5 days out — simulating a worker that was down through the
+    // ENTIRE 7d window (which would have needed a scan somewhere in
+    // [156h,180h] remaining) and only comes back now, at 120h remaining.
+    await admin`INSERT INTO subscriptions (id, workspace_id, state, period_start, period_end, version) VALUES
+      (${subscriptionId}, ${workspaceAId}, 'ACTIVE', now() - interval '25 days', now() + interval '5 days', 1)`;
+    try {
+      const workerDb = getWorkerDb();
+      const result = await runNotificationsScan(workerDb);
+      expect(result.subscriptionScanned).toBeGreaterThanOrEqual(1);
+
+      const rows = await admin`SELECT dedup_key, user_id FROM notifications WHERE entity_type = 'subscription' AND entity_id = ${subscriptionId}`;
+      expect(rows.length).toBe(1); // exactly one — never both 7d and a later one simultaneously
+      expect(rows[0]!.dedup_key).toBe("7d"); // the single most-relevant crossed-but-unemitted milestone
+      expect(rows[0]!.user_id).toBe(userAId); // notified the workspace Owner
+
+      // Re-running the scan (still at ~5 days remaining) does NOT duplicate
+      // the 7d reminder, and does NOT fall back to emitting anything else —
+      // DB dedup + determineMilestoneToEmit's own "already emitted" check
+      // both agree nothing further happens here.
+      await runNotificationsScan(workerDb);
+      const rowsAfterRescan = await admin`SELECT count(*)::int AS c FROM notifications WHERE entity_type = 'subscription' AND entity_id = ${subscriptionId}`;
+      expect(rowsAfterRescan[0]!.c).toBe(1);
+    } finally {
+      await admin`DELETE FROM notifications WHERE entity_type = 'subscription' AND entity_id = ${subscriptionId}`;
+      await admin`DELETE FROM subscriptions WHERE id = ${subscriptionId}`;
+    }
+  });
+
+  it("Phase 10 Closure Delta — subscription reminder catch-up: an outage spanning BOTH the 7d and 3d points emits only the more urgent 3d, never both", async () => {
+    const subscriptionId = randomUUID();
+    // periodEnd 2 days out — both the 7d and 3d points have already passed;
+    // only the single most-relevant one (3d) should ever be emitted.
+    await admin`INSERT INTO subscriptions (id, workspace_id, state, period_start, period_end, version) VALUES
+      (${subscriptionId}, ${workspaceAId}, 'ACTIVE', now() - interval '28 days', now() + interval '2 days', 1)`;
+    try {
+      const workerDb = getWorkerDb();
+      await runNotificationsScan(workerDb);
+
+      const rows = await admin`SELECT dedup_key FROM notifications WHERE entity_type = 'subscription' AND entity_id = ${subscriptionId}`;
+      expect(rows.length).toBe(1);
+      expect(rows[0]!.dedup_key).toBe("3d");
+      // The 7d reminder is deliberately never sent for this cycle — abandoned,
+      // not backfilled, per "never emit multiple stale warnings simultaneously".
+    } finally {
+      await admin`DELETE FROM notifications WHERE entity_type = 'subscription' AND entity_id = ${subscriptionId}`;
+      await admin`DELETE FROM subscriptions WHERE id = ${subscriptionId}`;
+    }
+  });
 });

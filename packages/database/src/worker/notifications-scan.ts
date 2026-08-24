@@ -8,9 +8,15 @@
  * Three independent sub-scans, per the Phase 9 Closure correction:
  *
  * 1. SUBSCRIPTION_EXPIRING — reminders at 7/3/1 days before `period_end`
- *    (PRD §44.2 "Final"). WINDOW-based, not exact-instant: a worker cycle
- *    that runs a few minutes (or even hours) late must never silently skip
- *    a reminder point — see `REMINDER_WINDOW_HALF_WIDTH_HOURS`.
+ *    (PRD §44.2 "Final"). Phase 10 Closure Delta: a worker outage longer
+ *    than one reminder's own window must not permanently lose it — see
+ *    `determineMilestoneToEmit`'s own doc comment for the deterministic
+ *    catch-up rule (a normal on-time scan and a catch-up-after-outage scan
+ *    are the exact same decision, no separate code path). This needed one
+ *    new capability: `app_worker` can now SELECT `notifications` (scoped to
+ *    the workspace it is currently scanning — migration 0047), so it can
+ *    check which dedup keys a subscription already has before deciding
+ *    whether the single most-relevant crossed milestone still needs firing.
  * 2. FOLLOWUP_DUE — one notification per `scheduled_followups` row that has
  *    become due (`due_at <= now`, `status = 'PENDING'`) — dedup key is the
  *    follow-up's own id, so it is created AT MOST once per follow-up ever
@@ -24,10 +30,17 @@
  *
  * Every insert goes through `insertDedupedNotification`'s
  * `ON CONFLICT DO NOTHING` — safe under concurrent/retried scans by
- * construction (migration 0043's `notifications_dedup_unique`).
+ * construction (migration 0043's `notifications_dedup_unique`). DB dedup
+ * remains the AUTHORITATIVE safety net for all three sub-scans, including
+ * the subscription catch-up rule — `determineMilestoneToEmit`'s own
+ * in-memory "already emitted" check is what decides which SINGLE milestone
+ * to attempt (never more than one per scan), but the INSERT's own
+ * `ON CONFLICT DO NOTHING` is what actually prevents a duplicate row if two
+ * scans ever raced.
  */
 import { and, eq, inArray, lte } from "drizzle-orm";
 import { subscriptions } from "../schema/subscriptions";
+import { notifications } from "../schema/notifications";
 import { workspaces } from "../schema/workspaces";
 import { scheduledFollowups } from "../schema/followup";
 import { memberships } from "../schema/permissions";
@@ -59,9 +72,63 @@ const MS_PER_DAY = 24 * MS_PER_HOUR;
  * worker cycle delayed by minutes (even hours) must still match; the
  * 2-day minimum gap between consecutive reminder points means a half-width
  * up to just under 24h can never double-match two adjacent points.
+ *
+ * Superseded by {@link determineMilestoneToEmit} for the actual scan logic
+ * (Phase 10 Closure Delta — see its own doc comment) but kept and still
+ * covered by its own tests: it remains a simple, correct description of
+ * "is this scan on time for milestone `days`", useful on its own and as
+ * the reference point the catch-up rule's tests are written against.
  */
 export function matchesReminderWindow(hoursUntilExpiry: number, days: number, halfWidthHours: number = REMINDER_WINDOW_HALF_WIDTH_HOURS): boolean {
   return Math.abs(hoursUntilExpiry - days * 24) <= halfWidthHours;
+}
+
+/**
+ * Phase 10 Closure Delta — deterministic catch-up rule for a worker outage
+ * longer than a reminder milestone's own window (correction: a permanently
+ * missed 7d/3d/1d reminder is "not acceptable" — a missed milestone must
+ * still fire once, but never more than one stale warning at a time).
+ *
+ * V1 rule (product-approved): a milestone `d` has been "crossed" once less
+ * than `d` days remain (`hoursUntilExpiry < d*24`) — no ±half-width window
+ * needed here, since we no longer require landing close to the exact
+ * instant; DB dedup (`notifications_dedup_unique`) is what makes emitting
+ * the SAME milestone twice safe, so every scan can simply ask "what is the
+ * single most relevant crossed-but-unemitted milestone right now" and try
+ * it — a normal on-time scan and a catch-up-after-outage scan both flow
+ * through the exact same decision, no separate code path.
+ *
+ * "Most recent" = the SMALLEST `d` among crossed milestones (closest to
+ * `now`, i.e. the most urgent still-relevant one) — older crossed
+ * milestones that were never emitted (because the worker was down through
+ * their own window) are deliberately abandoned, not backfilled, per the
+ * explicit "never emit multiple stale subscription warnings simultaneously"
+ * requirement. `alreadyEmittedDedupKeys` (the dedup keys this subscription
+ * already has a notification row for) is consulted so a scan that finds
+ * "3d" already sent moves on without re-attempting it — it does NOT fall
+ * back to a less urgent, already-past milestone.
+ *
+ * Returns `null` when: no milestone has been crossed yet (still more than
+ * 7 days out); the subscription has already fully expired
+ * (`hoursUntilExpiry < 0` — an expired subscription's 7d/3d/1d warnings are
+ * obsolete by definition, "do NOT send obsolete reminders after the
+ * subscription has already expired"); or the single most-relevant crossed
+ * milestone was already emitted (the common, on-time case — nothing new to
+ * do this scan). Deliberately does NOT fall back to a less-urgent,
+ * already-past milestone just because it happens to be unemitted — e.g.
+ * once "1d" has fired, a later scan must never emit a stale "3d" it skipped
+ * over during the same outage, which is exactly what a naive
+ * first-unemitted-in-list search would do.
+ */
+export function determineMilestoneToEmit(
+  hoursUntilExpiry: number,
+  alreadyEmittedDedupKeys: ReadonlySet<string>,
+): { dedupKey: "7d" | "3d" | "1d"; days: number } | null {
+  if (hoursUntilExpiry < 0) return null;
+  const crossed = REMINDER_WINDOWS.filter((w) => hoursUntilExpiry < w.days * 24);
+  if (crossed.length === 0) return null;
+  const mostRecent = crossed.reduce((closest, w) => (w.days < closest.days ? w : closest));
+  return alreadyEmittedDedupKeys.has(mostRecent.dedupKey) ? null : mostRecent;
 }
 
 export interface NotificationsScanResult {
@@ -104,25 +171,45 @@ async function scanSubscriptionReminders(workerDb: Db, now: Date): Promise<{ sca
     if (!subscription.periodEnd) continue;
     const hoursUntilExpiry = (subscription.periodEnd.getTime() - now.getTime()) / MS_PER_HOUR;
 
-    for (const window of REMINDER_WINDOWS) {
-      if (!matchesReminderWindow(hoursUntilExpiry, window.days)) continue;
+    const wasCreated = await withWorkerRuntimeContext({ workspaceId: subscription.workspaceId }, async (tx) => {
+      // Phase 10 Closure Delta — catch-up rule (see determineMilestoneToEmit's
+      // own doc comment): what matters is which dedup keys THIS subscription
+      // already has, not a fixed exact-window check, so that a worker outage
+      // spanning a whole reminder window still emits the single most-relevant
+      // missed milestone once, and never floods multiple stale ones. Reading
+      // the existing dedup keys costs one extra SELECT per candidate
+      // subscription — candidates are already filtered to active-ish states
+      // only (small set, not the whole workspace table), so this stays a
+      // cheap, workspace-scoped query, not a new N+1 hot path of consequence.
+      const existingRows = await tx
+        .select({ dedupKey: notifications.dedupKey })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.workspaceId, subscription.workspaceId),
+            eq(notifications.type, "SUBSCRIPTION_EXPIRING"),
+            eq(notifications.entityType, "subscription"),
+            eq(notifications.entityId, subscription.id),
+          ),
+        );
+      const alreadyEmitted = new Set(existingRows.map((r) => r.dedupKey));
+      const milestone = determineMilestoneToEmit(hoursUntilExpiry, alreadyEmitted);
+      if (!milestone) return false;
 
-      const wasCreated = await withWorkerRuntimeContext({ workspaceId: subscription.workspaceId }, async (tx) => {
-        const [workspace] = await tx.select({ ownerUserId: workspaces.ownerUserId, name: workspaces.name }).from(workspaces).where(eq(workspaces.id, subscription.workspaceId)).limit(1);
-        if (!workspace) return false;
-        return insertDedupedNotification(tx, {
-          workspaceId: subscription.workspaceId,
-          userId: workspace.ownerUserId,
-          type: "SUBSCRIPTION_EXPIRING",
-          title: "اقتراب انتهاء الاشتراك",
-          body: `اشتراك مساحة العمل «${workspace.name}» سينتهي خلال ${window.days} ${window.days === 1 ? "يوم" : "أيام"}.`,
-          entityType: "subscription",
-          entityId: subscription.id,
-          dedupKey: window.dedupKey,
-        });
+      const [workspace] = await tx.select({ ownerUserId: workspaces.ownerUserId, name: workspaces.name }).from(workspaces).where(eq(workspaces.id, subscription.workspaceId)).limit(1);
+      if (!workspace) return false;
+      return insertDedupedNotification(tx, {
+        workspaceId: subscription.workspaceId,
+        userId: workspace.ownerUserId,
+        type: "SUBSCRIPTION_EXPIRING",
+        title: "اقتراب انتهاء الاشتراك",
+        body: `اشتراك مساحة العمل «${workspace.name}» سينتهي خلال ${milestone.days} ${milestone.days === 1 ? "يوم" : "أيام"}.`,
+        entityType: "subscription",
+        entityId: subscription.id,
+        dedupKey: milestone.dedupKey,
       });
-      if (wasCreated) created += 1;
-    }
+    });
+    if (wasCreated) created += 1;
   }
   return { scanned: candidates.length, created };
 }
