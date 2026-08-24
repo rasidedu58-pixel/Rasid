@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, ErrorState, LoadingRegion, PermissionDeniedState, formatDate } from "@academic-precision/ui";
+import { Card, CardContent, ErrorState, LoadingRegion, PermissionDeniedState, StatCard, formatDate } from "@academic-precision/ui";
 import { PageHeader } from "../../components/shell/page-header";
 import { qk } from "../../lib/query-keys";
 import { fetchPlatformAdminDashboard } from "../../lib/api/platform-admin";
@@ -35,10 +35,10 @@ export default function PlatformAdminDashboardPage() {
       <PageHeader title="لوحة التحكم" description="أرقام حقيقية فقط — لا يوجد أي رقم إيراد مُخترع (لا عمود سعر في الاشتراكات بعد)." />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Stat label="إجمالي المستخدمين" value={data.totalUsers} />
-        <Stat label="مساحات العمل" value={data.totalWorkspaces} />
-        <Stat label="تنتهي خلال 7 أيام" value={data.expiringWithin7Days} tone={data.expiringWithin7Days > 0 ? "warning" : undefined} />
-        <Stat label="آخر التسجيلات" value={data.recentSignups.length} />
+        <StatCard label="إجمالي المستخدمين" value={String(data.totalUsers)} />
+        <StatCard label="مساحات العمل" value={String(data.totalWorkspaces)} />
+        <StatCard label="تنتهي خلال 7 أيام" value={String(data.expiringWithin7Days)} tone={data.expiringWithin7Days > 0 ? "warning" : undefined} />
+        <StatCard label="آخر التسجيلات" value={String(data.recentSignups.length)} />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -74,14 +74,5 @@ export default function PlatformAdminDashboardPage() {
         </Card>
       </div>
     </>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: number; tone?: "warning" }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-text-secondary">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone === "warning" ? "text-warning" : "text-text-primary"}`}>{value}</p>
-    </Card>
   );
 }
