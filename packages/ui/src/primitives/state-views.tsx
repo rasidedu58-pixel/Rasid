@@ -13,11 +13,11 @@ interface StateViewProps {
 
 function StateView({ icon, title, description, action, className }: StateViewProps) {
   return (
-    <div className={cn("flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-12 text-center", className)}>
+    <div className={cn("flex flex-col items-center gap-2.5 rounded-lg border border-dashed border-border px-6 py-8 text-center", className)}>
       {icon}
       <div className="flex flex-col gap-1">
         <p className="text-sm font-medium text-text-primary">{title}</p>
-        {description ? <p className="max-w-sm text-sm text-text-secondary">{description}</p> : null}
+        {description ? <p className="max-w-sm text-xs text-text-secondary">{description}</p> : null}
       </div>
       {action}
     </div>

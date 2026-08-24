@@ -51,6 +51,22 @@
   --radius-md: 0.625rem;
   --radius-lg: 0.875rem;
   --radius-xl: 1.25rem;
+
+  /*
+   * Phase 13 — shell identity tokens. A deep, confident brand-tinted
+   * surface (not flat black, not the app's own --brand hue repeated) used
+   * ONLY by the app shell (sidebar/mobile nav) — the one deliberate,
+   * bounded place this product "over-brands", so every other surface can
+   * stay a calm, restrained neutral. Distinct active/hover states so the
+   * current route reads as a solid, confident pill rather than a faint tint.
+   */
+  --shell-surface: 217 34% 12%;
+  --shell-surface-hover: 217 28% 18%;
+  --shell-border: 217 25% 20%;
+  --shell-text: 210 20% 92%;
+  --shell-text-muted: 215 14% 62%;
+  --shell-active-bg: 199 78% 30%;
+  --shell-active-text: 0 0% 100%;
 }
 
 * {

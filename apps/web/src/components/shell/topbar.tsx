@@ -37,7 +37,7 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   }
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4 md:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4 md:px-6">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" className="md:hidden" onClick={onOpenMobileNav} aria-label="فتح القائمة">
           <Menu className="h-5 w-5" aria-hidden />
@@ -47,7 +47,7 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         {subscriptionState ? <SubscriptionStatusBadge state={subscriptionState} className="hidden sm:inline-flex" /> : null}
 
         <Link href="/notifications" className="relative">

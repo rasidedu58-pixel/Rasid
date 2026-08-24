@@ -42,6 +42,15 @@ const config: Config = {
         danger: { DEFAULT: withOpacity("--danger"), subtle: withOpacity("--danger-subtle") },
         info: { DEFAULT: withOpacity("--info"), subtle: withOpacity("--info-subtle") },
         ring: withOpacity("--ring"),
+        shell: {
+          DEFAULT: withOpacity("--shell-surface"),
+          hover: withOpacity("--shell-surface-hover"),
+          border: withOpacity("--shell-border"),
+          text: withOpacity("--shell-text"),
+          "text-muted": withOpacity("--shell-text-muted"),
+          active: withOpacity("--shell-active-bg"),
+          "active-text": withOpacity("--shell-active-text"),
+        },
       },
       borderRadius: {
         sm: "var(--radius-sm)",
@@ -57,6 +66,7 @@ const config: Config = {
         sm: "0 1px 3px 0 rgb(15 23 42 / 0.06), 0 1px 2px -1px rgb(15 23 42 / 0.06)",
         md: "0 4px 10px -2px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.06)",
         lg: "0 12px 24px -6px rgb(15 23 42 / 0.10), 0 4px 8px -4px rgb(15 23 42 / 0.06)",
+        floating: "0 16px 32px -8px rgb(15 23 42 / 0.14), 0 6px 12px -4px rgb(15 23 42 / 0.08)",
       },
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },

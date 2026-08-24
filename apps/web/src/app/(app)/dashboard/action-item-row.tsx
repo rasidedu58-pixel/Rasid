@@ -3,10 +3,10 @@ import { ChevronLeft } from "lucide-react";
 import { Badge } from "@academic-precision/ui";
 import { actionItemHref } from "./action-item-link";
 
-const URGENCY_LABEL: Record<string, { label: string; tone: "danger" | "warning" | "neutral" }> = {
-  HIGH: { label: "عاجل", tone: "danger" },
-  MEDIUM: { label: "مهم", tone: "warning" },
-  LOW: { label: "للعلم", tone: "neutral" },
+const URGENCY_LABEL: Record<string, { label: string; tone: "danger" | "warning" | "neutral"; accent: string }> = {
+  HIGH: { label: "عاجل", tone: "danger", accent: "border-s-danger" },
+  MEDIUM: { label: "مهم", tone: "warning", accent: "border-s-warning" },
+  LOW: { label: "للعلم", tone: "neutral", accent: "border-s-border-strong" },
 };
 
 export interface ActionItem {
@@ -21,7 +21,10 @@ export interface ActionItem {
 export function ActionItemRow({ item }: { item: ActionItem }) {
   const urgency = URGENCY_LABEL[item.urgency] ?? URGENCY_LABEL.LOW!;
   return (
-    <Link href={actionItemHref(item.entityType, item.entityId)} className="flex items-start gap-3 rounded-md border border-border px-4 py-3 transition-colors hover:border-brand/40 hover:bg-brand-subtle/30">
+    <Link
+      href={actionItemHref(item.entityType, item.entityId)}
+      className={`flex items-start gap-3 rounded-md border border-s-2 border-border ${urgency.accent} bg-surface px-4 py-3 transition-colors hover:bg-brand-subtle/30`}
+    >
       <Badge tone={urgency.tone} className="mt-0.5 shrink-0">
         {urgency.label}
       </Badge>

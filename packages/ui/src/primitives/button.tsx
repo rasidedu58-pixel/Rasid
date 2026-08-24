@@ -5,15 +5,15 @@ import { Loader2 } from "lucide-react";
 import { cn } from "../lib/cn";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-ring disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[background-color,box-shadow,transform] duration-150 focus-ring disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
   {
     variants: {
       variant: {
-        primary: "bg-brand text-brand-foreground shadow-xs hover:bg-brand/90",
-        secondary: "bg-surface-sunken text-text-primary border border-border hover:bg-surface-sunken/70",
-        outline: "border border-border-strong bg-surface text-text-primary hover:bg-surface-sunken",
-        ghost: "text-text-primary hover:bg-surface-sunken",
-        danger: "bg-danger text-white shadow-xs hover:bg-danger/90",
+        primary: "bg-brand text-brand-foreground shadow-sm hover:bg-brand/90 hover:shadow-md active:bg-brand/95",
+        secondary: "bg-surface-sunken text-text-primary border border-border hover:bg-surface-sunken/70 active:bg-surface-sunken",
+        outline: "border border-border-strong bg-surface text-text-primary hover:bg-surface-sunken active:bg-surface-sunken/80",
+        ghost: "text-text-primary hover:bg-surface-sunken active:bg-surface-sunken/80",
+        danger: "bg-danger text-white shadow-sm hover:bg-danger/90 hover:shadow-md active:bg-danger/95",
         link: "text-brand underline-offset-4 hover:underline",
       },
       size: {

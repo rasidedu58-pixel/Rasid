@@ -11,9 +11,9 @@ export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange:
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="end" className="w-72 max-w-[85vw]">
+      <SheetContent side="end" className="w-72 max-w-[85vw] border-shell-border bg-shell">
         <SheetHeader>
-          <SheetTitle className="text-brand">راصد</SheetTitle>
+          <SheetTitle className="text-white">راصد</SheetTitle>
         </SheetHeader>
         <nav className="flex flex-col gap-1">
           {items.map((item) => {
@@ -26,10 +26,10 @@ export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange:
                 onClick={() => onOpenChange(false)}
                 className={cn(
                   "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
-                  active ? "bg-brand-subtle text-brand-subtle-foreground" : "text-text-secondary hover:bg-surface-sunken",
+                  active ? "bg-shell-active text-shell-active-text" : "text-shell-text-muted hover:bg-shell-hover hover:text-shell-text",
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
                 {item.label}
               </Link>
             );
