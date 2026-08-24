@@ -127,21 +127,27 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Features */}
+      {/* Features — no card borders/shadows at all (the explicit "not
+          every piece of content should be a card" direction, applied
+          concretely): an icon chip + text, differentiated by generous
+          whitespace only, not by 12 repeated boxes. Grid `divide-*`
+          utilities were deliberately avoided here — they don't wrap
+          correctly across a responsive 2-/3-column grid (a spurious
+          border appears at the start of every new row). */}
       <section id="features" className="border-t border-border bg-surface-sunken py-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="mb-10 text-center">
             <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">كل ما تحتاجه لتشغيل مجموعاتك، جاهز اليوم</h2>
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((feature) => (
-              <Card key={feature.label} className="p-5">
-                <CardContent className="flex flex-col gap-2 p-0">
-                  <feature.icon className="h-6 w-6 text-brand" aria-hidden />
-                  <p className="font-medium text-text-primary">{feature.label}</p>
-                  <p className="text-sm text-text-secondary">{feature.description}</p>
-                </CardContent>
-              </Card>
+              <div key={feature.label} className="flex flex-col gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-md bg-brand-subtle">
+                  <feature.icon className="h-[18px] w-[18px] text-brand" aria-hidden />
+                </span>
+                <p className="font-medium text-text-primary">{feature.label}</p>
+                <p className="text-sm text-text-secondary">{feature.description}</p>
+              </div>
             ))}
           </div>
         </div>
@@ -250,35 +256,45 @@ function WhoCard({ title, description }: { title: string; description: string })
  */
 function ProductPreviewPanel() {
   return (
-    <Card className="overflow-hidden shadow-lg">
-      <div className="flex items-center gap-2 border-b border-border bg-surface-sunken px-4 py-3">
-        <span className="h-2.5 w-2.5 rounded-full bg-danger/60" />
-        <span className="h-2.5 w-2.5 rounded-full bg-warning/60" />
-        <span className="h-2.5 w-2.5 rounded-full bg-success/60" />
-        <span className="ms-2 text-xs text-text-tertiary">راصد — الرئيسية</span>
-      </div>
-      <CardContent className="flex flex-col gap-3 p-4">
-        <div className="flex items-center justify-between rounded-md border border-border bg-brand-subtle px-3 py-2 text-sm">
-          <span className="text-brand-subtle-foreground">الحصة القادمة: مجموعة الرياضيات</span>
-          <span className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground">فتح الحصة</span>
-        </div>
-        <p className="text-xs font-semibold text-text-secondary">يحتاج إجراء الآن</p>
-        {[
-          { label: "3 طلاب لم يُسجَّل حضورهم في حصة الأمس", tone: "warning" as const },
-          { label: "دفعة متأخرة من ولي أمر — تذكير مطلوب", tone: "danger" as const },
-          { label: "متابعة مستحقة لحالة انتباه مفتوحة", tone: "neutral" as const },
-        ].map((row) => (
-          <div key={row.label} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-            <span className="text-text-primary">{row.label}</span>
-            <Badge tone={row.tone}>{row.tone === "warning" ? "متوسط" : row.tone === "danger" ? "عاجل" : "سياقي"}</Badge>
-          </div>
+    <Card className="flex overflow-hidden shadow-floating">
+      {/* A thin sliver of the REAL app shell (see components/shell/sidebar.tsx's
+          --shell-* tokens) — not a generic browser-chrome mockup — so this
+          preview reads as the actual product, not a stand-in dashboard. */}
+      <div className="hidden w-14 shrink-0 flex-col items-center gap-3 bg-shell py-4 sm:flex">
+        <span className="text-sm font-bold text-white">ر</span>
+        <span className="h-8 w-8 rounded-md bg-shell-active" />
+        {[Users, Layers, CalendarRange, Wallet].map((Icon, i) => (
+          <Icon key={i} className="h-4 w-4 text-shell-text-muted" aria-hidden />
         ))}
-        <div className="grid grid-cols-3 gap-2 pt-1">
-          <MiniStat icon={Users} label="الطلاب" />
-          <MiniStat icon={Wallet} label="المالية" />
-          <MiniStat icon={FileBarChart} label="التقارير" />
+      </div>
+
+      <div className="flex-1">
+        <div className="flex items-center border-b border-border bg-surface-sunken px-4 py-3">
+          <span className="text-xs font-medium text-text-secondary">الرئيسية</span>
         </div>
-      </CardContent>
+        <CardContent className="flex flex-col gap-3 p-4">
+          <div className="flex items-center justify-between rounded-md border border-border bg-brand-subtle px-3 py-2 text-sm">
+            <span className="text-brand-subtle-foreground">الحصة القادمة: مجموعة الرياضيات</span>
+            <span className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground">فتح الحصة</span>
+          </div>
+          <p className="text-xs font-semibold text-text-secondary">يحتاج إجراء الآن</p>
+          {[
+            { label: "3 طلاب لم يُسجَّل حضورهم في حصة الأمس", tone: "warning" as const },
+            { label: "دفعة متأخرة من ولي أمر — تذكير مطلوب", tone: "danger" as const },
+            { label: "متابعة مستحقة لحالة انتباه مفتوحة", tone: "neutral" as const },
+          ].map((row) => (
+            <div key={row.label} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
+              <span className="text-text-primary">{row.label}</span>
+              <Badge tone={row.tone}>{row.tone === "warning" ? "متوسط" : row.tone === "danger" ? "عاجل" : "سياقي"}</Badge>
+            </div>
+          ))}
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            <MiniStat icon={Users} label="الطلاب" />
+            <MiniStat icon={Wallet} label="المالية" />
+            <MiniStat icon={FileBarChart} label="التقارير" />
+          </div>
+        </CardContent>
+      </div>
     </Card>
   );
 }

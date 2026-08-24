@@ -62,7 +62,7 @@ export default function AttentionCaseDetailPage() {
         <SectionCard title="أسباب ظهور الحالة" description="كل سبب مبني على قاعدة محددة وأدلة فعلية — لا تخمين.">
           <div className="flex flex-col gap-3">
             {item.reasons.map((reason) => (
-              <Card key={reason.id} className="p-3">
+              <Card key={reason.id} className={`border-s-2 p-3 ${reason.severity === "HIGH" ? "border-s-danger" : "border-s-warning"}`}>
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-text-primary">{RULE_LABEL[reason.ruleKey] ?? reason.ruleKey}</p>
                   <Badge tone={reason.severity === "HIGH" ? "danger" : "warning"}>{reason.severity === "HIGH" ? "عالية" : "متوسطة"}</Badge>

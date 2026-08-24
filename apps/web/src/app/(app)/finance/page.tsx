@@ -68,7 +68,7 @@ export default function FinancePage() {
                     </Link>
                   </TableCell>
                   <TableCell className="text-text-secondary">{formatDate(item.dueDate)}</TableCell>
-                  <TableCell className="tabular-nums text-text-primary">{formatMoney(item.remainingMinor)}</TableCell>
+                  <TableCell className="text-base font-semibold tabular-nums text-text-primary">{formatMoney(item.remainingMinor)}</TableCell>
                   <TableCell>
                     <ObligationStatusBadge status={item.status} />
                   </TableCell>
