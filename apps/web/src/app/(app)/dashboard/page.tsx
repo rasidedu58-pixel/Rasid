@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { CalendarClock, Sparkles } from "lucide-react";
+import { CalendarClock, CalendarRange, Sparkles } from "lucide-react";
 import { Button, Card, CardContent, EmptyState, ErrorState, LoadingRegion, formatDateTime, formatMonthLabel } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
@@ -61,10 +61,10 @@ export default function DashboardPage() {
 
   return (
     <>
-      <PageHeader title="الرئيسية" description={data.month ? `الشهر التشغيلي الحالي: ${formatMonthLabel(data.month.year, data.month.month)}` : undefined} />
+      <PageHeader title="الرئيسية" />
 
       {!data.month ? (
-        <Card className="mb-6 border-brand/30 bg-brand-subtle">
+        <Card className="mb-4 border-brand/30 bg-brand-subtle">
           <CardContent className="flex flex-col items-start justify-between gap-3 py-4 sm:flex-row sm:items-center">
             <p className="text-sm text-text-primary">
               {isOwner ? "لا يوجد شهر تشغيلي بعد — جهّزه لتبدأ في جدولة الحصص وتسجيل الطلاب." : "بانتظار مالك المساحة لتجهيز أول شهر تشغيلي."}
@@ -79,33 +79,44 @@ export default function DashboardPage() {
       ) : null}
 
       {data.subscriptionWarning ? (
-        <Card className="mb-6 border-warning/30 bg-warning-subtle">
-          <CardContent className="flex items-center justify-between gap-4 py-3">
-            <p className="text-sm text-warning">{data.subscriptionWarning.message}</p>
-            <Button asChild size="sm" variant="outline">
-              <Link href="/settings?tab=billing">إدارة الاشتراك</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="mb-3 flex items-center justify-between gap-4 rounded-lg border border-warning/30 bg-warning-subtle px-4 py-2.5">
+          <p className="text-sm text-warning">{data.subscriptionWarning.message}</p>
+          <Link href="/settings?tab=billing" className="shrink-0 text-sm font-medium text-warning underline">
+            إدارة الاشتراك
+          </Link>
+        </div>
       ) : null}
 
-      {data.nextSession ? (
-        <Card className="mb-6">
-          <CardContent className="flex items-center justify-between gap-4 py-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-subtle">
-                <CalendarClock className="h-5 w-5 text-brand" aria-hidden />
+      {/* Phase 13 visual QA fix: month context + next session were two
+          separate full-width stacked cards (real, measured vertical space
+          waste — the exact "large empty page" complaint this phase exists
+          to fix). One compact context bar answers both "what context am I
+          in" and "what's next" at a glance, the way an operational command
+          center's status row does — no new data, same two fields. */}
+      {data.month || data.nextSession ? (
+        <div className="mb-6 flex flex-col gap-3 rounded-lg border border-border bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            {data.month ? (
+              <div className="flex items-center gap-2 text-sm">
+                <CalendarRange className="h-4 w-4 text-text-tertiary" aria-hidden />
+                <span className="text-text-secondary">الشهر الحالي</span>
+                <span className="font-medium text-text-primary">{formatMonthLabel(data.month.year, data.month.month)}</span>
               </div>
-              <div>
-                <p className="text-sm font-medium text-text-primary">الحصة القادمة: {data.nextSession.groupName}</p>
-                <p className="text-xs text-text-secondary">{formatDateTime(data.nextSession.scheduledAt)}</p>
+            ) : null}
+            {data.nextSession ? (
+              <div className="flex items-center gap-2 text-sm">
+                <CalendarClock className="h-4 w-4 text-brand" aria-hidden />
+                <span className="text-text-secondary">الحصة القادمة</span>
+                <span className="font-medium text-text-primary">{data.nextSession.groupName} — {formatDateTime(data.nextSession.scheduledAt)}</span>
               </div>
-            </div>
-            <Button asChild size="sm">
+            ) : null}
+          </div>
+          {data.nextSession ? (
+            <Button asChild size="sm" className="shrink-0">
               <Link href={`/sessions/${data.nextSession.id}`}>فتح الحصة</Link>
             </Button>
-          </CardContent>
-        </Card>
+          ) : null}
+        </div>
       ) : null}
 
       {allItems.length === 0 ? (
