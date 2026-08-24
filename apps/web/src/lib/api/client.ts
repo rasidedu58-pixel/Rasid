@@ -1,10 +1,24 @@
 import { env } from "../../env";
 import { getSupabaseClient } from "../supabase-client";
 
-const DEFAULT_API_URL = "http://localhost:3000/api/v1";
+const LOCAL_DEV_API_URL = "http://localhost:3000/api/v1";
 
+/**
+ * Deployment Closure Delta: `NEXT_PUBLIC_API_URL` silently falling back to
+ * `localhost:3000` was safe for local dev but a real, quiet failure mode
+ * in production — a deployed browser calling `localhost` fails every
+ * request with a generic network error and no hint that the ROOT cause is
+ * a missing env var, not a real outage. The fallback now only applies
+ * when the app itself is actually running on localhost (real local dev);
+ * everywhere else, a missing `NEXT_PUBLIC_API_URL` throws immediately and
+ * loudly instead of silently degrading into confusing per-request
+ * failures.
+ */
 function apiBaseUrl(): string {
-  return env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL;
+  if (env.NEXT_PUBLIC_API_URL) return env.NEXT_PUBLIC_API_URL;
+  const isLocalHost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  if (isLocalHost) return LOCAL_DEV_API_URL;
+  throw new Error("NEXT_PUBLIC_API_URL is not configured for this deployment.");
 }
 
 export class ApiRequestError extends Error {
@@ -33,6 +47,34 @@ export function isValidationError(error: unknown): error is ApiRequestError {
 }
 export function isSessionExpired(error: unknown): error is ApiRequestError {
   return error instanceof ApiRequestError && (error.code === "SESSION_EXPIRED" || error.code === "UNAUTHENTICATED" || error.status === 401);
+}
+
+/**
+ * Deployment Closure Delta — real bug found via live QA (`POST /groups`
+ * 422 on an unfilled optional field): an uncontrolled `<input>` left
+ * empty submits `""`, but nearly every optional string field across
+ * `packages/contracts` is `z.string().trim().min(1).optional()` — which
+ * accepts "absent" but rejects "present and empty". Rather than chase
+ * this down at every one of the ~10 call sites across every form (and
+ * every future one), it is normalized ONCE here: any top-level or
+ * one-level-nested empty string in a request body becomes `undefined`
+ * before serialization, matching what every one of those schemas already
+ * expects for "not provided". Never touches arrays or already-non-empty
+ * values.
+ */
+function stripEmptyOptionalStrings(value: unknown): unknown {
+  if (Array.isArray(value) || value === null || typeof value !== "object") return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    if (v === "") {
+      result[key] = undefined;
+    } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      result[key] = Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, nested]) => [k, nested === "" ? undefined : nested]));
+    } else {
+      result[key] = v;
+    }
+  }
+  return result;
 }
 
 export interface ApiRequestOptions {
@@ -86,7 +128,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   const response = await fetch(`${apiBaseUrl()}${path}${buildQueryString(options.query)}`, {
     method: options.method ?? "GET",
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.body !== undefined ? JSON.stringify(stripEmptyOptionalStrings(options.body)) : undefined,
   });
 
   if (options.raw) {

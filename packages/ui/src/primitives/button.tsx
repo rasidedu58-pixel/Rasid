@@ -34,12 +34,30 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>, Va
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, loading = false, disabled, children, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button";
+    // Deployment Closure Delta — real production crash found via live QA:
+    // Radix's `Slot` (what `asChild` renders as) requires EXACTLY one
+    // element child; rendering `{loading ? <Loader2/> : null}` alongside
+    // `{children}` always gave Slot an array of two items (even with the
+    // spinner branch resolving to `null`), which threw "Slot failed to
+    // slot onto its children" the moment any `asChild` button (e.g. a
+    // Link styled as a button) rendered — reproduced live after login,
+    // caught by `global-error.tsx`, root-caused via the browser console.
+    // `asChild` composes onto another element (a Link, typically) and has
+    // no loading state of its own in this product, so it renders ONLY the
+    // single child Slot requires; the spinner stays exclusive to the real
+    // `<button>` case.
+    if (asChild) {
+      return (
+        <Slot className={cn(buttonVariants({ variant, size }), className)} ref={ref} {...props}>
+          {children}
+        </Slot>
+      );
+    }
     return (
-      <Comp className={cn(buttonVariants({ variant, size }), className)} ref={ref} disabled={disabled || loading} {...props}>
+      <button className={cn(buttonVariants({ variant, size }), className)} ref={ref} disabled={disabled || loading} {...props}>
         {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
         {children}
-      </Comp>
+      </button>
     );
   },
 );

@@ -17,6 +17,9 @@ export function CreateGroupDialog() {
   const { register, handleSubmit, reset, formState } = useForm<CreateGroupRequest>();
 
   const mutation = useMutation({
+    // Blank optional fields (subject/grade) are normalized "" -> undefined
+    // globally in `apiRequest` (see its own comment for the real bug this
+    // fixes — a 422 found via live QA) — no per-form workaround needed.
     mutationFn: (body: CreateGroupRequest) => createGroup(workspaceId!, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.groups.list(workspaceId!) });
