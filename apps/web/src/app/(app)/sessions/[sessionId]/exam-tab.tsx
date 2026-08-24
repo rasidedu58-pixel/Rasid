@@ -84,7 +84,7 @@ export function ExamTab({ sessionId, sessionVersion, students, hasExam }: { sess
         {students.map((s) => {
           const local = scores[s.enrollmentId] ?? { absent: s.record.examStatus === "ABSENT_FROM_EXAM", score: s.record.examScore !== null ? String(s.record.examScore) : "" };
           return (
-            <div key={s.enrollmentId} className="flex items-center justify-between gap-3 px-4 py-2.5">
+            <div key={s.enrollmentId} className="flex items-center justify-between gap-3 px-4 py-3">
               <span className="text-sm font-medium text-text-primary">{s.studentName}</span>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-1.5 text-xs text-text-secondary">

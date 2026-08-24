@@ -54,16 +54,16 @@ export function HomeworkTab({ sessionId, sessionVersion, students }: { sessionId
 
       <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
         {students.map((s) => (
-          <div key={s.enrollmentId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+          <div key={s.enrollmentId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
             <span className="text-sm font-medium text-text-primary">{s.studentName}</span>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-2">
               {(Object.keys(STATUS_LABEL) as HomeworkStatus[]).map((status) => (
                 <button
                   key={status}
                   type="button"
                   disabled={savingId === s.enrollmentId}
                   onClick={() => setOneMutation.mutate({ enrollmentId: s.enrollmentId, status })}
-                  className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${s.record.homework === status ? STATUS_TONE[status] : "border-border text-text-secondary hover:bg-surface-sunken"}`}
+                  className={`min-w-12 rounded-md border px-2.5 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${s.record.homework === status ? STATUS_TONE[status] : "border-border text-text-secondary hover:bg-surface-sunken"}`}
                 >
                   {STATUS_LABEL[status]}
                 </button>

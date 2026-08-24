@@ -85,7 +85,7 @@ export default function SessionModePage() {
             <p className="font-medium text-text-primary">هذه الحصة لم تبدأ بعد</p>
             <p className="text-sm text-text-secondary">ابدأ الحصة لتسجيل الحضور والواجب.</p>
           </div>
-          <Button onClick={() => startMutation.mutate()} loading={startMutation.isPending}>
+          <Button size="lg" onClick={() => startMutation.mutate()} loading={startMutation.isPending}>
             <PlayCircle className="h-4 w-4" aria-hidden />
             بدء الحصة
           </Button>

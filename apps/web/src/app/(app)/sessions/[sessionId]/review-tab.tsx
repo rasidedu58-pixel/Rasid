@@ -83,7 +83,13 @@ export function ReviewTab({ sessionId, sessionVersion, onCompleted }: { sessionI
         </div>
       ) : null}
 
-      <Button onClick={() => completeMutation.mutate()} loading={completeMutation.isPending} disabled={!review.canComplete} className="self-end">
+      <Button
+        size="lg"
+        onClick={() => completeMutation.mutate()}
+        loading={completeMutation.isPending}
+        disabled={!review.canComplete}
+        className="w-full sm:w-auto sm:self-end"
+      >
         إنهاء الحصة
       </Button>
     </div>
