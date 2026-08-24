@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
-import { getDatabaseUrl, getWorkerDatabaseUrl } from "./env";
+import { getDatabaseUrl, getPlatformAdminDatabaseUrl, getWorkerDatabaseUrl } from "./env";
 import * as schema from "./schema/index";
 
 /**
@@ -36,6 +36,11 @@ export async function closeDb(): Promise<void> {
     await workerClient.end({ timeout: 5 });
     workerClient = undefined;
     workerDb = undefined;
+  }
+  if (platformAdminClient) {
+    await platformAdminClient.end({ timeout: 5 });
+    platformAdminClient = undefined;
+    platformAdminDb = undefined;
   }
 }
 
@@ -75,6 +80,27 @@ export function withWorkerRuntimeContext<T>(
     await tx.execute(sql`SELECT set_config('app.workspace_id', ${params.workspaceId}, true)`);
     return callback(tx as unknown as PostgresJsDatabase<typeof schema>);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Platform-admin connection (Phase 12) — a THIRD separate singleton,
+// authenticating as the dedicated least-privilege `app_platform_admin`
+// role (never `app_runtime`, never `app_worker`). See
+// migrations/0048_platform_admin.sql for the full rationale: this is the
+// ONLY connection in the codebase with unrestricted cross-tenant SELECT on
+// workspaces/users/memberships/subscriptions/entitlements, by design, for
+// the platform owner's own backoffice.
+// ---------------------------------------------------------------------------
+
+let platformAdminClient: Sql | undefined;
+let platformAdminDb: PostgresJsDatabase<typeof schema> | undefined;
+
+export function getPlatformAdminDb(): PostgresJsDatabase<typeof schema> {
+  if (!platformAdminDb) {
+    platformAdminClient = postgres(getPlatformAdminDatabaseUrl(), { max: 5 });
+    platformAdminDb = drizzle(platformAdminClient, { schema });
+  }
+  return platformAdminDb;
 }
 
 /**

@@ -10,9 +10,9 @@ environment's `DATABASE_URL`.
 Phase 0 ships this directory empty (placeholder schema only) — real migrations
 begin once the approved domain schema is implemented in a later phase.
 
-## Three connection strings (RLS Security Delta + Phase 7 Worker Boundary)
+## Four connection strings (RLS Security Delta + Phase 7 Worker Boundary + Phase 12 Platform Admin)
 
-As of `0032_app_worker_role.sql`, this package uses **three** separate
+As of `0048_platform_admin.sql`, this package uses **four** separate
 connection strings, never fewer, and never one standing in for another:
 
 - `DATABASE_URL` — the RUNTIME application connection, used by `apps/api` at
@@ -35,19 +35,40 @@ connection strings, never fewer, and never one standing in for another:
   `app_worker` gets its own narrower grants instead (outbox claim/process
   + read/write only the domain tables the rule engine touches — see
   `0032`/`0033`'s own comments for the exact list).
+- `PLATFORM_ADMIN_DATABASE_URL` — used ONLY by `apps/api`'s platform-admin
+  module (`packages/database/src/repositories/platform-admin.repository.ts`).
+  Authenticates as the dedicated, least-privilege `app_platform_admin`
+  Postgres role (`NOBYPASSRLS`, see `0048_platform_admin.sql`) — the ONLY
+  role in this codebase with unrestricted cross-tenant SELECT on
+  workspaces/users/memberships/subscriptions/entitlements, by explicit
+  design, for the platform owner's own backoffice. `app_runtime` must
+  never be widened for this — see `0048`'s own comment.
+
+### Granting/revoking platform-admin status
+
+There is deliberately no endpoint or UI to grant platform-admin status —
+it is an out-of-band DBA operation, same convention as a role's password:
+
+```sql
+INSERT INTO platform_admins (user_id, note) VALUES ('<supabase-auth-user-id>', 'e.g. founder');
+-- to revoke:
+DELETE FROM platform_admins WHERE user_id = '<supabase-auth-user-id>';
+```
 
 ### Provisioning a role's password per environment
 
-`0006` creates `app_runtime` and `0032` creates `app_worker`, both with
-`NOLOGIN` — **no password is ever committed to source control, and no
-migration file itself contains a password.** Enable each role with a
-one-time, out-of-band statement run directly against that environment's
-database (the generated password is stored ONLY in that environment's
-secret store / local `.env`, never in git, never in a migration):
+`0006` creates `app_runtime`, `0032` creates `app_worker`, and `0048`
+creates `app_platform_admin` — all three `NOLOGIN` by default — **no
+password is ever committed to source control, and no migration file
+itself contains a password.** Enable each role with a one-time,
+out-of-band statement run directly against that environment's database
+(the generated password is stored ONLY in that environment's secret
+store / local `.env`, never in git, never in a migration):
 
 ```sql
-ALTER ROLE app_runtime WITH LOGIN PASSWORD '<generated-secret>';
-ALTER ROLE app_worker  WITH LOGIN PASSWORD '<generated-secret>';
+ALTER ROLE app_runtime        WITH LOGIN PASSWORD '<generated-secret>';
+ALTER ROLE app_worker         WITH LOGIN PASSWORD '<generated-secret>';
+ALTER ROLE app_platform_admin WITH LOGIN PASSWORD '<generated-secret>';
 ```
 
 Generate a fresh, sufficiently random secret per role per environment
@@ -67,6 +88,7 @@ role prefix and password; host/port/database stay the same:
 DATABASE_URL=postgresql://app_runtime.<project-ref>:<app_runtime-password>@<host>:5432/postgres
 MIGRATION_DATABASE_URL=postgresql://postgres.<project-ref>:<postgres-password>@<host>:5432/postgres
 WORKER_DATABASE_URL=postgresql://app_worker.<project-ref>:<app_worker-password>@<host>:5432/postgres
+PLATFORM_ADMIN_DATABASE_URL=postgresql://app_platform_admin.<project-ref>:<app_platform_admin-password>@<host>:5432/postgres
 ```
 
 A bare `app_worker` username (no `.<project-ref>` suffix) will fail to

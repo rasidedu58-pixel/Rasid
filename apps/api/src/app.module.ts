@@ -14,6 +14,7 @@ import { BillingModule } from "./billing/billing.module";
 import { ReportsModule } from "./reports/reports.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { ActionCenterModule } from "./action-center/action-center.module";
+import { PlatformAdminModule } from "./platform-admin/platform-admin.module";
 import { RequestIdMiddleware } from "./common/middleware/request-id.middleware";
 import { loadRateLimitConfig } from "./common/rate-limit/rate-limit.config";
 
@@ -56,6 +57,7 @@ const rateLimitConfig = loadRateLimitConfig();
     ReportsModule,
     NotificationsModule,
     ActionCenterModule,
+    PlatformAdminModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

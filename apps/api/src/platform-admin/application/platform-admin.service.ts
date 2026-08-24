@@ -1,0 +1,138 @@
+import { Injectable } from "@nestjs/common";
+import type {
+  ListPlatformAdminSubscriptionsResponse,
+  ListPlatformAdminUsersResponse,
+  ListPlatformAdminWorkspacesResponse,
+  PlatformAdminDashboardResponse,
+  PlatformAdminUserDetail,
+  PlatformAdminWorkspaceDetail,
+} from "@academic-precision/contracts";
+import {
+  getDashboardStats,
+  getUserDetail,
+  getWorkspaceDetail,
+  listSubscriptions,
+  listUsers,
+  listWorkspaces,
+} from "@academic-precision/database";
+import { ResourceNotFoundException } from "../../common/exceptions/api.exception";
+
+/**
+ * Application service — Phase 12 Platform Admin. Read-only in V1 (see the
+ * module's own README/closure-report note on why mutations like workspace
+ * suspension were deliberately deferred). Every method here assumes the
+ * caller has ALREADY passed `PlatformAdminGuard` — no authorization logic
+ * lives here, only DTO mapping from repository rows to the contract shape
+ * (Date -> ISO string, nulls preserved as-is).
+ */
+@Injectable()
+export class PlatformAdminService {
+  async getDashboard(): Promise<PlatformAdminDashboardResponse> {
+    const stats = await getDashboardStats();
+    return {
+      totalUsers: stats.totalUsers,
+      totalWorkspaces: stats.totalWorkspaces,
+      subscriptionsByState: stats.subscriptionsByState,
+      recentSignups: stats.recentSignups.map((r) => ({
+        workspaceId: r.workspaceId,
+        name: r.name,
+        ownerName: r.ownerName,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      expiringWithin7Days: stats.expiringWithin7Days,
+    };
+  }
+
+  async listUsers(params: { search?: string; cursor?: string; limit?: number }): Promise<ListPlatformAdminUsersResponse> {
+    const result = await listUsers(params);
+    return {
+      items: result.items.map((u) => ({
+        id: u.id,
+        fullName: u.fullName,
+        emailDisplay: u.emailDisplay,
+        status: u.status,
+        createdAt: u.createdAt.toISOString(),
+        workspaceCount: u.workspaceCount,
+      })),
+      page: { hasNext: result.hasNext, nextCursor: result.nextCursor },
+    };
+  }
+
+  async getUser(userId: string): Promise<PlatformAdminUserDetail> {
+    const detail = await getUserDetail(userId);
+    if (!detail) throw new ResourceNotFoundException();
+    return {
+      id: detail.user.id,
+      fullName: detail.user.fullName,
+      emailDisplay: detail.user.emailDisplay,
+      phone: detail.user.phone,
+      status: detail.user.status,
+      createdAt: detail.user.createdAt.toISOString(),
+      memberships: detail.memberships,
+    };
+  }
+
+  async listWorkspaces(params: { search?: string; cursor?: string; limit?: number }): Promise<ListPlatformAdminWorkspacesResponse> {
+    const result = await listWorkspaces(params);
+    return {
+      items: result.items.map((w) => ({
+        id: w.id,
+        name: w.name,
+        ownerUserId: w.ownerUserId,
+        ownerName: w.ownerName,
+        workspaceType: w.workspaceType,
+        status: w.status,
+        createdAt: w.createdAt.toISOString(),
+        subscriptionState: w.subscriptionState,
+      })),
+      page: { hasNext: result.hasNext, nextCursor: result.nextCursor },
+    };
+  }
+
+  async getWorkspace(workspaceId: string): Promise<PlatformAdminWorkspaceDetail> {
+    const detail = await getWorkspaceDetail(workspaceId);
+    if (!detail) throw new ResourceNotFoundException();
+    return {
+      id: detail.workspace.id,
+      name: detail.workspace.name,
+      workspaceType: detail.workspace.workspaceType,
+      status: detail.workspace.status,
+      timezone: detail.workspace.timezone,
+      dueDatePolicy: detail.workspace.dueDatePolicy,
+      createdAt: detail.workspace.createdAt.toISOString(),
+      ownerUserId: detail.workspace.ownerUserId,
+      ownerName: detail.ownerName,
+      members: detail.members,
+      subscription: detail.subscription
+        ? {
+            id: detail.subscription.id,
+            provider: detail.subscription.provider,
+            state: detail.subscription.state,
+            periodStart: detail.subscription.periodStart ? detail.subscription.periodStart.toISOString() : null,
+            periodEnd: detail.subscription.periodEnd ? detail.subscription.periodEnd.toISOString() : null,
+            cancelAtPeriodEnd: detail.subscription.cancelAtPeriodEnd,
+            providerCustomerId: detail.subscription.providerCustomerId,
+            providerSubscriptionId: detail.subscription.providerSubscriptionId,
+          }
+        : null,
+      entitlements: detail.entitlements,
+    };
+  }
+
+  async listSubscriptions(params: { state?: string; cursor?: string; limit?: number }): Promise<ListPlatformAdminSubscriptionsResponse> {
+    const result = await listSubscriptions(params);
+    return {
+      items: result.items.map((s) => ({
+        id: s.id,
+        workspaceId: s.workspaceId,
+        workspaceName: s.workspaceName,
+        provider: s.provider,
+        state: s.state,
+        periodStart: s.periodStart ? s.periodStart.toISOString() : null,
+        periodEnd: s.periodEnd ? s.periodEnd.toISOString() : null,
+        cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+      })),
+      page: { hasNext: result.hasNext, nextCursor: result.nextCursor },
+    };
+  }
+}

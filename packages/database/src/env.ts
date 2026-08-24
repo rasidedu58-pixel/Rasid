@@ -32,6 +32,15 @@ const databaseEnvSchema = z.object({
    * connection, not a widened runtime one.
    */
   WORKER_DATABASE_URL: z.string().optional(),
+  /**
+   * Phase 12 — the dedicated, least-privilege `app_platform_admin`
+   * connection string (see migrations/0048_platform_admin.sql), used ONLY
+   * by `apps/api`'s platform-admin module for its cross-tenant reads.
+   * Deliberately a SEPARATE role from `app_runtime`: the whole point of
+   * this role is unrestricted SELECT across every workspace, which
+   * `app_runtime` must never have.
+   */
+  PLATFORM_ADMIN_DATABASE_URL: z.string().optional(),
 });
 
 export function loadDatabaseEnv(
@@ -95,4 +104,23 @@ export function getWorkerDatabaseUrl(
     );
   }
   return WORKER_DATABASE_URL;
+}
+
+/**
+ * Returns a validated `PLATFORM_ADMIN_DATABASE_URL` (the dedicated,
+ * least-privilege `app_platform_admin` connection — see
+ * migrations/0048_platform_admin.sql), throwing only when something
+ * actually tries to connect without one configured.
+ */
+export function getPlatformAdminDatabaseUrl(
+  source: Record<string, string | undefined> = typeof process !== "undefined" ? process.env : {},
+): string {
+  const { PLATFORM_ADMIN_DATABASE_URL } = loadDatabaseEnv(source);
+  if (!PLATFORM_ADMIN_DATABASE_URL) {
+    throw new Error(
+      "PLATFORM_ADMIN_DATABASE_URL is not set. Configure it (the app_platform_admin role's own connection string) " +
+        "before using the platform-admin module.",
+    );
+  }
+  return PLATFORM_ADMIN_DATABASE_URL;
 }

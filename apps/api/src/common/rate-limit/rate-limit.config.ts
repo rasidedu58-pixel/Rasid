@@ -32,6 +32,8 @@ export interface RateLimitConfig {
   billing: RateLimitTierConfig;
   export: RateLimitTierConfig;
   webhook: RateLimitTierConfig;
+  /** Phase 12 — Platform Admin routes: a small, known set of privileged callers, tighter than `default`. */
+  platformAdmin: RateLimitTierConfig;
 }
 
 const SAFE_DEFAULTS: RateLimitConfig = {
@@ -48,6 +50,10 @@ const SAFE_DEFAULTS: RateLimitConfig = {
   // Paddle can legitimately burst-deliver retries; generous, and NOT the
   // primary defense (signature + idempotency are) — see module doc comment.
   webhook: { limit: 120, ttlMs: 60_000 },
+  // Generous per-minute budget for legitimate dashboard/list/search
+  // browsing by the (very small) set of platform admins, well below what a
+  // scraping loop across every tenant would need.
+  platformAdmin: { limit: 120, ttlMs: 60_000 },
 };
 
 export function loadRateLimitConfig(): RateLimitConfig {
@@ -76,6 +82,10 @@ export function loadRateLimitConfig(): RateLimitConfig {
     webhook: {
       limit: env.RATE_LIMIT_WEBHOOK_LIMIT ?? SAFE_DEFAULTS.webhook.limit,
       ttlMs: env.RATE_LIMIT_WEBHOOK_TTL_MS ?? SAFE_DEFAULTS.webhook.ttlMs,
+    },
+    platformAdmin: {
+      limit: env.RATE_LIMIT_PLATFORM_ADMIN_LIMIT ?? SAFE_DEFAULTS.platformAdmin.limit,
+      ttlMs: env.RATE_LIMIT_PLATFORM_ADMIN_TTL_MS ?? SAFE_DEFAULTS.platformAdmin.ttlMs,
     },
   };
 }

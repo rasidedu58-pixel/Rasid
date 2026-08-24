@@ -40,3 +40,4 @@ export * as audit from "./audit";
 export * as outbox from "./outbox";
 export * as idempotency from "./idempotency";
 export * as featureFlags from "./feature-flags";
+export * as platformAdmin from "./platform-admin";

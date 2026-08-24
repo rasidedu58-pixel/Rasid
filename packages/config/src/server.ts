@@ -80,6 +80,8 @@ const serverEnvSchema = z.object({
   RATE_LIMIT_EXPORT_TTL_MS: z.coerce.number().int().positive().optional(),
   RATE_LIMIT_WEBHOOK_LIMIT: z.coerce.number().int().positive().optional(),
   RATE_LIMIT_WEBHOOK_TTL_MS: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_PLATFORM_ADMIN_LIMIT: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_PLATFORM_ADMIN_TTL_MS: z.coerce.number().int().positive().optional(),
 
   /**
    * Phase 11 — comma-separated list of allowed browser origins for CORS

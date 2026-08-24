@@ -21,9 +21,24 @@ const inter = Inter({
   display: "swap",
 });
 
+const SITE_URL = "https://rasid-web.vercel.app";
+
 export const metadata: Metadata = {
-  title: "راصد — Rasid",
-  description: "راصد — منصة تشغيل احترافية للمعلمين وأصحاب المجموعات التعليمية.",
+  metadataBase: new URL(SITE_URL),
+  title: { default: "راصد — Rasid", template: "%s" },
+  description: "راصد — نظام تشغيل ومتابعة للمعلمين وأصحاب المجموعات التعليمية.",
+  openGraph: {
+    type: "website",
+    locale: "ar_EG",
+    siteName: "راصد",
+    title: "راصد — نظام تشغيل ومتابعة للمدرسين وأصحاب المجموعات التعليمية",
+    description: "سجّل → افهم → اتخذ إجراء → تابع. تجربة مجانية 14 يومًا بدون بطاقة.",
+  },
+  twitter: {
+    card: "summary",
+    title: "راصد — نظام تشغيل ومتابعة للمدرسين",
+    description: "سجّل → افهم → اتخذ إجراء → تابع. تجربة مجانية 14 يومًا بدون بطاقة.",
+  },
 };
 
 /** Root layout — Arabic-first/RTL. Providers are ordered so WorkspaceProvider can read SessionProvider's state, and AppQueryProvider wraps both (both use TanStack Query). */

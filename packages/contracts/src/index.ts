@@ -10,3 +10,4 @@ export * from "./session-mode";
 export * from "./attention";
 export * from "./billing";
 export * from "./reports";
+export * from "./platform-admin";

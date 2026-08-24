@@ -12,6 +12,7 @@ export * from "./repositories/subscriptions.repository";
 export * from "./reports/reports.repository";
 export * from "./reports/action-center.repository";
 export * from "./repositories/notifications.repository";
+export * from "./repositories/platform-admin.repository";
 export * from "./scheduling/session-generator";
 export * from "./scheduling/proration";
 export * from "./students/arabic-normalize";

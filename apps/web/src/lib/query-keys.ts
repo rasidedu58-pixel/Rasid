@@ -58,4 +58,12 @@ export const qk = {
   actionCenter: {
     root: (ws: string) => ["action-center", ws] as const,
   },
+  platformAdmin: {
+    dashboard: () => ["platform-admin", "dashboard"] as const,
+    users: (params?: Record<string, unknown>) => ["platform-admin", "users", params] as const,
+    user: (id: string) => ["platform-admin", "users", "detail", id] as const,
+    workspaces: (params?: Record<string, unknown>) => ["platform-admin", "workspaces", params] as const,
+    workspace: (id: string) => ["platform-admin", "workspaces", "detail", id] as const,
+    subscriptions: (params?: Record<string, unknown>) => ["platform-admin", "subscriptions", params] as const,
+  },
 } as const;
