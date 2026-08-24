@@ -17,7 +17,11 @@
     "test": "vitest run",
     "clean": "rimraf dist",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/migrate.ts"
+    "db:migrate": "tsx src/migrate.ts",
+    "db:validate-migrations": "tsx src/scripts/validate-migrations.ts",
+    "scale:seed": "tsx src/scripts/seed-scale-dataset.ts",
+    "scale:cleanup": "tsx src/scripts/cleanup-scale-dataset.ts",
+    "scale:load-test": "tsx src/scripts/load-test-db-layer.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",

@@ -1,4 +1,5 @@
 import { Controller, Get, Param, Res, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { FastifyReply } from "fastify";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
@@ -10,7 +11,10 @@ import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/pe
 import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
 import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import type { GetExportResponse } from "@academic-precision/contracts";
+import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { ReportsService } from "../application/reports.service";
+
+const RATE_LIMIT = loadRateLimitConfig();
 
 /**
  * Thin controller — `GET /exports/{id}` and `GET /exports/{id}/download`
@@ -21,6 +25,7 @@ import { ReportsService } from "../application/reports.service";
 @ApiTags("reports")
 @ApiBearerAuth()
 @UseGuards(SupabaseAuthGuard, PermissionGuard, EntitlementGuard)
+@Throttle({ default: { limit: RATE_LIMIT.export.limit, ttl: RATE_LIMIT.export.ttlMs } })
 @Controller("exports")
 export class ExportsController {
   constructor(private readonly reportsService: ReportsService) {}

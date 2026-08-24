@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
@@ -18,7 +19,10 @@ import {
 } from "@academic-precision/contracts";
 import { ValidationApiException } from "../../common/exceptions/api.exception";
 import { toFieldErrors } from "../../common/validation/zod-field-errors";
+import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { ReportsService } from "../application/reports.service";
+
+const RATE_LIMIT = loadRateLimitConfig();
 
 /**
  * Thin controller — Phase 9 Reports endpoints (API Contract §9.10,
@@ -71,6 +75,7 @@ export class ReportsController {
   @RequirePermission("reports.export")
   @UseGuards(EntitlementGuard)
   @RequireEntitlement("REPORT_EXPORT")
+  @Throttle({ default: { limit: RATE_LIMIT.export.limit, ttl: RATE_LIMIT.export.ttlMs } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "CSV UTF-8 export only in V1 (POST /api/v1/reports/export)" })
   createExport(

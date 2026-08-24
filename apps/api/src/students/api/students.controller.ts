@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Patch, Query, Req, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { AuthenticatedRequest } from "../../identity/api/guards/supabase-auth.guard";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
@@ -6,6 +7,7 @@ import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-to
 import { CurrentUser } from "../../identity/api/decorators/current-user.decorator";
 import { REQUEST_ID_HEADER } from "../../common/middleware/request-id.middleware";
 import { extractHeader } from "../../common/http/header-utils";
+import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
@@ -36,6 +38,8 @@ import { ValidationApiException } from "../../common/exceptions/api.exception";
 import { toFieldErrors } from "../../common/validation/zod-field-errors";
 import { StudentsService } from "../application/students.service";
 
+const RATE_LIMIT = loadRateLimitConfig();
+
 /**
  * Thin controller — Phase 4 Students + Guardians + QR endpoints (API
  * Contract §9.5). All business/authorization logic lives in
@@ -50,6 +54,7 @@ export class StudentsController {
 
   @Get("students")
   @RequirePermission("students.view_basic")
+  @Throttle({ default: { limit: RATE_LIMIT.search.limit, ttl: RATE_LIMIT.search.ttlMs } })
   @ApiOperation({ summary: "Scoped directory/search (GET /api/v1/students)" })
   listStudents(
     @CurrentUser() user: VerifiedSupabaseToken,

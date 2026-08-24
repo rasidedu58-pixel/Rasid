@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
@@ -13,7 +14,10 @@ import {
 } from "@academic-precision/contracts";
 import { ValidationApiException } from "../../common/exceptions/api.exception";
 import { toFieldErrors } from "../../common/validation/zod-field-errors";
+import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { StudentsService } from "../application/students.service";
+
+const RATE_LIMIT = loadRateLimitConfig();
 
 /**
  * Thin controller — `POST /api/v1/qr/resolve` (API Contract §9.5).
@@ -31,6 +35,7 @@ export class QrController {
 
   @Post("resolve")
   @RequirePermission("students.view_basic")
+  @Throttle({ default: { limit: RATE_LIMIT.qr.limit, ttl: RATE_LIMIT.qr.ttlMs } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Safe-no-leak QR resolve, GLOBAL context only in Phase 4 (POST /api/v1/qr/resolve)" })
   resolve(

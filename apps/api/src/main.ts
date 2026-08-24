@@ -9,7 +9,15 @@ import { RequestContextInterceptor } from "./common/interceptors/request-context
 const API_PREFIX = "api/v1";
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());
+  // `trustProxy: true` — Phase 10: the app is deployed behind a reverse
+  // proxy/load balancer in every real environment (Render, or any future
+  // container host per ADR-012's portability requirement); without this,
+  // Fastify's `req.ip` resolves to the proxy's own address for every
+  // request, which would make the rate limiter (ThrottlerGuard, keyed by
+  // client IP) treat all traffic as a single client instead of isolating
+  // abusive callers. Harmless locally (no proxy present, `req.ip` still
+  // resolves to the direct connection).
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ trustProxy: true }));
 
   app.setGlobalPrefix(API_PREFIX);
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -58,9 +66,10 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Academic Precision API")
     .setDescription(
-      "Phase 0 infrastructure (health/readiness) + Phase 1 identity/auth/workspace " +
-        "endpoints (GET /me, GET /me/workspaces/:id/context, POST /onboarding/complete). " +
-        "No later-phase business feature endpoints are exposed yet.",
+      "Teacher V1 API — identity/auth/workspace, RBAC, scheduling, students, session mode, " +
+        "finance, attention/follow-up, billing/entitlements, reports, notifications, and the " +
+        "Action Center (Phases 1-9). Every route is rate-limited (Phase 10) — see response " +
+        "headers for the caller's remaining quota.",
     )
     .setVersion("v1")
     .addBearerAuth({ type: "http", scheme: "bearer", bearerFormat: "JWT" })

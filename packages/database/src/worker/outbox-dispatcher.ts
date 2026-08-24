@@ -41,6 +41,21 @@
  *    caught in-process), a THIRD, separate transaction marks the row
  *    FAILED with an exponential-ish backoff `available_at`, so a
  *    persistently-broken event does not spin the poll loop.
+ *
+ * Phase 10 hardening — bounded retry / terminal `DEAD` status (migration
+ * 0045). Before this, a "poison" event (permanently invalid — e.g. a
+ * payload referencing an already-deleted Session) could retry FOREVER:
+ * `attempt_count` kept climbing with a capped 10-minute backoff, but
+ * nothing ever stopped the cycle. This never starved OTHER events (the
+ * claim query always picks whichever due row has the earliest
+ * `available_at`, and a backed-off poison event usually isn't due), but it
+ * would consume a worker cycle indefinitely for a row nothing can ever fix
+ * automatically. Once `attempt_count` reaches `MAX_ATTEMPTS`, the row is
+ * marked `DEAD` instead of `FAILED` — never discarded, never claimed again
+ * by the normal poll loop, inspectable directly
+ * (`SELECT * FROM outbox_events WHERE status = 'DEAD'`), and explicitly
+ * replayable by an operator via `replayDeadOutboxEvent` once the
+ * underlying cause is fixed.
  */
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { outboxEvents } from "../schema/outbox";
@@ -51,6 +66,8 @@ import { runEvaluateAttentionRulesForSessionTransaction } from "../repositories/
 const LEASE_MS = 2 * 60 * 1000; // 2 minutes — generous for a single-session evaluation.
 const MAX_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes cap.
 const BASE_BACKOFF_MS = 30 * 1000; // 30 seconds per attempt.
+/** After this many attempts, a still-failing event goes DEAD (terminal) instead of FAILED-and-retried-again. At the backoff cap (10 min), 10 attempts is up to ~100 minutes of automatic retry before requiring operator intervention — long enough to ride out a transient dependency outage, short enough not to loop forever on a truly poison event. */
+const MAX_ATTEMPTS = 10;
 
 export type OutboxEventRow = typeof outboxEvents.$inferSelect;
 
@@ -89,9 +106,16 @@ async function claimOneEvent(workerDb: Db, eventTypes: string[]): Promise<Outbox
   });
 }
 
-/** Step 3 — mark a claimed event FAILED with a backoff delay, in its own small transaction (never inside the failed processing transaction itself, which just rolled back). */
+/** Step 3 — mark a claimed event FAILED (with a backoff delay) or, once `MAX_ATTEMPTS` is exhausted, terminally DEAD — in its own small transaction (never inside the failed processing transaction itself, which just rolled back). */
 async function markEventFailed(workerDb: Db, event: OutboxEventRow, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  if (event.attemptCount >= MAX_ATTEMPTS) {
+    await workerDb
+      .update(outboxEvents)
+      .set({ status: "DEAD", lastError: message.slice(0, 2000) })
+      .where(eq(outboxEvents.id, event.id));
+    return;
+  }
   const delayMs = backoffMs(event.attemptCount);
   await workerDb
     .update(outboxEvents)
@@ -101,6 +125,24 @@ async function markEventFailed(workerDb: Db, event: OutboxEventRow, error: unkno
       availableAt: sql`now() + (${delayMs}::text || ' milliseconds')::interval`,
     })
     .where(eq(outboxEvents.id, event.id));
+}
+
+/**
+ * Operator recovery/replay procedure (Phase 10) — the ONLY way a DEAD
+ * event is ever picked up again. Resets `attempt_count` to 0 and `status`
+ * to `PENDING` with `available_at = now()`, so the very next poll cycle
+ * claims it immediately. Callable manually (a one-off script/REPL against
+ * the worker connection) once the underlying cause has actually been
+ * fixed — never automatic, since an unconditionally-auto-replayed poison
+ * event would just go DEAD again after the same `MAX_ATTEMPTS` retries.
+ */
+export async function replayDeadOutboxEvent(workerDb: Db, eventId: string): Promise<OutboxEventRow | undefined> {
+  const [row] = await workerDb
+    .update(outboxEvents)
+    .set({ status: "PENDING", attemptCount: 0, availableAt: sql`now()`, lastError: null })
+    .where(and(eq(outboxEvents.id, eventId), eq(outboxEvents.status, "DEAD")))
+    .returning();
+  return row;
 }
 
 /** Step 2 — process one claimed event's domain effects + mark it PROCESSED, all in one transaction, with the correct workspace context set first. */
@@ -131,6 +173,8 @@ export interface ProcessPendingOutboxEventsResult {
   processed: number;
   failed: number;
   claimed: number;
+  /** How many of `failed` went terminal (DEAD) this cycle, not just backed-off-and-retried — surfaced separately so an operator/dashboard can alert on it specifically. */
+  dead: number;
 }
 
 /**
@@ -147,6 +191,7 @@ export async function processPendingOutboxEvents(
   const maxEvents = opts.maxEvents ?? 20;
   let processed = 0;
   let failed = 0;
+  let dead = 0;
   let claimed = 0;
 
   for (let i = 0; i < maxEvents; i++) {
@@ -159,8 +204,9 @@ export async function processPendingOutboxEvents(
     } catch (err) {
       await markEventFailed(workerDb, event, err);
       failed += 1;
+      if (event.attemptCount >= MAX_ATTEMPTS) dead += 1;
     }
   }
 
-  return { processed, failed, claimed };
+  return { processed, failed, claimed, dead };
 }

@@ -56,6 +56,30 @@ const serverEnvSchema = z.object({
 
   SENTRY_DSN: z.string().optional(),
   POSTHOG_API_KEY: z.string().optional(),
+
+  /**
+   * Phase 10 — rate limiting (API Contract §18 Security Contract: "Rate
+   * limit أعلى صرامة على Auth، QR resolve، search، invitation/webhook abuse
+   * surfaces"). Every limit is environment-configurable rather than
+   * hardcoded, per the Phase 10 correction: initial values are safe
+   * defaults (applied in code when a var is unset — see
+   * `apps/api/src/common/rate-limit/rate-limit.config.ts`), meant to be
+   * revisited against real load-test results, not treated as final.
+   * `ttlMs` = the sliding window length; `limit` = max requests per window
+   * per client (IP, or IP+workspace where noted at the call site).
+   */
+  RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_DEFAULT_TTL_MS: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_SEARCH_LIMIT: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_SEARCH_TTL_MS: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_QR_LIMIT: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_QR_TTL_MS: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_BILLING_LIMIT: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_BILLING_TTL_MS: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_EXPORT_LIMIT: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_EXPORT_TTL_MS: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_WEBHOOK_LIMIT: z.coerce.number().int().positive().optional(),
+  RATE_LIMIT_WEBHOOK_TTL_MS: z.coerce.number().int().positive().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

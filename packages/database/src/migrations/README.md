@@ -85,3 +85,43 @@ back to `DATABASE_URL` (which would silently reuse `app_runtime`'s
 narrower, wrong-shaped grants) or to `MIGRATION_DATABASE_URL` (which
 would silently grant the worker `BYPASSRLS`/table-owner privileges it
 must never have).
+
+## Connection pool budget (Phase 10 scale-review finding)
+
+The shared development Supabase project this codebase has used through
+every phase's live integration tests enforces a **hard cap of 15
+simultaneous session-mode connections** (Supavisor's own limit for this
+project's current tier — confirmed empirically during the Phase 10 load
+test: `EMAXCONNSESSION: max clients reached in session mode - max clients
+are limited to pool_size: 15`).
+
+Production code's own pool sizes already assume real headroom that this
+project's actual tier does NOT provide:
+
+| Connection | Pool size (code) |
+|---|---|
+| `app_runtime` (`getDb()`, `packages/database/src/connection.ts`) | max 10 |
+| `app_worker` (`getWorkerDb()`) | max 5 |
+| `MIGRATION_DATABASE_URL` (migrations, ad-hoc admin scripts) | typically 1-2, but load/scale tooling can request more |
+
+A single API instance (10) + a single worker instance (5) already consumes
+the ENTIRE 15-connection budget on this project's tier, with zero headroom
+for a migration/admin connection, a second API instance (horizontal
+scaling), or this package's own live integration test suite running
+concurrently. This is exactly why `vitest.config.ts` already sets
+`fileParallelism: false` for this package (serializing integration test
+files) — and it is also why any load-testing/scale-seeding script in
+`src/scripts/` must keep its own connection pool small (`connect_timeout`
++ a conservative `max`) rather than assuming generous headroom.
+
+**Trigger point for a paid/larger Supabase tier (or a dedicated
+PgBouncer/pooler in front of Postgres) is exactly this**: the moment a
+second concurrently-running API or worker instance is needed (horizontal
+scaling — Technical Architecture §23's own stated evolution path), the
+current 15-connection cap is already fully consumed by ONE of each. This
+is not a code defect — `app_runtime`/`app_worker`'s pool sizes are
+reasonable for a single-instance deployment — it is a real, measured
+infrastructure ceiling that must be raised (or fronted by a proper
+transaction-mode pooler) before horizontal scaling or heavier concurrent
+tooling (this package's own load tests included) can run reliably
+alongside the live application.

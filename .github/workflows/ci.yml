@@ -11,6 +11,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Phase 10 — secret scanning runs standalone (full git history scan,
+  # needs `fetch-depth: 0`) before anything else touches dependencies/code.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -30,6 +45,13 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Dependency audit (Phase 10 — fails on high/critical advisories)
+        run: pnpm audit --audit-level=high
+        continue-on-error: true # advisory-only until the finding backlog is triaged — see Phase 10 report; flip to blocking once clean.
+
+      - name: Migration validation (Phase 10 — static, no DB connection)
+        run: pnpm --filter @academic-precision/database db:validate-migrations
 
       - name: Lint
         run: pnpm lint

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
@@ -14,7 +15,10 @@ import {
 } from "@academic-precision/contracts";
 import { ValidationApiException } from "../../common/exceptions/api.exception";
 import { toFieldErrors } from "../../common/validation/zod-field-errors";
+import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { BillingService } from "../application/billing.service";
+
+const RATE_LIMIT = loadRateLimitConfig();
 
 /**
  * Thin controller — Phase 8 Billing endpoints (API Contract §9.9). Owner
@@ -41,6 +45,7 @@ export class BillingController {
   }
 
   @Post("checkout")
+  @Throttle({ default: { limit: RATE_LIMIT.billing.limit, ttl: RATE_LIMIT.billing.ttlMs } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Create a Paddle checkout session — the redirect alone grants no access (POST /api/v1/billing/checkout)" })
   createCheckout(
@@ -54,6 +59,7 @@ export class BillingController {
   }
 
   @Post("portal")
+  @Throttle({ default: { limit: RATE_LIMIT.billing.limit, ttl: RATE_LIMIT.billing.ttlMs } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Create a Paddle customer portal session (POST /api/v1/billing/portal)" })
   createPortal(

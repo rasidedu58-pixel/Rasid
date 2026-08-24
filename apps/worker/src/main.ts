@@ -98,6 +98,14 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
         }
       }
 
+      if (result.dead > 0) {
+        // Phase 10 — a permanently-invalid event just went terminal. Never
+        // silent: this is the operator signal to inspect
+        // `SELECT * FROM outbox_events WHERE status = 'DEAD'` and, once the
+        // root cause is understood, replay it via `replayDeadOutboxEvent`.
+        logger.error({ ...result }, "Outbox event(s) exhausted retries and are now DEAD — operator investigation required.");
+      }
+
       if (result.claimed === 0) {
         await sleep(IDLE_POLL_DELAY_MS, state);
       } else {

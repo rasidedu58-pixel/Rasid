@@ -34,6 +34,7 @@ export const outboxEvents = pgTable(
     aggregateType: text("aggregate_type").notNull(),
     aggregateId: uuid("aggregate_id").notNull(),
     payload: jsonb("payload").notNull(),
+    /** Phase 10 adds `DEAD` — a terminal status for an event that exhausted `MAX_ATTEMPTS` retries (see worker/outbox-dispatcher.ts). Never picked up again by the normal claim query; requires an explicit operator replay. */
     status: text("status").notNull().default("PENDING"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().default(sql`now()`),
     availableAt: timestamp("available_at", { withTimezone: true }).notNull().default(sql`now()`),
@@ -44,9 +45,13 @@ export const outboxEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
   (table) => [
-    check("outbox_events_status_check", sql`${table.status} IN ('PENDING', 'PROCESSING', 'PROCESSED', 'FAILED')`),
+    check("outbox_events_status_check", sql`${table.status} IN ('PENDING', 'PROCESSING', 'PROCESSED', 'FAILED', 'DEAD')`),
+    // Phase 10 fix — widened to match the REAL claim query's own filter
+    // exactly (`status IN ('PENDING','FAILED','PROCESSING')`, PROCESSING
+    // included for crash/lease-expiry reclaim) — see migration 0046's own
+    // comment for the EXPLAIN ANALYZE finding this fixes.
     index("outbox_events_status_available_at_idx")
       .on(table.status, table.availableAt)
-      .where(sql`${table.status} IN ('PENDING', 'FAILED')`),
+      .where(sql`${table.status} IN ('PENDING', 'FAILED', 'PROCESSING')`),
   ],
 );

@@ -1,0 +1,24 @@
+-- Phase 10 — bounded retry / terminal status for outbox_events (hardening,
+-- not a new feature). Before this migration, `markEventFailed` could retry
+-- a permanently-invalid ("poison") event forever — `attempt_count` kept
+-- incrementing with a capped 10-minute backoff, but no attempt ceiling ever
+-- moved the row to a truly terminal state. This never starved OTHER events
+-- (the claim query always picks whichever due row has the earliest
+-- `available_at`, and a backed-off poison event simply isn't due most of
+-- the time), but it would consume a worker cycle indefinitely, every
+-- backoff interval, forever, for a row nothing can ever fix automatically
+-- (e.g. a payload referencing an already-deleted Session).
+--
+-- `DEAD` is a new terminal status: once `attempt_count` reaches
+-- `MAX_ATTEMPTS` (see outbox-dispatcher.ts), the row is marked DEAD instead
+-- of FAILED and is NEVER claimed again by the normal poll loop (the claim
+-- query's own `status IN ('PENDING','FAILED','PROCESSING')` filter already
+-- excludes it — no query change needed here). An operator can inspect
+-- DEAD rows directly (`SELECT * FROM outbox_events WHERE status = 'DEAD'`)
+-- and explicitly replay one via `replayDeadOutboxEvent` (resets
+-- attempt_count to 0 and status to PENDING) once the underlying cause is
+-- fixed — never a silent discard.
+--> statement-breakpoint
+ALTER TABLE "outbox_events" DROP CONSTRAINT "outbox_events_status_check";
+--> statement-breakpoint
+ALTER TABLE "outbox_events" ADD CONSTRAINT "outbox_events_status_check" CHECK ("outbox_events"."status" IN ('PENDING', 'PROCESSING', 'PROCESSED', 'FAILED', 'DEAD'));
