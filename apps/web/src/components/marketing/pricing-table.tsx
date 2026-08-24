@@ -16,7 +16,7 @@ export function PricingTable() {
       {PRICING_PLANS.map((plan) => (
         <Card
           key={plan.id}
-          className={`flex flex-col gap-5 p-6 ${plan.highlighted ? "border-brand shadow-md ring-1 ring-brand" : ""}`}
+          className={`flex flex-col gap-5 p-6 ${plan.highlighted ? "border-brand shadow-floating ring-1 ring-brand lg:-translate-y-2" : ""}`}
         >
           <CardContent className="flex flex-1 flex-col gap-5 p-0">
             <div className="flex items-center justify-between">
