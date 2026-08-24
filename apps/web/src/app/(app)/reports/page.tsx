@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileBarChart } from "lucide-react";
-import { Card, ErrorState, LoadingRegion, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SectionCard, formatMoney, formatMonthLabel } from "@academic-precision/ui";
+import { Card, ErrorState, LoadingRegion, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SectionCard, StatCard, formatMoney, formatMonthLabel } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
@@ -68,10 +68,10 @@ export default function ReportsPage() {
       ) : (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Stat label="الطلاب" value={String(reportQuery.data.totals.studentsCount)} />
-            <Stat label="الحصص" value={String(reportQuery.data.totals.sessionsCount)} />
-            <Stat label="المتبقي" value={formatMoney(reportQuery.data.totals.collection.totalRemainingMinor)} />
-            <Stat label="متأخرات" value={String(reportQuery.data.totals.overdueCount)} />
+            <StatCard label="الطلاب" value={String(reportQuery.data.totals.studentsCount)} />
+            <StatCard label="الحصص" value={String(reportQuery.data.totals.sessionsCount)} />
+            <StatCard label="المتبقي" value={formatMoney(reportQuery.data.totals.collection.totalRemainingMinor)} />
+            <StatCard label="متأخرات" value={String(reportQuery.data.totals.overdueCount)} tone={reportQuery.data.totals.overdueCount > 0 ? "danger" : undefined} />
           </div>
 
           <SectionCard title="المجموعات">
@@ -106,14 +106,5 @@ export default function ReportsPage() {
         </Card>
       ) : null}
     </>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-text-secondary">{label}</p>
-      <p className="mt-1 text-lg font-semibold tabular-nums text-text-primary">{value}</p>
-    </Card>
   );
 }

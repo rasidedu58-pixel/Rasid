@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Wallet } from "lucide-react";
-import { Button, Card, EmptyState, ErrorState, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, formatDate, formatMoney } from "@academic-precision/ui";
+import { Button, EmptyState, ErrorState, SkeletonRows, StatCard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, formatDate, formatMoney } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
@@ -35,7 +35,7 @@ export default function FinancePage() {
       {summaryQuery.data ? (
         <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <StatCard label="إجمالي المستحق" value={formatMoney(summaryQuery.data.totalNetDueMinor)} />
-          <StatCard label="المحصّل" value={formatMoney(summaryQuery.data.totalPaidMinor)} />
+          <StatCard label="المحصّل" value={formatMoney(summaryQuery.data.totalPaidMinor)} tone="success" />
           <StatCard label="المتبقي" value={formatMoney(summaryQuery.data.totalRemainingMinor)} />
           <StatCard label="متأخرات" value={String(summaryQuery.data.overdueCount)} tone={summaryQuery.data.overdueCount > 0 ? "danger" : undefined} />
         </div>
@@ -88,14 +88,5 @@ export default function FinancePage() {
         <RecordPaymentDialog obligationId={payingObligation.id} remainingMinor={payingObligation.remainingMinor} open onOpenChange={() => setPayingObligation(null)} onRecorded={() => queueQuery.refetch()} />
       ) : null}
     </>
-  );
-}
-
-function StatCard({ label, value, tone }: { label: string; value: string; tone?: "danger" }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-text-secondary">{label}</p>
-      <p className={`mt-1 text-lg font-semibold tabular-nums ${tone === "danger" ? "text-danger" : "text-text-primary"}`}>{value}</p>
-    </Card>
   );
 }

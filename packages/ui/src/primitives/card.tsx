@@ -48,3 +48,28 @@ export function SectionCard({ title, description, action, children, className }:
     </Card>
   );
 }
+
+export type StatTone = "danger" | "warning" | "success" | "brand";
+
+const STAT_TONE_CLASS: Record<StatTone, string> = {
+  danger: "text-danger",
+  warning: "text-warning",
+  success: "text-success",
+  brand: "text-brand",
+};
+
+/**
+ * Phase 13 — the single small "label + big number" summary tile, replacing
+ * the same handful of lines re-written ad hoc on Dashboard/Finance/Months/
+ * GroupDetail/PlatformAdmin (Component Consistency Matrix finding: 5
+ * near-identical local implementations). Numbers always render
+ * `tabular-nums` so a grid of these never jitters as digits change.
+ */
+export function StatCard({ label, value, tone, className }: { label: string; value: string; tone?: StatTone; className?: string }) {
+  return (
+    <Card className={cn("p-4", className)}>
+      <p className="text-xs text-text-secondary">{label}</p>
+      <p className={cn("mt-1 text-xl font-semibold tabular-nums text-text-primary", tone && STAT_TONE_CLASS[tone])}>{value}</p>
+    </Card>
+  );
+}

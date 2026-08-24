@@ -57,16 +57,16 @@ export function AttendanceTab({ sessionId, sessionVersion, students }: { session
 
       <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
         {students.map((s) => (
-          <div key={s.enrollmentId} className="flex items-center justify-between gap-3 px-4 py-2.5">
+          <div key={s.enrollmentId} className="flex items-center justify-between gap-3 px-4 py-3">
             <span className="text-sm font-medium text-text-primary">{s.studentName}</span>
-            <div className="flex gap-1.5">
+            <div className="flex gap-2">
               {(["PRESENT", "LATE", "ABSENT"] as AttendanceStatus[]).map((status) => (
                 <button
                   key={status}
                   type="button"
                   disabled={savingId === s.enrollmentId}
                   onClick={() => setOneMutation.mutate({ enrollmentId: s.enrollmentId, status })}
-                  className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${s.record.attendance === status ? STATUS_TONE[status] : "border-border text-text-secondary hover:bg-surface-sunken"}`}
+                  className={`min-w-14 rounded-md border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${s.record.attendance === status ? STATUS_TONE[status] : "border-border text-text-secondary hover:bg-surface-sunken"}`}
                 >
                   {STATUS_LABEL[status]}
                 </button>

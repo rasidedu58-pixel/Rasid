@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Card, ErrorState, LoadingRegion, SectionCard, formatMoney, formatMonthLabel } from "@academic-precision/ui";
+import { Badge, Card, ErrorState, LoadingRegion, SectionCard, StatCard, formatMoney, formatMonthLabel } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { ExportCsvButton } from "../../../../components/reports/export-csv-button";
 import { useWorkspace } from "../../../../lib/workspace-provider";
@@ -101,14 +101,5 @@ export default function GroupDetailPage() {
         </div>
       )}
     </>
-  );
-}
-
-function StatCard({ label, value, tone }: { label: string; value: string; tone?: "warning" | "danger" }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-text-secondary">{label}</p>
-      <p className={`mt-1 text-lg font-semibold tabular-nums ${tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-text-primary"}`}>{value}</p>
-    </Card>
   );
 }
