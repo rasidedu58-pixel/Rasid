@@ -26,14 +26,24 @@ const sheetVariants = cva("fixed z-50 flex flex-col gap-4 border-border bg-surfa
   defaultVariants: { side: "end" },
 });
 
-export interface SheetContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>, VariantProps<typeof sheetVariants> {}
+export interface SheetContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>, VariantProps<typeof sheetVariants> {
+  /**
+   * Override the close (×) button's own color classes — the default
+   * (`text-text-tertiary hover:text-text-primary`) assumes a light
+   * `--surface`-family background. A caller rendering SheetContent on a
+   * dark surface (e.g. MobileNav's `bg-shell`) MUST pass a matching
+   * light-on-dark pair here — measured, not guessed: the default combo
+   * against `--shell-surface` is a 3.30:1 contrast, below WCAG AA.
+   */
+  closeClassName?: string;
+}
 
-export const SheetContent = forwardRef<React.ElementRef<typeof DialogPrimitive.Content>, SheetContentProps>(({ className, side, children, ...props }, ref) => (
+export const SheetContent = forwardRef<React.ElementRef<typeof DialogPrimitive.Content>, SheetContentProps>(({ className, side, children, closeClassName, ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-fade-in" />
     <DialogPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), "overflow-y-auto", className)} {...props}>
       {children}
-      <DialogPrimitive.Close className="absolute end-4 top-4 rounded-sm text-text-tertiary transition-colors hover:text-text-primary focus-ring">
+      <DialogPrimitive.Close className={cn("absolute end-4 top-4 rounded-sm text-text-tertiary transition-colors hover:text-text-primary focus-ring", closeClassName)}>
         <X className="h-4 w-4" aria-hidden />
         <span className="sr-only">إغلاق</span>
       </DialogPrimitive.Close>

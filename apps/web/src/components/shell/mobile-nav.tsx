@@ -11,7 +11,7 @@ export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange:
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="end" className="w-72 max-w-[85vw] border-shell-border bg-shell">
+      <SheetContent side="end" className="w-72 max-w-[85vw] border-shell-border bg-shell" closeClassName="text-shell-text-muted hover:text-shell-text">
         <SheetHeader>
           <SheetTitle className="text-white">راصد</SheetTitle>
         </SheetHeader>
