@@ -92,7 +92,17 @@ body {
 }
 
 @layer utilities {
+  /*
+   * Phase 13 bug fix — real, confirmed via a live authenticated
+   * screenshot (not a style opinion): this utility applied `ring-2`
+   * UNCONDITIONALLY (no `focus`/`focus-visible` scoping at all), so
+   * EVERY button in the product showed a permanent halo — a visible
+   * white gap + blue ring around every button, all the time, not just
+   * when actually keyboard-focused. `focus-visible:` scoping is the
+   * correct, modern, accessible pattern: a mouse click needs no visible
+   * indicator, keyboard/assistive-tech navigation still gets a clear one.
+   */
   .focus-ring {
-    @apply outline-none ring-2 ring-[hsl(var(--ring))] ring-offset-2 ring-offset-[hsl(var(--background))];
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))];
   }
 }
