@@ -87,4 +87,15 @@ exists. Status: **pending, human action only**.
 
 ## Closed gates
 
-*(none yet — this list grows as gates above are genuinely closed with evidence)*
+### Platform Admin production provisioning (Phase 12, closed 2026-08-24)
+Migration `0048_platform_admin.sql` applied to the real production database
+(project `sbzksiidurpofzteyxsu`) — `platform_admins`/`platform_audit_events`
+tables, the `app_platform_admin` role, and its 5 cross-tenant read
+policies all verified present via direct query. `app_platform_admin`'s
+login password was set (a generated random secret, not the weak one
+initially proposed) and `PLATFORM_ADMIN_DATABASE_URL` configured on
+Railway. `teachermohsenashraf@gmail.com` registered as the first platform
+admin (`platform_admins` row inserted). **Live-verified**: the deployed
+`/platform-admin` dashboard renders real production data (16 users, 16
+workspaces, 10 recent signups, subscriptions-by-state breakdown) —
+confirmed by the platform owner directly via screenshot, not asserted.
