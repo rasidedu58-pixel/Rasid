@@ -5,6 +5,7 @@ import type {
   CreateMonthPreviewResponse,
   CreateMonthConfirmRequest,
   CreateMonthConfirmResponse,
+  ListGroupMonthsResponse,
   ListGroupsResponse,
   Group,
   CreateGroupRequest,
@@ -45,6 +46,11 @@ export function previewCreateMonth(workspaceId: string, body: CreateMonthPreview
 
 export function confirmCreateMonth(workspaceId: string, body: CreateMonthConfirmRequest): Promise<CreateMonthConfirmResponse> {
   return apiRequest<CreateMonthConfirmResponse>("/months", { method: "POST", workspaceId, body, idempotencyKey: newIdempotencyKey() });
+}
+
+/** Resolves each Group's GroupMonth id for a given OperatingMonth — see the contract's own comment for why this endpoint exists. */
+export function fetchGroupMonthsForMonth(workspaceId: string, monthId: string): Promise<ListGroupMonthsResponse> {
+  return apiRequest<ListGroupMonthsResponse>(`/months/${monthId}/group-months`, { workspaceId });
 }
 
 // --- Groups --------------------------------------------------------------

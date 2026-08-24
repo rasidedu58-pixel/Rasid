@@ -196,6 +196,19 @@ export const groupMonthApplyChangeResponseSchema = z.object({
 });
 export type GroupMonthApplyChangeResponse = z.infer<typeof groupMonthApplyChangeResponseSchema>;
 
+/**
+ * Phase 11 Closure Delta — real gap found while wiring the month-management
+ * UI: no existing endpoint let the frontend resolve a Group's GroupMonth id
+ * for a given OperatingMonth (only single-GroupMonth-by-id lookups existed).
+ * This is the smallest safe addition — reuses the repository's own
+ * pre-existing `listGroupMonthsForOperatingMonth` (already declared on the
+ * port, just never wired to a route) rather than inventing new persistence.
+ * Same scope-filtering rule as `GET /groups` (ALL_GROUPS sees everything,
+ * a SELECTED_GROUPS grant sees only its own groups' GroupMonths).
+ */
+export const listGroupMonthsResponseSchema = z.object({ groupMonths: z.array(groupMonthSchema) });
+export type ListGroupMonthsResponse = z.infer<typeof listGroupMonthsResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // Schedule
 // ---------------------------------------------------------------------------

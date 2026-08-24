@@ -1,5 +1,5 @@
 import type { PermissionKey } from "@academic-precision/contracts";
-import { LayoutDashboard, Users, Layers, CalendarClock, HeartHandshake, Wallet, FileBarChart, Bell, ShieldCheck, Settings } from "lucide-react";
+import { LayoutDashboard, Users, Layers, CalendarRange, CalendarClock, HeartHandshake, Wallet, FileBarChart, Bell, ShieldCheck, Settings } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -19,6 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
   { href: "/students", label: "الطلاب", icon: Users, anyOf: ["students.view_basic"] },
   { href: "/groups", label: "المجموعات", icon: Layers, anyOf: ["groups.view"] },
+  { href: "/months", label: "الأشهر التشغيلية", icon: CalendarRange, anyOf: ["groups.view"] },
   { href: "/sessions", label: "الحصص", icon: CalendarClock, anyOf: ["groups.view"] },
   { href: "/attention", label: "المتابعة", icon: HeartHandshake, anyOf: ["followup.read"] },
   { href: "/finance", label: "المالية", icon: Wallet, anyOf: ["payments.view_student_status", "finance.overview"] },

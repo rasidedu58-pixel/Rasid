@@ -16,9 +16,11 @@ import {
   type CreateMonthConfirmResponse,
   type CreateMonthPreviewRequest,
   type CreateMonthPreviewResponse,
+  type ListGroupMonthsResponse,
   type ListMonthsResponse,
   type OperatingMonth,
 } from "@academic-precision/contracts";
+import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { ValidationApiException } from "../../common/exceptions/api.exception";
 import { toFieldErrors } from "../../common/validation/zod-field-errors";
 import { SchedulingService } from "../application/scheduling.service";
@@ -54,6 +56,17 @@ export class MonthsController {
     @Param("id") id: string,
   ): Promise<OperatingMonth> {
     return this.schedulingService.getMonth(workspaceContext, id);
+  }
+
+  @Get("months/:id/group-months")
+  @RequirePermission("groups.view")
+  @ApiOperation({ summary: "GroupMonths belonging to this operating month, scope-filtered (GET /api/v1/months/:id/group-months)" })
+  listGroupMonthsForMonth(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Param("id") id: string,
+  ): Promise<ListGroupMonthsResponse> {
+    return this.schedulingService.listGroupMonthsForMonth(user, workspaceContext, id);
   }
 
   @Post("months/preview")

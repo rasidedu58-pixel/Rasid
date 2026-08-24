@@ -10,6 +10,7 @@ import type {
   GroupMonthApplyChangeResponse,
   GroupMonthChangePreviewRequest,
   GroupMonthChangePreviewResponse,
+  ListGroupMonthsResponse,
   ListGroupsResponse,
   ListMonthsResponse,
   ListScheduleRulesResponse,
@@ -479,6 +480,34 @@ export class SchedulingService {
   ): Promise<GroupMonth> {
     const { groupMonth } = await this.loadGroupMonthInScope(authUser, workspaceContext, id, "groups.view");
     return this.toGroupMonthDto(groupMonth);
+  }
+
+  /**
+   * Phase 11 Closure Delta — the smallest safe addition needed for the
+   * month-management UI to resolve "which GroupMonth (if any) does this
+   * Group have in this OperatingMonth" without a new persistence path:
+   * `listGroupMonthsForOperatingMonth` was already declared on the port and
+   * implemented, just never reachable from a route. Scope-filtered exactly
+   * like `listGroups` above (ALL_GROUPS sees everything; a SELECTED_GROUPS
+   * grant only its own groups' GroupMonths) — safe no-leak, no 404 needed
+   * since an empty/filtered list is itself a valid, non-leaking response.
+   */
+  async listGroupMonthsForMonth(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    operatingMonthId: string,
+  ): Promise<ListGroupMonthsResponse> {
+    const rows = await this.repository.listGroupMonthsForOperatingMonth(operatingMonthId);
+    const grant = await this.permissionResolver.hasPermission(
+      workspaceContext.workspaceId,
+      authUser.id,
+      "groups.view",
+    );
+    const visible =
+      !grant || grant.scope === "ALL_GROUPS"
+        ? rows
+        : rows.filter((r) => (grant.groupIds ?? []).includes(r.groupId));
+    return { groupMonths: visible.map((r) => this.toGroupMonthDto(r)) };
   }
 
   async previewGroupMonthChange(

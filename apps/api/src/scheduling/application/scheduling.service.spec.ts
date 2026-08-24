@@ -169,6 +169,41 @@ describe("SchedulingService", () => {
     });
   });
 
+  describe("listGroupMonthsForMonth (Phase 11 Closure Delta)", () => {
+    it("resolves the GroupMonth ids for every group carried into a new month", async () => {
+      const groupA = seedActiveGroup();
+      const groupB = seedActiveGroup();
+      const { confirmed } = await createMonthEndToEnd([groupA.id, groupB.id]);
+
+      const { groupMonths } = await service.listGroupMonthsForMonth(owner, ownerContext, confirmed.monthId);
+
+      expect(groupMonths).toHaveLength(2);
+      expect(new Set(groupMonths.map((gm) => gm.groupId))).toEqual(new Set([groupA.id, groupB.id]));
+      expect(groupMonths.every((gm) => gm.operatingMonthId === confirmed.monthId)).toBe(true);
+    });
+
+    it("filters to only the caller's in-scope groups for a SELECTED_GROUPS grant (same rule as listGroups)", async () => {
+      const inScopeGroup = seedActiveGroup();
+      const outOfScopeGroup = seedActiveGroup();
+      const { confirmed } = await createMonthEndToEnd([inScopeGroup.id, outOfScopeGroup.id]);
+
+      const assistant = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: "u-assistant-gm", roleLabel: "ASSISTANT" });
+      const assistantContext: WorkspaceContext = { workspaceId: WORKSPACE_A, membership: assistant };
+      await teamRepo.replaceMembershipGrants({
+        workspaceId: WORKSPACE_A,
+        membershipId: assistant.id,
+        createdByUserId: owner.id,
+        desiredGrants: [{ permissionKey: "groups.view", scopeType: "SELECTED_GROUPS", groupIds: [inScopeGroup.id] }],
+      });
+      const assistantUser: VerifiedSupabaseToken = { id: "u-assistant-gm", email: null };
+
+      const { groupMonths } = await service.listGroupMonthsForMonth(assistantUser, assistantContext, confirmed.monthId);
+
+      expect(groupMonths).toHaveLength(1);
+      expect(groupMonths[0]?.groupId).toBe(inScopeGroup.id);
+    });
+  });
+
   describe("Session cancel", () => {
     it("cancels a SCHEDULED session (status transition only, row never deleted)", async () => {
       const group = seedActiveGroup();

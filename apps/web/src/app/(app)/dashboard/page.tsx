@@ -19,7 +19,7 @@ import { ActionItemRow, type ActionItem } from "./action-item-row";
  * decided, never recomputes Attention/missing-records logic itself.
  */
 export default function DashboardPage() {
-  const { workspaceId } = useWorkspace();
+  const { workspaceId, isOwner } = useWorkspace();
 
   const query = useQuery({
     queryKey: workspaceId ? qk.actionCenter.root(workspaceId) : ["action-center", "none"],
@@ -62,6 +62,21 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader title="الرئيسية" description={data.month ? `الشهر التشغيلي الحالي: ${formatMonthLabel(data.month.year, data.month.month)}` : undefined} />
+
+      {!data.month ? (
+        <Card className="mb-6 border-brand/30 bg-brand-subtle">
+          <CardContent className="flex flex-col items-start justify-between gap-3 py-4 sm:flex-row sm:items-center">
+            <p className="text-sm text-text-primary">
+              {isOwner ? "لا يوجد شهر تشغيلي بعد — جهّزه لتبدأ في جدولة الحصص وتسجيل الطلاب." : "بانتظار مالك المساحة لتجهيز أول شهر تشغيلي."}
+            </p>
+            {isOwner ? (
+              <Button asChild size="sm">
+                <Link href="/months/new">تجهيز أول شهر تشغيلي</Link>
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {data.subscriptionWarning ? (
         <Card className="mb-6 border-warning/30 bg-warning-subtle">

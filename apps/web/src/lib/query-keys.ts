@@ -22,6 +22,7 @@ export const qk = {
   months: {
     list: (ws: string) => ["months", ws, "list"] as const,
     detail: (ws: string, id: string) => ["months", ws, "detail", id] as const,
+    groupMonths: (ws: string, id: string) => ["months", ws, id, "group-months"] as const,
   },
   sessions: {
     list: (ws: string, params?: Record<string, unknown>) => ["sessions", ws, "list", params] as const,
