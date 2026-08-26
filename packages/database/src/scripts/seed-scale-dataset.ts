@@ -56,6 +56,26 @@ const STUDENTS_PER_WORKSPACE = envInt("STUDENTS_PER_WORKSPACE", DEFAULTS.STUDENT
 const GROUPS_PER_WORKSPACE = envInt("GROUPS_PER_WORKSPACE", DEFAULTS.GROUPS_PER_WORKSPACE);
 const SESSIONS_PER_GROUP_MONTH = envInt("SESSIONS_PER_GROUP_MONTH", DEFAULTS.SESSIONS_PER_GROUP_MONTH);
 
+/**
+ * Phase 15C: STUDENT_DISTRIBUTION=realistic makes per-workspace student
+ * counts follow a real market shape (deterministic by workspace index, so
+ * runs are reproducible) instead of a flat STUDENTS_PER_WORKSPACE for all:
+ *   ~70% small (50–300), ~22% medium (300–800),
+ *   ~7% large (800–1,500), ~1% whale (1,500–3,000).
+ * Groups scale with student count (≈40 students/group). This models "5,000
+ * teachers where most are small and a few are huge" far better than a
+ * uniform worst-case, and keeps total row volume realistic.
+ */
+const REALISTIC = process.env.STUDENT_DISTRIBUTION === "realistic";
+function studentsForWorkspace(index: number): number {
+  if (!REALISTIC) return STUDENTS_PER_WORKSPACE;
+  const bucket = index % 100;
+  if (bucket < 70) return 50 + ((index * 37) % 251); // 50–300
+  if (bucket < 92) return 300 + ((index * 53) % 501); // 300–800
+  if (bucket < 99) return 800 + ((index * 71) % 701); // 800–1,500
+  return 1500 + ((index * 97) % 1501); // 1,500–3,000
+}
+
 const NAME_PREFIX = `SCALE-${RUN_TAG}`;
 const BATCH_SIZE = 1000;
 
@@ -125,24 +145,29 @@ async function main(): Promise<void> {
   console.log(`[seed-scale-dataset] memberships: ${memberships.length}`);
 
   // ---- Groups + CURRENT operating month + group_months ----
+  // Phase 15C: group count scales with the workspace's own student count
+  // (≈40 students/group) when a realistic distribution is in use.
+  const groupsForWorkspace = (w: number): number =>
+    REALISTIC ? Math.max(1, Math.ceil(studentsForWorkspace(w) / 40)) : GROUPS_PER_WORKSPACE;
   const groups = workspaces.flatMap((ws, w) =>
-    Array.from({ length: GROUPS_PER_WORKSPACE }, (_, g) => ({ id: randomUUID(), workspace_id: ws.id, name: `${NAME_PREFIX} Group ${w}-${g}`, status: "ACTIVE" })),
+    Array.from({ length: groupsForWorkspace(w) }, (_, g) => ({ id: randomUUID(), workspace_id: ws.id, name: `${NAME_PREFIX} Group ${w}-${g}`, status: "ACTIVE" })),
   );
   await insertBatched(sql, groups, (s, batch) => s`INSERT INTO groups ${s(batch)}`);
 
   const months = workspaces.map((ws, w) => ({ id: randomUUID(), workspace_id: ws.id, year: 2026, month: 8, status: "CURRENT", created_by: owners[w]!.id }));
   await insertBatched(sql, months, (s, batch) => s`INSERT INTO operating_months ${s(batch)}`);
 
-  const groupMonths = groups.map((g, i) => {
-    const w = Math.floor(i / GROUPS_PER_WORKSPACE);
-    return { id: randomUUID(), workspace_id: g.workspace_id, group_id: g.id, operating_month_id: months[w]!.id, base_fee_minor: 30000, due_policy: "PER_GROUP", join_fee_policy: "FULL" };
+  const monthByWorkspaceId = new Map(months.map((m) => [m.workspace_id, m]));
+  const groupMonths = groups.map((g) => {
+    const m = monthByWorkspaceId.get(g.workspace_id)!;
+    return { id: randomUUID(), workspace_id: g.workspace_id, group_id: g.id, operating_month_id: m.id, base_fee_minor: 30000, due_policy: "PER_GROUP", join_fee_policy: "FULL" };
   });
   await insertBatched(sql, groupMonths, (s, batch) => s`INSERT INTO group_months ${s(batch)}`);
   console.log(`[seed-scale-dataset] groups: ${groups.length}, group_months: ${groupMonths.length}`);
 
   // ---- Students + enrollments (round-robin across the workspace's own groupMonths) ----
   const students = workspaces.flatMap((ws, w) =>
-    Array.from({ length: STUDENTS_PER_WORKSPACE }, (_, i) => ({
+    Array.from({ length: studentsForWorkspace(w) }, (_, i) => ({
       id: randomUUID(),
       workspace_id: ws.id,
       student_code: `${NAME_PREFIX.slice(0, 12)}-${w}-${i}`,
