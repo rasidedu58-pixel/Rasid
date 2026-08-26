@@ -97,5 +97,10 @@ export const sessions = pgTable(
       table.status,
       table.scheduledAt,
     ),
+    // Phase 15 (0049) — worker global IN_PROGRESS scan (app_worker RLS has
+    // no workspace predicate, so workspace-leading indexes can't serve it).
+    index("sessions_in_progress_scan_idx")
+      .on(table.scheduledAt)
+      .where(sql`${table.status} = 'IN_PROGRESS'`),
   ],
 );

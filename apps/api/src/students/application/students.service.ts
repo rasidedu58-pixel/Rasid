@@ -112,9 +112,20 @@ export class StudentsService {
     const items = rows.slice(0, limit);
     const last = items[items.length - 1];
 
+    // Phase 15 fix — fuzzy name search orders by similarity() DESC, which
+    // an `id >` cursor cannot correctly page through (rows would be both
+    // skipped and repeated). A name search is a "refine your query" UX,
+    // not a deep-paging one, so it now honestly reports no next page
+    // instead of emitting a corrupt cursor. Code/phone/plain-list paths
+    // keep real id-cursor pagination (their ordering matches the cursor).
+    const cursorablePage = !normalizedNameQuery;
+
     return {
       items: items.map((s) => this.toStudentDto(s)),
-      page: { hasNext, nextCursor: hasNext && last ? last.id : null },
+      page: {
+        hasNext: hasNext && cursorablePage,
+        nextCursor: hasNext && cursorablePage && last ? last.id : null,
+      },
     };
   }
 

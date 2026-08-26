@@ -74,7 +74,9 @@ export function findGroupById(db: Db, groupId: string): Promise<GroupRow | undef
 }
 
 export function listGroupsForWorkspace(db: Db, workspaceId: string): Promise<GroupRow[]> {
-  return db.select().from(groups).where(eq(groups.workspaceId, workspaceId));
+  // Phase 15: deterministic ordering — without it the groups screen
+  // reshuffled between reloads (heap order is not stable).
+  return db.select().from(groups).where(eq(groups.workspaceId, workspaceId)).orderBy(asc(groups.name), asc(groups.id));
 }
 
 export interface InsertGroupInput {
@@ -191,7 +193,10 @@ export function findGroupMonthById(db: Db, id: string): Promise<GroupMonthRow | 
 }
 
 export function listGroupMonthsForOperatingMonth(db: Db, operatingMonthId: string): Promise<GroupMonthRow[]> {
-  return db.select().from(groupMonths).where(eq(groupMonths.operatingMonthId, operatingMonthId));
+  // Phase 15: deterministic ordering (workspace scoping comes via RLS's
+  // own `workspace_id = current_setting(...)` predicate, which also lets
+  // the planner use the workspace-leading composite index).
+  return db.select().from(groupMonths).where(eq(groupMonths.operatingMonthId, operatingMonthId)).orderBy(asc(groupMonths.id));
 }
 
 export function listScheduleRulesForGroupMonth(db: Db, groupMonthId: string): Promise<ScheduleRuleRow[]> {

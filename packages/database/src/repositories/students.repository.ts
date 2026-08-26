@@ -184,20 +184,27 @@ export async function searchStudents(db: Db, filter: StudentSearchFilter): Promi
         : inArray(students.id, studentsInGroupScopeSubquery(db, filter.restrictToGroupIds));
 
   if (filter.studentCode) {
+    // Phase 15: deterministic ordering (the (workspace, code) unique makes
+    // this ≤1 row in practice, but LIMIT-without-ORDER-BY is never OK).
     const conditions = [eq(students.workspaceId, filter.workspaceId), eq(students.studentCode, filter.studentCode)];
     if (scopeCondition) conditions.push(scopeCondition);
     return db
       .select()
       .from(students)
       .where(and(...conditions))
+      .orderBy(asc(students.id))
       .limit(filter.limit);
   }
 
   if (filter.guardianNormalizedPhone) {
+    // Phase 15 fix: this branch ignored `cursorId` while the service still
+    // emitted a nextCursor from it — paging a phone search returned the
+    // same first page forever. Now honors the cursor like the plain list.
     const conditions = [
       eq(students.workspaceId, filter.workspaceId),
       eq(guardians.normalizedPhone, filter.guardianNormalizedPhone),
     ];
+    if (filter.cursorId) conditions.push(gt(students.id, filter.cursorId));
     if (scopeCondition) conditions.push(scopeCondition);
     const rows = await db
       .selectDistinct({ student: students })

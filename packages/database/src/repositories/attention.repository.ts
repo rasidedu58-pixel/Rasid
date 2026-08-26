@@ -136,7 +136,14 @@ export interface ListScheduledFollowupsFilter {
   /** `undefined` = unrestricted. A (possibly empty) array restricts to follow-ups whose Case has at least one Reason in one of these groups. */
   restrictToGroupIds?: string[];
   limit: number;
-  cursorId?: string;
+  /**
+   * Phase 15 fix — was a plain `cursorId` compared with `id >` while the
+   * ORDER BY was `due_at`: two uncorrelated orderings, so page 2+ both
+   * skipped and repeated rows (a real correctness bug the pagination audit
+   * caught, guaranteed to bite once a workspace exceeds one page of
+   * follow-ups). Now a proper row-value cursor matching the sort order.
+   */
+  cursor?: { dueAt: Date; id: string };
 }
 
 export async function listScheduledFollowups(
@@ -145,7 +152,11 @@ export async function listScheduledFollowups(
 ): Promise<ScheduledFollowupRow[]> {
   const conditions = [eq(scheduledFollowups.workspaceId, filter.workspaceId)];
   if (filter.status) conditions.push(eq(scheduledFollowups.status, filter.status));
-  if (filter.cursorId) conditions.push(rawSql`${scheduledFollowups.id} > ${filter.cursorId}`);
+  if (filter.cursor) {
+    conditions.push(
+      rawSql`(${scheduledFollowups.dueAt}, ${scheduledFollowups.id}) > (${filter.cursor.dueAt}, ${filter.cursor.id})`,
+    );
+  }
 
   if (filter.restrictToGroupIds !== undefined) {
     if (filter.restrictToGroupIds.length === 0) return [];
@@ -154,7 +165,7 @@ export async function listScheduledFollowups(
       .from(scheduledFollowups)
       .innerJoin(attentionReasons, eq(attentionReasons.attentionCaseId, scheduledFollowups.attentionCaseId))
       .where(and(...conditions, inArray(attentionReasons.groupId, filter.restrictToGroupIds)))
-      .orderBy(asc(scheduledFollowups.dueAt))
+      .orderBy(asc(scheduledFollowups.dueAt), asc(scheduledFollowups.id))
       .limit(filter.limit);
     return rows.map((r) => r.f);
   }
@@ -163,7 +174,7 @@ export async function listScheduledFollowups(
     .select()
     .from(scheduledFollowups)
     .where(and(...conditions))
-    .orderBy(asc(scheduledFollowups.dueAt))
+    .orderBy(asc(scheduledFollowups.dueAt), asc(scheduledFollowups.id))
     .limit(filter.limit);
 }
 

@@ -138,6 +138,9 @@ export type CollectionQueueItem = z.infer<typeof collectionQueueItemSchema>;
 
 export const collectionQueueResponseSchema = z.object({
   items: z.array(collectionQueueItemSchema),
+  // Phase 15 — real cursor pagination (was a silent LIMIT 200 truncation).
+  // Additive field: older clients ignore it; `nextCursor` is opaque.
+  page: z.object({ hasNext: z.boolean(), nextCursor: z.string().nullable() }),
 });
 export type CollectionQueueResponse = z.infer<typeof collectionQueueResponseSchema>;
 

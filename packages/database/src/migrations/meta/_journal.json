@@ -330,6 +330,13 @@
       "when": 1787441900000,
       "tag": "0048_platform_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1787442000000,
+      "tag": "0049_scale_hot_path_indexes",
+      "breakpoints": true
     }
   ]
 }

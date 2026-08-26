@@ -101,7 +101,7 @@ export class DrizzleAttentionRepository implements AttentionRepositoryPort {
     status?: string;
     restrictToGroupIds?: string[];
     limit: number;
-    cursorId?: string;
+    cursor?: { dueAt: Date; id: string };
   }): Promise<ScheduledFollowupRow[]> {
     return withRuntimeContext(this.runtimeCtx(filter.workspaceId), (db) => listScheduledFollowups(db, filter));
   }

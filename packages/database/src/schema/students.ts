@@ -38,5 +38,12 @@ export const students = pgTable(
     check("students_status_check", sql`${table.status} IN ('ACTIVE', 'ARCHIVED')`),
     unique("students_workspace_student_code_unique").on(table.workspaceId, table.studentCode),
     index("students_workspace_status_idx").on(table.workspaceId, table.status),
+    // Phase 15 — declared here so drizzle-kit never generates a DROP for
+    // the migration-created trigram index (schema/migration drift found by
+    // the index audit; the index itself has existed since 0015).
+    index("students_search_name_trgm_idx").using("gin", table.searchNameNormalized.op("gin_trgm_ops")),
+    // Phase 15 — serves the directory page's (workspace_id, id) cursor
+    // walk; created in migration 0049.
+    index("students_workspace_id_id_idx").on(table.workspaceId, table.id),
   ],
 );

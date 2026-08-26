@@ -20,7 +20,7 @@
  * Usage: `RUN_TAG=phase10a CONCURRENCY=20 REQUESTS=500 tsx src/scripts/load-test-db-layer.ts`
  */
 import postgres from "postgres";
-import { withRuntimeContext } from "../connection";
+import { closeDb, withRuntimeContext } from "../connection";
 import { getGroupReport, getMonthlyTeacherReport } from "../reports/reports.repository";
 import { listSessionsWithMissingRecords } from "../reports/action-center.repository";
 
@@ -40,14 +40,35 @@ function percentile(sorted: number[], p: number): number {
   return sorted[Math.max(0, idx)]!;
 }
 
+interface LabelStats {
+  label: string;
+  n: number;
+  errors: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  min: number | null;
+  max: number | null;
+}
+
+const allStats: LabelStats[] = [];
+
 function report(label: string, timings: Timing[]): void {
   const durations = timings.filter((t) => t.ok).map((t) => t.ms).sort((a, b) => a - b);
   const errors = timings.filter((t) => !t.ok).length;
   const p50 = percentile(durations, 50);
   const p95 = percentile(durations, 95);
   const p99 = percentile(durations, 99);
-  const totalMs = timings.reduce((sum, t) => sum + t.ms, 0);
-  const throughput = totalMs > 0 ? (timings.length / (Math.max(...timings.map((t) => t.ms)) / 1000)).toFixed(1) : "n/a";
+  allStats.push({
+    label,
+    n: timings.length,
+    errors,
+    p50: Math.round(p50 * 10) / 10,
+    p95: Math.round(p95 * 10) / 10,
+    p99: Math.round(p99 * 10) / 10,
+    min: durations[0] ?? null,
+    max: durations[durations.length - 1] ?? null,
+  });
   console.log(
     `[${label}] n=${timings.length} errors=${errors} p50=${p50.toFixed(1)}ms p95=${p95.toFixed(1)}ms p99=${p99.toFixed(1)}ms ` +
       `min=${durations[0]?.toFixed(1) ?? "n/a"}ms max=${durations[durations.length - 1]?.toFixed(1) ?? "n/a"}ms`,
@@ -138,10 +159,29 @@ async function main(): Promise<void> {
   });
   report("action-center-missing-records", actionCenterTimings);
 
-  await adminSql.end();
+  // Phase 15 fix — the Phase 14 hang, root-caused: `adminSql.end()` closed
+  // the script's OWN pool, but the report/action-center sections above run
+  // through `withRuntimeContext` → `getDb()`, a SEPARATE singleton pool
+  // (max 10) that was never closed, keeping the event loop alive forever
+  // with zero output. Close it too, emit a machine-readable JSON summary,
+  // and exit explicitly so no stray handle (timer/socket) can ever wedge
+  // the process again.
+  await adminSql.end({ timeout: 5 });
+  await closeDb();
+  console.log("[load-test-db-layer] JSON_RESULT " + JSON.stringify({ runTag: RUN_TAG, concurrency: CONCURRENCY, requests: REQUESTS, stats: allStats }));
 }
 
-main().catch((error) => {
-  console.error("[load-test-db-layer] FAILED:", error);
-  process.exit(1);
-});
+// Absolute safety net: if anything above still wedges (network half-open,
+// pooler stall), fail LOUDLY after 10 minutes instead of hanging silently.
+const watchdog = setTimeout(() => {
+  console.error("[load-test-db-layer] WATCHDOG: run exceeded 10 minutes — forcing exit(2).");
+  process.exit(2);
+}, 10 * 60_000);
+watchdog.unref();
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("[load-test-db-layer] FAILED:", error);
+    process.exit(1);
+  });

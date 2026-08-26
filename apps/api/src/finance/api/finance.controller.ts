@@ -1,5 +1,5 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
-import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import { CurrentUser } from "../../identity/api/decorators/current-user.decorator";
@@ -28,11 +28,13 @@ export class FinanceController {
 
   @Get("collection-queue")
   @ApiOperation({ summary: "Due/remaining queue (GET /api/v1/finance/collection-queue)" })
+  @ApiQuery({ name: "cursor", required: false, description: "Opaque pagination cursor from a previous page's nextCursor." })
   collectionQueue(
     @CurrentUser() user: VerifiedSupabaseToken,
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Query("cursor") cursor?: string,
   ): Promise<CollectionQueueResponse> {
-    return this.financeService.getCollectionQueue(user, workspaceContext);
+    return this.financeService.getCollectionQueue(user, workspaceContext, { cursor });
   }
 
   @Get("summary")

@@ -82,7 +82,7 @@ export class InMemoryFinanceRepository implements FinanceRepositoryPort {
     return rows;
   }
 
-  async listCollectionQueue(params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number }): Promise<CollectionQueueRow[]> {
+  async listCollectionQueue(params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number; cursor?: { dueDate: string; id: string } }): Promise<CollectionQueueRow[]> {
     const rows: CollectionQueueRow[] = [];
     for (const obligation of this.shared.obligationsById.values()) {
       if (obligation.workspaceId !== params.workspaceId) continue;
@@ -103,8 +103,18 @@ export class InMemoryFinanceRepository implements FinanceRepositoryPort {
         groupId: groupMonth.groupId,
       });
     }
-    rows.sort((a, b) => a.obligation.dueDate.localeCompare(b.obligation.dueDate));
-    return rows.slice(0, params.limit);
+    rows.sort(
+      (a, b) =>
+        a.obligation.dueDate.localeCompare(b.obligation.dueDate) || a.obligation.id.localeCompare(b.obligation.id),
+    );
+    const afterCursor = params.cursor
+      ? rows.filter(
+          (r) =>
+            r.obligation.dueDate.localeCompare(params.cursor!.dueDate) > 0 ||
+            (r.obligation.dueDate === params.cursor!.dueDate && r.obligation.id.localeCompare(params.cursor!.id) > 0),
+        )
+      : rows;
+    return afterCursor.slice(0, params.limit);
   }
 
   async getFinanceSummary(params: { workspaceId: string; restrictToGroupIds?: string[]; todayIsoDate: string }): Promise<FinanceSummary> {

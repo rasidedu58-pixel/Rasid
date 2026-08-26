@@ -47,7 +47,8 @@ export interface AttentionRepositoryPort {
     status?: string;
     restrictToGroupIds?: string[];
     limit: number;
-    cursorId?: string;
+    /** Phase 15 — row-value cursor matching the (due_at, id) sort order. */
+    cursor?: { dueAt: Date; id: string };
   }): Promise<ScheduledFollowupRow[]>;
   completeScheduledFollowupWithVersion(input: { id: string; expectedVersion: number }): Promise<ScheduledFollowupRow | undefined>;
   rescheduleScheduledFollowupWithVersion(input: {

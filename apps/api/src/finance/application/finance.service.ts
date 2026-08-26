@@ -254,7 +254,11 @@ export class FinanceService {
   // happens here.
   // ---------------------------------------------------------------------
 
-  async getCollectionQueue(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<CollectionQueueResponse> {
+  async getCollectionQueue(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    query: { cursor?: string } = {},
+  ): Promise<CollectionQueueResponse> {
     const restrictToGroupIds = await this.resolveEitherPermissionScope(workspaceContext.workspaceId, authUser.id, [
       "payments.view_student_status",
       "finance.overview",
@@ -263,14 +267,35 @@ export class FinanceService {
       throw new ForbiddenApiException();
     }
 
+    // Phase 15 fix — cursor pagination replacing the silent LIMIT-200
+    // truncation (see the repository's comment). Opaque "<dueDate>_<id>".
+    let cursor: { dueDate: string; id: string } | undefined;
+    if (query.cursor) {
+      const sep = query.cursor.indexOf("_");
+      if (sep > 0) {
+        const dueDate = query.cursor.slice(0, sep);
+        const id = query.cursor.slice(sep + 1);
+        if (dueDate && id) cursor = { dueDate, id };
+      }
+    }
+
     const rows = await this.repository.listCollectionQueue({
       workspaceId: workspaceContext.workspaceId,
       restrictToGroupIds,
-      limit: COLLECTION_QUEUE_LIMIT,
+      limit: COLLECTION_QUEUE_LIMIT + 1,
+      cursor,
     });
 
+    const hasNext = rows.length > COLLECTION_QUEUE_LIMIT;
+    const items = rows.slice(0, COLLECTION_QUEUE_LIMIT);
+    const last = items[items.length - 1];
+
     return {
-      items: rows.map((r) => this.toCollectionQueueItemDto(r)),
+      items: items.map((r) => this.toCollectionQueueItemDto(r)),
+      page: {
+        hasNext,
+        nextCursor: hasNext && last ? `${last.obligation.dueDate}_${last.obligation.id}` : null,
+      },
     };
   }
 

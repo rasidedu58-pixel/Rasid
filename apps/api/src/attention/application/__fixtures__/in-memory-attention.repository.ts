@@ -309,7 +309,7 @@ export class InMemoryAttentionRepository implements AttentionRepositoryPort {
     status?: string;
     restrictToGroupIds?: string[];
     limit: number;
-    cursorId?: string;
+    cursor?: { dueAt: Date; id: string };
   }): Promise<ScheduledFollowupRow[]> {
     let rows = [...this.followupsById.values()].filter((f) => f.workspaceId === filter.workspaceId);
     if (filter.status) rows = rows.filter((f) => f.status === filter.status);
@@ -320,8 +320,12 @@ export class InMemoryAttentionRepository implements AttentionRepositoryPort {
         [...this.reasonsById.values()].some((r) => r.attentionCaseId === f.attentionCaseId && allowed.has(r.groupId)),
       );
     }
-    rows.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
-    if (filter.cursorId) rows = rows.filter((f) => f.id > filter.cursorId!);
+    // Phase 15 — mirrors the real repository's (due_at, id) row-value cursor.
+    rows.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime() || a.id.localeCompare(b.id));
+    if (filter.cursor) {
+      const { dueAt, id } = filter.cursor;
+      rows = rows.filter((f) => f.dueAt.getTime() > dueAt.getTime() || (f.dueAt.getTime() === dueAt.getTime() && f.id > id));
+    }
     return rows.slice(0, filter.limit);
   }
 

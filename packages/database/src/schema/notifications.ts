@@ -69,5 +69,7 @@ export const notifications = pgTable(
     ),
     // Database Schema §13's own named index — backs `GET /notifications`'s read/unread-ordered list.
     index("notifications_user_read_created_idx").on(table.userId, table.readAt, table.createdAt),
+    // Phase 15 (0049) — worker dedup pre-check lookup shape.
+    index("notifications_workspace_entity_type_idx").on(table.workspaceId, table.entityType, table.entityId, table.type),
   ],
 );

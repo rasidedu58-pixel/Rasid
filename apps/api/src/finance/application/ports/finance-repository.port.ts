@@ -33,7 +33,7 @@ export interface FinanceRepositoryPort {
   findPaymentById(id: string): Promise<PaymentRow | undefined>;
   listPaymentsForObligation(obligationId: string): Promise<PaymentRow[]>;
   listObligationsForStudent(params: { workspaceId: string; studentId: string }): Promise<StudentObligationRow[]>;
-  listCollectionQueue(params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number }): Promise<CollectionQueueRow[]>;
+  listCollectionQueue(params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number; cursor?: { dueDate: string; id: string } }): Promise<CollectionQueueRow[]>;
   getFinanceSummary(params: { workspaceId: string; restrictToGroupIds?: string[]; todayIsoDate: string }): Promise<FinanceSummary>;
 
   // Reads reused for scope resolution / DTOs (delegate to the same

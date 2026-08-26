@@ -68,7 +68,7 @@ export class DrizzleFinanceRepository implements FinanceRepositoryPort {
     return withRuntimeContext(this.runtimeCtx(params.workspaceId), (db) => listObligationsForStudent(db, params));
   }
 
-  listCollectionQueue(params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number }): Promise<CollectionQueueRow[]> {
+  listCollectionQueue(params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number; cursor?: { dueDate: string; id: string } }): Promise<CollectionQueueRow[]> {
     return withRuntimeContext(this.runtimeCtx(params.workspaceId), (db) => listCollectionQueue(db, params));
   }
 

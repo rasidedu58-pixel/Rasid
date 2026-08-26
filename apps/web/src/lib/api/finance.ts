@@ -1,8 +1,9 @@
 import type { CollectionQueueResponse, FinanceSummaryResponse, RecordPaymentRequest, RecordPaymentResponse, ReversePaymentRequest, ReversePaymentResponse } from "@academic-precision/contracts";
 import { apiRequest, newIdempotencyKey } from "./client";
 
-export function fetchCollectionQueue(workspaceId: string): Promise<CollectionQueueResponse> {
-  return apiRequest<CollectionQueueResponse>("/finance/collection-queue", { workspaceId });
+export function fetchCollectionQueue(workspaceId: string, cursor?: string): Promise<CollectionQueueResponse> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiRequest<CollectionQueueResponse>(`/finance/collection-queue${qs}`, { workspaceId });
 }
 
 export function fetchFinanceSummary(workspaceId: string): Promise<FinanceSummaryResponse> {

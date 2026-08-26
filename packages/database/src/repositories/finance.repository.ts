@@ -212,12 +212,29 @@ export interface CollectionQueueRow {
  */
 export async function listCollectionQueue(
   db: Db,
-  params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number },
+  params: {
+    workspaceId: string;
+    restrictToGroupIds?: string[];
+    limit: number;
+    /**
+     * Phase 15 fix — the queue was a bare `LIMIT 200` with no cursor: a
+     * 3,000-student workspace's unpaid set silently truncated, making money
+     * past row 200 invisible with no way to reach it (the scale audit's
+     * single worst finding). Row-value cursor matching the (due_date, id)
+     * sort, same pattern as `listSessions`.
+     */
+    cursor?: { dueDate: string; id: string };
+  },
 ): Promise<CollectionQueueRow[]> {
   const conditions = [
     eq(financialObligations.workspaceId, params.workspaceId),
     inArray(financialObligations.status, [UNPAID, PARTIAL]),
   ];
+  if (params.cursor) {
+    conditions.push(
+      rawSql`(${financialObligations.dueDate}, ${financialObligations.id}) > (${params.cursor.dueDate}, ${params.cursor.id})`,
+    );
+  }
   if (params.restrictToGroupIds !== undefined) {
     conditions.push(
       params.restrictToGroupIds.length === 0
@@ -240,7 +257,7 @@ export async function listCollectionQueue(
     .innerJoin(groupMonths, eq(groupMonths.id, enrollments.groupMonthId))
     .innerJoin(students, eq(students.id, enrollments.studentId))
     .where(and(...conditions))
-    .orderBy(financialObligations.dueDate)
+    .orderBy(financialObligations.dueDate, financialObligations.id)
     .limit(params.limit);
   return rows;
 }

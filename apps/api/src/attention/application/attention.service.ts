@@ -209,12 +209,26 @@ export class AttentionService {
     const restrictToGroupIds = await this.resolveGroupScopeFilter(workspaceContext.workspaceId, authUser.id, "followup.read");
     const limit = Math.min(query.limit ?? DEFAULT_LIST_LIMIT, 200);
 
+    // Phase 15 fix — cursor now matches the (due_at, id) sort order (see
+    // the repository's own comment). Encoded opaquely as "<epochMs>_<id>";
+    // an old-format (plain id) cursor fails decode and safely restarts
+    // from page 1 rather than producing a corrupted page.
+    let cursor: { dueAt: Date; id: string } | undefined;
+    if (query.cursor) {
+      const sep = query.cursor.indexOf("_");
+      if (sep > 0) {
+        const ms = Number(query.cursor.slice(0, sep));
+        const id = query.cursor.slice(sep + 1);
+        if (Number.isFinite(ms) && id) cursor = { dueAt: new Date(ms), id };
+      }
+    }
+
     const rows = await this.repository.listScheduledFollowups({
       workspaceId: workspaceContext.workspaceId,
       status: query.status,
       restrictToGroupIds,
       limit: limit + 1,
-      cursorId: query.cursor ?? undefined,
+      cursor,
     });
 
     const hasNext = rows.length > limit;
@@ -223,7 +237,7 @@ export class AttentionService {
 
     return {
       items: items.map((f) => this.toFollowupDto(f)),
-      page: { hasNext, nextCursor: hasNext && last ? last.id : null },
+      page: { hasNext, nextCursor: hasNext && last ? `${last.dueAt.getTime()}_${last.id}` : null },
     };
   }
 

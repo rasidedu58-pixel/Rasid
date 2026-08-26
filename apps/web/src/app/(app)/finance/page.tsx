@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Wallet } from "lucide-react";
 import { Button, EmptyState, ErrorState, SkeletonRows, StatCard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, formatDate, formatMoney } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
@@ -22,11 +22,17 @@ export default function FinancePage() {
     enabled: !!workspaceId && hasPermission("finance.overview"),
   });
 
-  const queueQuery = useQuery({
+  // Phase 15 — the queue is cursor-paginated now (the API previously
+  // silently truncated at 200 rows; at 3,000 students that hid real money).
+  const queueQuery = useInfiniteQuery({
     queryKey: workspaceId ? qk.finance.collectionQueue(workspaceId) : ["collection-queue", "none"],
-    queryFn: () => fetchCollectionQueue(workspaceId!),
+    queryFn: ({ pageParam }) => fetchCollectionQueue(workspaceId!, pageParam ?? undefined),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.page?.nextCursor ?? null,
     enabled: !!workspaceId,
   });
+
+  const queueItems = queueQuery.data?.pages.flatMap((p) => p.items) ?? [];
 
   return (
     <>
@@ -45,43 +51,52 @@ export default function FinancePage() {
         <SkeletonRows rows={6} />
       ) : queueQuery.isError ? (
         <ErrorState onRetry={() => queueQuery.refetch()} />
-      ) : queueQuery.data!.items.length === 0 ? (
+      ) : queueItems.length === 0 ? (
         <EmptyState icon={<Wallet className="h-8 w-8 text-text-tertiary" aria-hidden />} title="لا توجد التزامات مالية معلّقة" description="كل الطلاب مسدّدون بالكامل حاليًا." />
       ) : (
-        <TableScroll>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>الطالب</TableHead>
-                <TableHead>الاستحقاق</TableHead>
-                <TableHead>المتبقي</TableHead>
-                <TableHead>الحالة</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {queueQuery.data!.items.map((item) => (
-                <TableRow key={item.obligationId}>
-                  <TableCell>
-                    <Link href={`/students/${item.studentId}`} className="font-medium text-text-primary hover:text-brand hover:underline">
-                      {item.studentName}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-text-secondary">{formatDate(item.dueDate)}</TableCell>
-                  <TableCell className="text-base font-semibold tabular-nums text-text-primary">{formatMoney(item.remainingMinor)}</TableCell>
-                  <TableCell>
-                    <ObligationStatusBadge status={item.status} />
-                  </TableCell>
-                  <TableCell>
-                    <Button size="sm" onClick={() => setPayingObligation({ id: item.obligationId, remainingMinor: item.remainingMinor })}>
-                      تسجيل دفعة
-                    </Button>
-                  </TableCell>
+        <>
+          <TableScroll>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>الطالب</TableHead>
+                  <TableHead>الاستحقاق</TableHead>
+                  <TableHead>المتبقي</TableHead>
+                  <TableHead>الحالة</TableHead>
+                  <TableHead />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableScroll>
+              </TableHeader>
+              <TableBody>
+                {queueItems.map((item) => (
+                  <TableRow key={item.obligationId}>
+                    <TableCell>
+                      <Link href={`/students/${item.studentId}`} className="font-medium text-text-primary hover:text-brand hover:underline">
+                        {item.studentName}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-text-secondary">{formatDate(item.dueDate)}</TableCell>
+                    <TableCell className="text-base font-semibold tabular-nums text-text-primary">{formatMoney(item.remainingMinor)}</TableCell>
+                    <TableCell>
+                      <ObligationStatusBadge status={item.status} />
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" onClick={() => setPayingObligation({ id: item.obligationId, remainingMinor: item.remainingMinor })}>
+                        تسجيل دفعة
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableScroll>
+          {queueQuery.hasNextPage ? (
+            <div className="mt-4 flex justify-center">
+              <Button variant="outline" loading={queueQuery.isFetchingNextPage} onClick={() => void queueQuery.fetchNextPage()}>
+                عرض المزيد
+              </Button>
+            </div>
+          ) : null}
+        </>
       )}
 
       {payingObligation ? (

@@ -88,5 +88,10 @@ export const scheduledFollowups = pgTable(
   (table) => [
     check("scheduled_followups_status_check", sql`${table.status} IN ('PENDING', 'DONE', 'CANCELLED')`),
     index("scheduled_followups_workspace_status_due_idx").on(table.workspaceId, table.status, table.dueAt),
+    // Phase 15 (0049) — worker global PENDING-due scan (same app_worker
+    // RLS rationale as sessions_in_progress_scan_idx).
+    index("scheduled_followups_pending_due_scan_idx")
+      .on(table.dueAt)
+      .where(sql`${table.status} = 'PENDING'`),
   ],
 );

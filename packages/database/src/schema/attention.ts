@@ -68,6 +68,8 @@ export const attentionCases = pgTable(
     // same convention as enrollments→financial_obligations in Phase 6).
     unique("attention_cases_id_workspace_id_unique").on(table.id, table.workspaceId),
     index("attention_cases_workspace_status_priority_idx").on(table.workspaceId, table.status, table.priority),
+    // Phase 15 (0049) — serves the id-cursor-paginated cases list.
+    index("attention_cases_workspace_status_id_idx").on(table.workspaceId, table.status, table.id),
   ],
 );
 
