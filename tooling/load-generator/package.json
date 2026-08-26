@@ -1,0 +1,13 @@
+{
+  "name": "rasid-load-generator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TEMPORARY Phase 15C in-region load generator for Rasid STAGING only. Delete after the capacity test. Never targets production. Zero dependencies.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node run.mjs"
+  }
+}
