@@ -28,6 +28,30 @@ concurrently. Status: **pending** — requires either a higher-tier
 Supabase plan or a real load-test-informed pool re-budget before
 horizontal scaling or heavy concurrent platform-admin use.
 
+**Phase 15 empirical confirmation (2026-08-26):** the 15-client cap was
+reproduced live — `(EMAXCONNSESSION) max clients reached in session mode -
+max clients are limited to pool_size: 15` — during a DB-layer load test
+whose pools requested 22 clients (41/200 requests failed on that error).
+Note the layering: `SHOW max_connections` on the backend returns 60, but
+the app connects through the Supavisor **session pooler**
+(`aws-1-eu-west-1.pooler.supabase.com:5432`), whose client cap of 15 is
+the binding constraint. Both numbers are real; the pooler's is the one
+that matters.
+
+### 2b. API↔DB inter-region latency (new, Phase 15 — measured)
+The Railway API container and the Supabase database (eu-west-1) are in
+different regions. Measured consequences on the live deployment:
+`GET /health` (no DB) ≈ 230ms, while any authenticated endpoint costs
+2-5s server-side because each request performs many sequential DB
+round-trips (each RLS transaction = BEGIN + set_config + queries +
+COMMIT) at ~150-300ms per round-trip. Phase 15 reduced round-trips per
+request in code (merged set_config, request-scoped permission memo,
+provisioning fast path, N+1 fix), but the transformative fix is moving
+the Railway service(s) to an EU region so the per-round-trip cost drops
+from ~150-300ms to single-digit ms. Status: **pending — human action**
+(Railway dashboard → service settings → region; verify
+`WORKER_DATABASE_URL`/`DATABASE_URL` unchanged and redeploy).
+
 ### 3. Paddle real (sandbox/live) validation (carried from Phase 8/10)
 `PaddleBillingProvider` (`apps/api/src/billing/infrastructure/paddle-billing.provider.ts`)
 has never been exercised against a real Paddle sandbox or production
