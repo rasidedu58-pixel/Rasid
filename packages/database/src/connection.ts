@@ -18,9 +18,49 @@ import * as schema from "./schema/index";
 let client: Sql | undefined;
 let db: PostgresJsDatabase<typeof schema> | undefined;
 
+/**
+ * Phase 15B — shared pool-option builder for all three runtime roles.
+ *
+ * `prepare: false` is switched on automatically when the URL targets the
+ * Supavisor TRANSACTION pooler (port 6543): transaction mode multiplexes
+ * many client connections over few backend connections, so named prepared
+ * statements (which live on a specific backend session) would break.
+ * Live-verified against this project's own transaction pooler before this
+ * change: RLS `set_config(..., true)` stays transaction-scoped (no leak
+ * between pooled statements), tenant isolation holds (foreign-workspace
+ * read returns 0 rows), and `FOR UPDATE SKIP LOCKED` outbox claiming is
+ * transaction-contained by construction.
+ *
+ * Pool sizes are env-tunable because the safe number depends on the
+ * deployment shape (replica count × pool must stay within each role's own
+ * Postgres CONNECTION LIMIT — exceeding it FAILS with error 53300 rather
+ * than queueing, measured live). Defaults preserve prior behavior.
+ */
+function poolOptions(url: string, envVar: string, defaultMax: number): Parameters<typeof postgres>[1] {
+  const raw = process.env[envVar];
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const max = Number.isFinite(parsed) && parsed > 0 ? parsed : defaultMax;
+  const isTransactionPooler = /:6543\//.test(url);
+  return {
+    max,
+    prepare: isTransactionPooler ? false : true,
+    // Fail loudly instead of hanging forever when the pooler/DB is
+    // saturated or unreachable (same rationale as the Phase 10 load-test
+    // fix — a silent infinite hang is the worst failure mode).
+    connect_timeout: 15,
+    // Release idle connections back to the shared budget; the role
+    // CONNECTION LIMIT is a cross-process budget, so holding idle
+    // connections starves other consumers (measured: the API's idle
+    // session connections consumed the role budget during external tests).
+    idle_timeout: 60,
+    max_lifetime: 60 * 30,
+  };
+}
+
 export function getDb(): PostgresJsDatabase<typeof schema> {
   if (!db) {
-    client = postgres(getDatabaseUrl(), { max: 10 });
+    const url = getDatabaseUrl();
+    client = postgres(url, poolOptions(url, "DB_POOL_MAX", 10));
     db = drizzle(client, { schema });
   }
   return db;
@@ -56,7 +96,13 @@ let workerDb: PostgresJsDatabase<typeof schema> | undefined;
 
 export function getWorkerDb(): PostgresJsDatabase<typeof schema> {
   if (!workerDb) {
-    workerClient = postgres(getWorkerDatabaseUrl(), { max: 5 });
+    // Phase 15B: default lowered 5 → 3. The worker is one sequential
+    // polling loop — it never needs 5 concurrent connections, and its
+    // previous pool max equalled its role's CONNECTION LIMIT exactly
+    // (zero self-headroom, reproduced as a real error in Phase 10's own
+    // README). 3 leaves genuine slack inside the role budget.
+    const url = getWorkerDatabaseUrl();
+    workerClient = postgres(url, poolOptions(url, "WORKER_DB_POOL_MAX", 3));
     workerDb = drizzle(workerClient, { schema });
   }
   return workerDb;
@@ -97,7 +143,11 @@ let platformAdminDb: PostgresJsDatabase<typeof schema> | undefined;
 
 export function getPlatformAdminDb(): PostgresJsDatabase<typeof schema> {
   if (!platformAdminDb) {
-    platformAdminClient = postgres(getPlatformAdminDatabaseUrl(), { max: 5 });
+    // Phase 15B: default lowered 5 → 2 — the platform-admin backoffice is
+    // a single human's read-only console; it must never reserve budget
+    // the teacher-facing API needs.
+    const url = getPlatformAdminDatabaseUrl();
+    platformAdminClient = postgres(url, poolOptions(url, "PLATFORM_ADMIN_DB_POOL_MAX", 2));
     platformAdminDb = drizzle(platformAdminClient, { schema });
   }
   return platformAdminDb;
