@@ -49,28 +49,34 @@ export interface GrantWithScopes {
   groupIds: string[];
 }
 
-/** Non-revoked grants for a membership, each joined to its group-scope rows (if any). */
+/**
+ * Non-revoked grants for a membership, each joined to its group-scope rows
+ * (if any). Phase 15 latency fix: was one query per SELECTED_GROUPS grant
+ * (a real N+1 — each extra query costs a full network round-trip on the
+ * deployed topology); now a single LEFT JOIN regrouped in JS.
+ */
 export async function listActiveGrantsForMembership(
   db: Db,
   membershipId: string,
 ): Promise<GrantWithScopes[]> {
-  const grants = await db
-    .select()
+  const rows = await db
+    .select({ grant: permissionGrants, scopeGroupId: permissionGroupScopes.groupId })
     .from(permissionGrants)
+    .leftJoin(permissionGroupScopes, eq(permissionGroupScopes.permissionGrantId, permissionGrants.id))
     .where(and(eq(permissionGrants.membershipId, membershipId), isNull(permissionGrants.revokedAt)));
 
-  const results: GrantWithScopes[] = [];
-  for (const grant of grants) {
-    const scopes =
-      grant.scopeType === "SELECTED_GROUPS"
-        ? await db
-            .select()
-            .from(permissionGroupScopes)
-            .where(eq(permissionGroupScopes.permissionGrantId, grant.id))
-        : [];
-    results.push({ grant, groupIds: scopes.map((s) => s.groupId) });
+  const byGrantId = new Map<string, GrantWithScopes>();
+  for (const row of rows) {
+    let entry = byGrantId.get(row.grant.id);
+    if (!entry) {
+      entry = { grant: row.grant, groupIds: [] };
+      byGrantId.set(row.grant.id, entry);
+    }
+    if (row.scopeGroupId !== null) {
+      entry.groupIds.push(row.scopeGroupId);
+    }
   }
-  return results;
+  return [...byGrantId.values()];
 }
 
 export interface DesiredGrantInput {

@@ -67,8 +67,12 @@ export function findUserByAuthId(db: Db, authUserId: string): Promise<UserRow | 
  * Loads the (user, owner workspace, owner membership) triple for an
  * already-provisioned auth user id. Returns undefined only if provisioning
  * has genuinely never completed for this id.
+ *
+ * Exported since Phase 15: the API's provision adapter uses this as a
+ * cheap read-only fast path (steady state — every request after the very
+ * first) before falling back to the full write transaction below.
  */
-async function loadProvisionedIdentity(
+export async function loadProvisionedIdentity(
   db: Db,
   authUserId: string,
 ): Promise<ProvisionedIdentity | undefined> {

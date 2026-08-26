@@ -1,11 +1,42 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { PermissionKey, CapabilityDto } from "@academic-precision/contracts";
 import { fetchMe, fetchWorkspaceContext } from "./api/identity";
 import { qk } from "./query-keys";
 import { useSession } from "./session-provider";
+
+/**
+ * Phase 15 latency fix — the measured cold-load waterfall was
+ * `/me` (≈3s) → `/context` (≈4.7s) STRICTLY SERIALIZED, because the
+ * context query was gated on `/me`'s response. The active workspace id
+ * changes essentially never for a real teacher, so we persist it and use
+ * it as a HINT to fire `/context` in PARALLEL with `/me` on the next
+ * load. `/me` remains the authority: if it resolves to a different
+ * active workspace (rare — workspace switch/removal), the context query
+ * key changes and refetches correctly; the hint fetch is simply
+ * discarded. The id is not a secret (it appears in every API header).
+ */
+const LAST_WORKSPACE_KEY = "rasid.last-active-workspace-id";
+
+function readCachedWorkspaceId(): string | null {
+  try {
+    return localStorage.getItem(LAST_WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `/me` + `/context` describe slowly-changing identity/permission state —
+ * a longer staleTime keeps SPA navigations from re-running the auth
+ * waterfall. Mutations that change memberships/permissions already call
+ * broad `queryClient.invalidateQueries()` on success, which resets these
+ * regardless of staleTime. The backend stays the authority on every
+ * mutation either way (§4.4/§4.5).
+ */
+const BOOTSTRAP_STALE_MS = 5 * 60_000;
 
 interface WorkspaceContextValue {
   status: "loading" | "ready" | "no-workspace" | "error";
@@ -36,20 +67,39 @@ const WRITE_BLOCKING_STATES = new Set(["EXPIRED", "PAYMENT_FAILED"]);
  */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { status: sessionStatus } = useSession();
+  // Read once on mount (useState initializer — no SSR window access).
+  const [cachedWorkspaceId] = useState<string | null>(() => (typeof window === "undefined" ? null : readCachedWorkspaceId()));
 
   const meQuery = useQuery({
     queryKey: qk.me(),
     queryFn: fetchMe,
     enabled: sessionStatus === "authenticated",
+    staleTime: BOOTSTRAP_STALE_MS,
   });
 
   const activeWorkspace = meQuery.data?.workspaces.find((w) => w.status === "ACTIVE") ?? null;
 
+  // `/me` is authoritative once resolved; before that, the persisted id is
+  // only a parallelization hint. When `/me` has resolved and found NO
+  // active workspace, the hint must NOT keep a context fetch alive.
+  const contextWorkspaceId = activeWorkspace?.id ?? (meQuery.data ? null : cachedWorkspaceId);
+
   const contextQuery = useQuery({
-    queryKey: activeWorkspace ? qk.workspaceContext(activeWorkspace.id) : ["workspace-context", "none"],
-    queryFn: () => fetchWorkspaceContext(activeWorkspace!.id),
-    enabled: !!activeWorkspace,
+    queryKey: contextWorkspaceId ? qk.workspaceContext(contextWorkspaceId) : ["workspace-context", "none"],
+    queryFn: () => fetchWorkspaceContext(contextWorkspaceId!),
+    enabled: sessionStatus === "authenticated" && !!contextWorkspaceId,
+    staleTime: BOOTSTRAP_STALE_MS,
   });
+
+  useEffect(() => {
+    if (activeWorkspace) {
+      try {
+        localStorage.setItem(LAST_WORKSPACE_KEY, activeWorkspace.id);
+      } catch {
+        /* storage unavailable — hint simply won't help next load */
+      }
+    }
+  }, [activeWorkspace]);
 
   const value = useMemo<WorkspaceContextValue>(() => {
     if (sessionStatus === "loading" || meQuery.isLoading || (activeWorkspace && contextQuery.isLoading)) {

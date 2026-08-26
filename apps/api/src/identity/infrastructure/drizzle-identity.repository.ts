@@ -7,6 +7,7 @@ import {
   findSubscriptionByWorkspaceId,
   listAllowedEntitlementsForWorkspace,
   listMembershipsForUser,
+  loadProvisionedIdentity,
   withRuntimeContext,
   type EntitlementRow,
   type MembershipWithWorkspace,
@@ -45,7 +46,20 @@ export class DrizzleIdentityRepository implements IdentityRepositoryPort {
    * `memberships_self_read`/`workspaces_self_membership_read` policies
    * (keyed on `app.user_id`, not `app.workspace_id`).
    */
-  provision(input: ProvisionInput): Promise<ProvisionedIdentity> {
+  async provision(input: ProvisionInput): Promise<ProvisionedIdentity> {
+    // Phase 15 latency fix — steady-state fast path: every request after
+    // the very first for an identity used to pay the full write
+    // transaction (INSERT … ON CONFLICT + savepoint + read-back) just to
+    // discover it was already provisioned. A plain read-only lookup under
+    // the same `app.user_id` self-read RLS policies answers that in fewer
+    // round-trips and zero writes. Concurrency-safe: two concurrent
+    // first-requests both miss the fast path and fall through to the
+    // idempotent write transaction below, exactly as before.
+    const existing = await withRuntimeContext({ userId: input.authUserId }, (db) =>
+      loadProvisionedIdentity(db, input.authUserId),
+    );
+    if (existing) return existing;
+
     const pregeneratedWorkspaceId = randomUUID();
     return withRuntimeContext(
       { userId: input.authUserId, workspaceId: pregeneratedWorkspaceId },

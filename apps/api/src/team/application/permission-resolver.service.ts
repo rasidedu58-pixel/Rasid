@@ -6,6 +6,7 @@ import {
   type ScopeType,
 } from "@academic-precision/contracts";
 import type { MembershipRow } from "@academic-precision/database";
+import { getContext } from "@academic-precision/observability";
 import { TEAM_REPOSITORY, type TeamRepositoryPort } from "./ports/team-repository.port";
 
 const OWNER_ROLE_LABEL = "OWNER";
@@ -34,29 +35,71 @@ export interface EffectiveGrant {
 export class PermissionResolverService {
   constructor(@Inject(TEAM_REPOSITORY) private readonly repository: TeamRepositoryPort) {}
 
-  async findActiveMembership(workspaceId: string, userId: string): Promise<MembershipRow | undefined> {
-    const membership = await this.repository.findMembershipByUserAndWorkspace(userId, workspaceId);
-    return membership && membership.status === ACTIVE_STATUS ? membership : undefined;
+  /**
+   * Phase 15 latency fix — request-scoped memoization. The measured
+   * production waterfall showed the SAME membership row fetched 3× and the
+   * SAME grant set resolved 2× within one request (guard → resolver →
+   * service defensive re-check), each a full RLS transaction costing
+   * multiple network round-trips. Within a single request the answer
+   * cannot change, so both lookups are memoized against the request's own
+   * AsyncLocalStorage context object (WeakMap ⇒ dropped automatically when
+   * the request context is garbage-collected — no TTL/invalidations to get
+   * wrong). Promises are cached (not values) so concurrent callers within
+   * one request also coalesce into a single query. Outside a request
+   * context (tests, jobs) this transparently degrades to uncached calls.
+   * Security note: this NEVER caches across requests — a permission change
+   * is visible on the very next request, exactly as before.
+   */
+  private readonly membershipMemo = new WeakMap<object, Map<string, Promise<MembershipRow | undefined>>>();
+  private readonly grantsMemo = new WeakMap<object, Map<string, Promise<EffectiveGrant[]>>>();
+
+  private memoized<T>(
+    memo: WeakMap<object, Map<string, Promise<T>>>,
+    key: string,
+    compute: () => Promise<T>,
+  ): Promise<T> {
+    const store = getContext();
+    if (!store) return compute();
+    let perRequest = memo.get(store);
+    if (!perRequest) {
+      perRequest = new Map();
+      memo.set(store, perRequest);
+    }
+    let promise = perRequest.get(key);
+    if (!promise) {
+      promise = compute();
+      perRequest.set(key, promise);
+    }
+    return promise;
   }
 
-  async resolveEffectivePermissions(workspaceId: string, userId: string): Promise<EffectiveGrant[]> {
-    const membership = await this.findActiveMembership(workspaceId, userId);
-    if (!membership) {
-      return [];
-    }
+  findActiveMembership(workspaceId: string, userId: string): Promise<MembershipRow | undefined> {
+    return this.memoized(this.membershipMemo, `${workspaceId}:${userId}`, async () => {
+      const membership = await this.repository.findMembershipByUserAndWorkspace(userId, workspaceId);
+      return membership && membership.status === ACTIVE_STATUS ? membership : undefined;
+    });
+  }
 
-    if (membership.roleLabel === OWNER_ROLE_LABEL) {
-      return PERMISSION_KEYS.map((permission) => ({ permission, scope: "ALL_GROUPS" as const }));
-    }
+  resolveEffectivePermissions(workspaceId: string, userId: string): Promise<EffectiveGrant[]> {
+    return this.memoized(this.grantsMemo, `${workspaceId}:${userId}`, async () => {
+      const membership = await this.findActiveMembership(workspaceId, userId);
+      if (!membership) {
+        return [];
+      }
 
-    const grants = await this.repository.listActiveGrants(membership.id, workspaceId);
-    return this.computeClosure(
-      grants.map((g) => ({
-        permissionKey: g.grant.permissionKey as PermissionKey,
-        scopeType: g.grant.scopeType as ScopeType,
-        groupIds: g.groupIds,
-      })),
-    );
+      if (membership.roleLabel === OWNER_ROLE_LABEL) {
+        return PERMISSION_KEYS.map((permission) => ({ permission, scope: "ALL_GROUPS" as const }));
+      }
+
+      const grants = await this.repository.listActiveGrants(membership.id, workspaceId);
+      return this.computeClosure(
+        grants.map((g) => ({
+          permissionKey: g.grant.permissionKey as PermissionKey,
+          scopeType: g.grant.scopeType as ScopeType,
+          groupIds: g.groupIds,
+        })),
+      );
+    });
   }
 
   private computeClosure(

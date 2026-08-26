@@ -126,10 +126,19 @@ export function withRuntimeContext<T>(
     // `set_config(..., true)` is the transaction-scoped ("SET LOCAL")
     // equivalent that supports a bound parameter (`SET LOCAL x = $1` is not
     // valid Postgres syntax — SET does not accept bind parameters).
-    if (params.userId !== undefined) {
+    //
+    // Phase 15 latency fix: both configs are set in ONE statement (one
+    // network round-trip instead of two). Measured on the real deployed
+    // topology, every round-trip to the eu-west-1 pooler costs ~75-150ms,
+    // so an extra sequential statement here was a real, user-visible cost
+    // on every RLS-scoped request.
+    if (params.userId !== undefined && params.workspaceId !== undefined) {
+      await tx.execute(
+        sql`SELECT set_config('app.user_id', ${params.userId}, true), set_config('app.workspace_id', ${params.workspaceId}, true)`,
+      );
+    } else if (params.userId !== undefined) {
       await tx.execute(sql`SELECT set_config('app.user_id', ${params.userId}, true)`);
-    }
-    if (params.workspaceId !== undefined) {
+    } else if (params.workspaceId !== undefined) {
       await tx.execute(sql`SELECT set_config('app.workspace_id', ${params.workspaceId}, true)`);
     }
     return callback(tx as unknown as PostgresJsDatabase<typeof schema>);

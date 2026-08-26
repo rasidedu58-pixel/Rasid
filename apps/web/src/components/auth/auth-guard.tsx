@@ -27,17 +27,20 @@ export function AuthGuard({ children }: { children: ReactNode }) {
     if (sessionStatus === "authenticated" && workspace.status === "no-workspace") router.replace("/onboarding");
   }, [sessionStatus, workspace.status, router]);
 
+  // Phase 15: this guard now renders INSIDE the AppShell content region
+  // (see (app)/layout.tsx) — loading/error states are content-area sized,
+  // not full-screen, so the shell chrome stays visible and stable.
   if (sessionStatus === "loading" || sessionStatus === "unauthenticated") {
-    return <LoadingRegion className="min-h-screen" />;
+    return <LoadingRegion className="min-h-[60vh]" />;
   }
 
   if (workspace.status === "loading" || workspace.status === "no-workspace") {
-    return <LoadingRegion className="min-h-screen" label="جارٍ تجهيز مساحة العمل..." />;
+    return <LoadingRegion className="min-h-[60vh]" label="جارٍ تجهيز مساحة العمل..." />;
   }
 
   if (workspace.status === "error") {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6">
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
         <ErrorState title="تعذّر تحميل بيانات مساحة العمل" onRetry={workspace.refetch} />
       </div>
     );
