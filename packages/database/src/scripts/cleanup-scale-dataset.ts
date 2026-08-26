@@ -29,6 +29,14 @@ async function main(): Promise<void> {
     // a run could have touched, not just the seeder's own base tables.
     await sql`DELETE FROM outbox_events WHERE workspace_id = ANY(${workspaceIds})`;
     await sql`DELETE FROM audit_events WHERE workspace_id = ANY(${workspaceIds})`;
+    // Phase 15C — the seeder can now (env-gated) produce attention/followup
+    // rows too; delete in FK dependency order before students/groups.
+    await sql`DELETE FROM scheduled_followups WHERE workspace_id = ANY(${workspaceIds})`;
+    await sql`DELETE FROM contact_logs WHERE workspace_id = ANY(${workspaceIds})`;
+    await sql`DELETE FROM attention_evidence WHERE workspace_id = ANY(${workspaceIds})`;
+    await sql`DELETE FROM attention_reasons WHERE workspace_id = ANY(${workspaceIds})`;
+    await sql`DELETE FROM attention_cases WHERE workspace_id = ANY(${workspaceIds})`;
+    await sql`DELETE FROM payment_reversals WHERE workspace_id = ANY(${workspaceIds})`;
     await sql`DELETE FROM payments WHERE workspace_id = ANY(${workspaceIds})`;
     await sql`DELETE FROM financial_obligations WHERE workspace_id = ANY(${workspaceIds})`;
     await sql`DELETE FROM session_records WHERE workspace_id = ANY(${workspaceIds})`;

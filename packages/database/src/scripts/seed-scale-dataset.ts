@@ -208,6 +208,92 @@ async function main(): Promise<void> {
   }
   console.log(`[seed-scale-dataset] sessions: ${totalSessions}, session_records: ${totalRecords}`);
 
+  // ---- Phase 15C: dense finance + attention data (env-gated — prior
+  // phases' seeds never produced these, which left Finance/Attention
+  // untested at scale; SEED_FINANCE=1 / SEED_ATTENTION=1 turn them on).
+  // Realistic mix, mirroring what a real month-close produces: one
+  // obligation per enrollment; ~40% PAID / ~25% PARTIAL / ~35% UNPAID;
+  // one posted payment row per paid/partial obligation; attention cases
+  // for ~10% of students with one reason each; follow-ups for ~30% of
+  // open cases.
+  if (process.env.SEED_FINANCE === "1") {
+    const obligations = enrollments.map((e, i) => {
+      const bucket = i % 20; // 8 PAID, 5 PARTIAL, 7 UNPAID per 20 → 40/25/35%
+      const paid = bucket < 8 ? 30000 : bucket < 13 ? 15000 : 0;
+      const status = paid === 30000 ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID";
+      return {
+        id: randomUUID(),
+        workspace_id: e.workspace_id,
+        enrollment_id: e.id,
+        base_fee_minor: 30000,
+        net_due_minor: 30000,
+        due_date: `2026-08-${String((i % 25) + 1).padStart(2, "0")}`,
+        amount_paid_minor: paid,
+        remaining_minor: 30000 - paid,
+        status,
+        calculation_basis: "FULL_MONTH",
+      };
+    });
+    await insertBatched(sql, obligations, (s, batch) => s`INSERT INTO financial_obligations ${s(batch)}`);
+
+    const paymentsRows = obligations
+      .filter((o) => o.amount_paid_minor > 0)
+      .map((o, i) => ({
+        id: randomUUID(),
+        workspace_id: o.workspace_id,
+        obligation_id: o.id,
+        amount_minor: o.amount_paid_minor,
+        method: "CASH",
+        paid_at: new Date("2026-08-15T10:00:00Z"),
+        status: "POSTED",
+        idempotency_key: `${NAME_PREFIX}-pay-${i}`,
+        recorded_by: owners[0]!.id,
+      }));
+    await insertBatched(sql, paymentsRows, (s, batch) => s`INSERT INTO payments ${s(batch)}`);
+    console.log(`[seed-scale-dataset] financial_obligations: ${obligations.length}, payments: ${paymentsRows.length}`);
+  }
+
+  if (process.env.SEED_ATTENTION === "1") {
+    const gmById = new Map(groupMonths.map((gm) => [gm.id, gm]));
+    const caseStudents = students.filter((_, i) => i % 10 === 0); // 10%
+    const cases = caseStudents.map((st, i) => ({
+      id: randomUUID(),
+      workspace_id: st.workspace_id,
+      student_id: st.id,
+      status: i % 4 === 0 ? "CONTACTED" : "NEW",
+      priority: i % 3 === 0 ? "HIGH" : "MEDIUM",
+    }));
+    await insertBatched(sql, cases, (s, batch) => s`INSERT INTO attention_cases ${s(batch)}`);
+
+    const enrollmentByStudent = new Map(enrollments.map((e) => [e.student_id, e]));
+    const reasons = cases.map((c) => {
+      const enr = enrollmentByStudent.get(c.student_id)!;
+      const gm = gmById.get(enr.group_month_id)!;
+      return {
+        id: randomUUID(),
+        workspace_id: c.workspace_id,
+        attention_case_id: c.id,
+        group_id: gm.group_id,
+        rule_key: "ABSENCE_STREAK",
+        severity: c.priority,
+      };
+    });
+    await insertBatched(sql, reasons, (s, batch) => s`INSERT INTO attention_reasons ${s(batch)}`);
+
+    const followups = cases
+      .filter((_, i) => i % 3 === 0) // ~30% of cases
+      .map((c, i) => ({
+        id: randomUUID(),
+        workspace_id: c.workspace_id,
+        attention_case_id: c.id,
+        student_id: c.student_id,
+        due_at: new Date(`2026-08-${String((i % 27) + 1).padStart(2, "0")}T12:00:00Z`),
+        status: "PENDING",
+      }));
+    await insertBatched(sql, followups, (s, batch) => s`INSERT INTO scheduled_followups ${s(batch)}`);
+    console.log(`[seed-scale-dataset] attention_cases: ${cases.length}, reasons: ${reasons.length}, followups: ${followups.length}`);
+  }
+
   const elapsedS = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[seed-scale-dataset] DONE in ${elapsedS}s. Run tag: ${RUN_TAG} (use this with cleanup-scale-dataset.ts).`);
   await sql.end();

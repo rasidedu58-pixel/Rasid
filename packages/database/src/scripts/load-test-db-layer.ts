@@ -23,6 +23,8 @@ import postgres from "postgres";
 import { closeDb, withRuntimeContext } from "../connection";
 import { getGroupReport, getMonthlyTeacherReport } from "../reports/reports.repository";
 import { listSessionsWithMissingRecords } from "../reports/action-center.repository";
+import { getFinanceSummary, listCollectionQueue } from "../repositories/finance.repository";
+import { listAttentionCasesForWorkspace, listScheduledFollowups } from "../repositories/attention.repository";
 
 const RUN_TAG = process.env.RUN_TAG ?? "phase10a";
 const CONCURRENCY = Number.parseInt(process.env.CONCURRENCY ?? "20", 10);
@@ -158,6 +160,41 @@ async function main(): Promise<void> {
     await withRuntimeContext({ workspaceId }, (tx) => listSessionsWithMissingRecords(tx, workspaceId, "ALL", 10));
   });
   report("action-center-missing-records", actionCenterTimings);
+
+  // 6-8. Phase 15C — finance + attention hot paths (only meaningful when the
+  // seed ran with SEED_FINANCE=1 / SEED_ATTENTION=1; harmless zero-row
+  // queries otherwise).
+  const collectionQueueTimings = await runConcurrent("finance-collection-queue", REQUESTS, CONCURRENCY, async (i) => {
+    const workspaceId = workspaceIds[i % workspaceIds.length]!;
+    await withRuntimeContext({ workspaceId }, (tx) =>
+      listCollectionQueue(tx as never, { workspaceId, limit: 200 }),
+    );
+  });
+  report("finance-collection-queue", collectionQueueTimings);
+
+  const financeSummaryTimings = await runConcurrent("finance-summary", REQUESTS, CONCURRENCY, async (i) => {
+    const workspaceId = workspaceIds[i % workspaceIds.length]!;
+    await withRuntimeContext({ workspaceId }, (tx) =>
+      getFinanceSummary(tx as never, { workspaceId, todayIsoDate: "2026-08-26" }),
+    );
+  });
+  report("finance-summary", financeSummaryTimings);
+
+  const attentionTimings = await runConcurrent("attention-cases-list", REQUESTS, CONCURRENCY, async (i) => {
+    const workspaceId = workspaceIds[i % workspaceIds.length]!;
+    await withRuntimeContext({ workspaceId }, (tx) =>
+      listAttentionCasesForWorkspace(tx as never, { workspaceId, limit: 50 }),
+    );
+  });
+  report("attention-cases-list", attentionTimings);
+
+  const followupsTimings = await runConcurrent("followups-list", REQUESTS, CONCURRENCY, async (i) => {
+    const workspaceId = workspaceIds[i % workspaceIds.length]!;
+    await withRuntimeContext({ workspaceId }, (tx) =>
+      listScheduledFollowups(tx as never, { workspaceId, status: "PENDING", limit: 50 }),
+    );
+  });
+  report("followups-list", followupsTimings);
 
   // Phase 15 fix — the Phase 14 hang, root-caused: `adminSql.end()` closed
   // the script's OWN pool, but the report/action-center sections above run
