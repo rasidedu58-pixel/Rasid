@@ -36,3 +36,5 @@ export * from "./primitives/cursor-pagination";
 export * from "./primitives/confirm-dialog";
 export * from "./primitives/spinner";
 export * from "./primitives/filter-bar";
+export * from "./primitives/metric-strip";
+export * from "./primitives/timeline";

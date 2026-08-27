@@ -1,29 +1,16 @@
-import Link from "next/link";
 import type { StudentReportResponse } from "@academic-precision/contracts";
-import { Badge, Card, SectionCard, formatDate, formatMoney, formatMonthLabel } from "@academic-precision/ui";
+import { Badge, Card, SectionCard, Timeline, TimelineItem, formatMoney, formatMonthLabel } from "@academic-precision/ui";
+
+const OBLIGATION_TONE: Record<string, "success" | "warning" | "danger"> = { PAID: "success", PARTIAL: "warning", UNPAID: "danger" };
 
 export function OverviewTab({ report }: { report: StudentReportResponse }) {
   return (
     <div className="flex flex-col gap-4">
-      {report.activeAttentionCase ? (
-        <Card className="border-warning/30 bg-warning-subtle p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-warning">هذا الطالب ضمن المتابعة حاليًا</p>
-              <p className="text-xs text-text-secondary">فُتحت الحالة في {formatDate(report.activeAttentionCase.openedAt)}</p>
-            </div>
-            <Link href={`/attention/${report.activeAttentionCase.id}`} className="text-sm font-medium text-brand hover:underline">
-              عرض الحالة
-            </Link>
-          </div>
-        </Card>
-      ) : null}
-
       {!report.currentMonth ? (
         <Card className="p-6 text-center text-sm text-text-secondary">لا يوجد تسجيل في الشهر الحالي.</Card>
       ) : (
         <SectionCard title={`الحصص هذا الشهر — ${formatMonthLabel(report.currentMonth.year, report.currentMonth.month)}`}>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
             <StatGroup title="الحضور" items={[["حاضر", report.sessions.attendance.present], ["غائب", report.sessions.attendance.absent], ["متأخر", report.sessions.attendance.late], ["غير مسجّل", report.sessions.attendance.missing]]} />
             <StatGroup title="الواجب" items={[["منجز", report.sessions.homework.done], ["جزئي", report.sessions.homework.partial], ["غير منجز", report.sessions.homework.notDone], ["غير مسجّل", report.sessions.homework.missing]]} />
             <StatGroup title="الامتحان" items={[["تم الرصد", report.sessions.exam.scored], ["غياب", report.sessions.exam.absent], ["غير مسجّل", report.sessions.exam.missing]]} />
@@ -31,25 +18,23 @@ export function OverviewTab({ report }: { report: StudentReportResponse }) {
         </SectionCard>
       )}
 
-      <SectionCard title="الالتزامات المالية">
+      <SectionCard title="السجل المالي">
         {report.obligationsByMonth.length === 0 ? (
           <p className="text-sm text-text-secondary">لا توجد التزامات مالية مسجّلة.</p>
         ) : (
-          <ul className="flex flex-col divide-y divide-border">
-            {report.obligationsByMonth.map((o) => (
-              <li key={`${o.monthId}-${o.groupId}`} className="flex items-center justify-between py-2">
-                <div>
-                  <p className="text-sm text-text-primary">
-                    {o.groupName} — {formatMonthLabel(o.year, o.month)}
-                  </p>
-                  <p className="text-xs text-text-secondary tabular-nums">
-                    {formatMoney(o.amountPaidMinor)} من {formatMoney(o.netDueMinor)}
-                  </p>
-                </div>
-                <ObligationStatusBadge status={o.status} />
-              </li>
+          <Timeline>
+            {report.obligationsByMonth.map((o, i) => (
+              <TimelineItem
+                key={`${o.monthId}-${o.groupId}`}
+                tone={OBLIGATION_TONE[o.status] ?? "warning"}
+                date={formatMonthLabel(o.year, o.month)}
+                title={o.groupName}
+                context={<span className="tabular-nums">{formatMoney(o.amountPaidMinor)} من {formatMoney(o.netDueMinor)}</span>}
+                action={<ObligationStatusBadge status={o.status} />}
+                last={i === report.obligationsByMonth.length - 1}
+              />
             ))}
-          </ul>
+          </Timeline>
         )}
       </SectionCard>
     </div>

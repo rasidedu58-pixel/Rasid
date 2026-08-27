@@ -2,7 +2,8 @@
 
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, ErrorState, LoadingRegion, Tabs, TabsContent, TabsList, TabsTrigger } from "@academic-precision/ui";
+import Link from "next/link";
+import { Badge, ErrorState, LoadingRegion, MetricCell, MetricStrip, Tabs, TabsContent, TabsList, TabsTrigger, formatMoney } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { ExportCsvButton } from "../../../../components/reports/export-csv-button";
 import { useWorkspace } from "../../../../lib/workspace-provider";
@@ -43,11 +44,25 @@ export default function StudentProfilePage() {
   const { student, guardians } = detailQuery.data;
   const report = reportQuery.data;
 
+  // Status strip — derived ONLY from data already on this page (the student
+  // report). Attendance/homework/exam are current-month session ratios;
+  // "المتبقّي" aggregates the student's obligations. Nothing invented.
+  const att = report.sessions.attendance;
+  const hw = report.sessions.homework;
+  const attTotal = att.present + att.absent + att.late + att.missing;
+  const hwTotal = hw.done + hw.partial + hw.notDone + hw.missing;
+  const examTotal = report.sessions.exam.scored + report.sessions.exam.absent + report.sessions.exam.missing;
+  const totalDue = report.obligationsByMonth.reduce((s, o) => s + o.netDueMinor, 0);
+  const totalPaid = report.obligationsByMonth.reduce((s, o) => s + o.amountPaidMinor, 0);
+  const outstanding = Math.max(0, totalDue - totalPaid);
+  const groupNames = [...new Set(report.obligationsByMonth.map((o) => o.groupName))];
+
   return (
     <>
       <PageHeader
+        eyebrow="ملف الطالب"
         title={student.name}
-        description={`كود الطالب: ${student.studentCode}`}
+        description={[`كود: ${student.studentCode}`, groupNames.length > 0 ? `المجموعات: ${groupNames.join("، ")}` : null].filter(Boolean).join(" · ")}
         actions={
           <div className="flex items-center gap-2">
             <ExportCsvButton type="STUDENT" studentId={studentId} filename={`${student.name}.csv`} />
@@ -55,6 +70,29 @@ export default function StudentProfilePage() {
           </div>
         }
       />
+
+      <div className="mb-6 flex flex-col gap-3">
+        <MetricStrip>
+          <MetricCell label="الحضور" value={attTotal > 0 ? `${att.present}/${attTotal}` : "—"} sub="حاضر هذا الشهر" />
+          <MetricCell label="الواجب" value={hwTotal > 0 ? `${hw.done}/${hwTotal}` : "—"} sub="منجز" />
+          <MetricCell label="الامتحان" value={examTotal > 0 ? `${report.sessions.exam.scored}/${examTotal}` : "—"} sub="مرصود" />
+          <MetricCell
+            label="المتبقّي"
+            value={report.obligationsByMonth.length > 0 ? formatMoney(outstanding) : "—"}
+            tone={outstanding > 0 ? "danger" : "success"}
+            sub={totalDue > 0 ? `من ${formatMoney(totalDue)}` : undefined}
+          />
+        </MetricStrip>
+        {report.activeAttentionCase ? (
+          <Link
+            href={`/attention/${report.activeAttentionCase.id}`}
+            className="flex items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-subtle px-4 py-2.5 transition-colors hover:bg-warning-subtle/70"
+          >
+            <span className="text-sm font-medium text-warning">هذا الطالب ضمن المتابعة حاليًا</span>
+            <span className="shrink-0 text-sm font-medium text-warning underline">عرض الحالة</span>
+          </Link>
+        ) : null}
+      </div>
 
       <Tabs defaultValue="overview" dir="rtl">
         <TabsList>

@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Users } from "lucide-react";
-import { ActiveFilters, Badge, CursorPagination, EmptyState, ErrorState, FilterBar, FilterChip, SearchInput, SegmentedControl, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll } from "@academic-precision/ui";
+import { ChevronLeft, Users } from "lucide-react";
+import { ActiveFilters, CursorPagination, EmptyState, ErrorState, FilterBar, FilterChip, SearchInput, SegmentedControl, SkeletonRows, StatusDot, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { useDebounce } from "../../../hooks/use-debounce";
@@ -30,6 +31,7 @@ const MODE_PLACEHOLDER: Record<SearchMode, string> = {
 
 export default function StudentsPage() {
   const { workspaceId } = useWorkspace();
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [searchBy, setSearchBy] = useState<SearchMode>("auto");
   const debouncedSearch = useDebounce(search, 300);
@@ -84,21 +86,30 @@ export default function StudentsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>الاسم</TableHead>
-                  <TableHead>الكود</TableHead>
+                  <TableHead className="hidden sm:table-cell">الكود</TableHead>
                   <TableHead>الحالة</TableHead>
+                  <TableHead className="w-8" aria-label="فتح" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {students.map((student) => (
-                  <TableRow key={student.id}>
+                  <TableRow
+                    key={student.id}
+                    className="group cursor-pointer transition-colors hover:bg-surface-sunken/50"
+                    onClick={() => router.push(`/students/${student.id}`)}
+                  >
                     <TableCell>
-                      <Link href={`/students/${student.id}`} className="font-medium text-text-primary hover:text-brand hover:underline">
+                      <Link href={`/students/${student.id}`} className="font-medium text-text-primary group-hover:text-brand" onClick={(e) => e.stopPropagation()}>
                         {student.name}
                       </Link>
+                      <span className="mt-0.5 block text-xs text-text-tertiary tabular-nums sm:hidden">{student.studentCode}</span>
                     </TableCell>
-                    <TableCell className="text-text-secondary">{student.studentCode}</TableCell>
+                    <TableCell className="hidden text-text-secondary tabular-nums sm:table-cell">{student.studentCode}</TableCell>
                     <TableCell>
-                      <Badge tone={student.status === "ACTIVE" ? "success" : "neutral"}>{student.status === "ACTIVE" ? "نشط" : "مؤرشف"}</Badge>
+                      <StatusDot tone={student.status === "ACTIVE" ? "success" : "neutral"} label={student.status === "ACTIVE" ? "نشط" : "مؤرشف"} />
+                    </TableCell>
+                    <TableCell className="text-text-tertiary">
+                      <ChevronLeft className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
                     </TableCell>
                   </TableRow>
                 ))}
