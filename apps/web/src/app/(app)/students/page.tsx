@@ -3,22 +3,41 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Search, Users } from "lucide-react";
-import { Badge, CursorPagination, EmptyState, ErrorState, Input, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll } from "@academic-precision/ui";
+import { Users } from "lucide-react";
+import { ActiveFilters, Badge, CursorPagination, EmptyState, ErrorState, FilterBar, FilterChip, SearchInput, SegmentedControl, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { useDebounce } from "../../../hooks/use-debounce";
 import { fetchStudents } from "../../../lib/api/students";
 import { CreateStudentDialog } from "./create-student-dialog";
 
+// The search modes the students API actually supports (`searchBy`); "auto"
+// lets the server infer name/code/phone from the query shape.
+const SEARCH_MODES = [
+  { value: "auto", label: "تلقائي" },
+  { value: "name", label: "الاسم" },
+  { value: "code", label: "الكود" },
+  { value: "guardianPhone", label: "هاتف ولي الأمر" },
+] as const;
+type SearchMode = (typeof SEARCH_MODES)[number]["value"];
+const MODE_LABEL: Record<SearchMode, string> = { auto: "تلقائي", name: "الاسم", code: "الكود", guardianPhone: "هاتف ولي الأمر" };
+const MODE_PLACEHOLDER: Record<SearchMode, string> = {
+  auto: "ابحث بالاسم أو الكود أو رقم ولي الأمر...",
+  name: "ابحث باسم الطالب...",
+  code: "ابحث بكود الطالب...",
+  guardianPhone: "ابحث برقم هاتف ولي الأمر...",
+};
+
 export default function StudentsPage() {
   const { workspaceId } = useWorkspace();
   const [search, setSearch] = useState("");
+  const [searchBy, setSearchBy] = useState<SearchMode>("auto");
   const debouncedSearch = useDebounce(search, 300);
 
   const query = useInfiniteQuery({
-    queryKey: ["students", workspaceId, "list", debouncedSearch],
-    queryFn: ({ pageParam }: { pageParam?: string }) => fetchStudents(workspaceId!, { q: debouncedSearch || undefined, cursor: pageParam, limit: 30 }),
+    queryKey: ["students", workspaceId, "list", debouncedSearch, searchBy],
+    queryFn: ({ pageParam }: { pageParam?: string }) =>
+      fetchStudents(workspaceId!, { q: debouncedSearch || undefined, searchBy: searchBy === "auto" ? undefined : searchBy, cursor: pageParam, limit: 30 }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
     enabled: !!workspaceId,
@@ -26,15 +45,31 @@ export default function StudentsPage() {
 
   const students = query.data?.pages.flatMap((p) => p.items) ?? [];
   const hasNext = query.data?.pages[query.data.pages.length - 1]?.page.hasNext ?? false;
+  const hasActiveFilters = search.trim().length > 0 || searchBy !== "auto";
 
   return (
     <>
       <PageHeader title="الطلاب" actions={<CreateStudentDialog />} />
 
-      <div className="relative mb-4 max-w-sm">
-        <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث بالاسم أو كود الطالب..." className="ps-9" />
-      </div>
+      <FilterBar>
+        <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder={MODE_PLACEHOLDER[searchBy]} aria-label="البحث عن طالب" />
+        <SegmentedControl aria-label="البحث حسب" options={SEARCH_MODES} value={searchBy} onChange={setSearchBy} />
+      </FilterBar>
+
+      {hasActiveFilters ? (
+        <ActiveFilters
+          onClearAll={() => {
+            setSearch("");
+            setSearchBy("auto");
+          }}
+          chips={
+            <>
+              {search.trim() ? <FilterChip label={`بحث: ${search.trim()}`} onRemove={() => setSearch("")} /> : null}
+              {searchBy !== "auto" ? <FilterChip label={`الحقل: ${MODE_LABEL[searchBy]}`} onRemove={() => setSearchBy("auto")} /> : null}
+            </>
+          }
+        />
+      ) : null}
 
       {query.isLoading ? (
         <SkeletonRows rows={6} />

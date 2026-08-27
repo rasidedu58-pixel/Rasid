@@ -59,9 +59,23 @@ export default function DashboardPage() {
   const needsFollowUpSoon = allItems.filter((i) => i.urgency === "MEDIUM");
   const contextual = allItems.filter((i) => i.urgency === "LOW");
 
+  // Greeting + one-line operating summary (§11.A) — real data only: a
+  // time-of-day greeting, today's date, and a qualitative read of the queue.
+  // Exact counts live on the section headers (numeric, no grammar agreement
+  // pitfalls); this line stays qualitative and always true.
+  const now = new Date();
+  const greeting = now.getHours() < 12 ? "صباح الخير" : "مساء الخير";
+  const dateLabel = new Intl.DateTimeFormat("ar-EG", { weekday: "long", day: "numeric", month: "long" }).format(now);
+  const summary =
+    needsActionNow.length > 0
+      ? "هناك بنود عاجلة تحتاج قرارك اليوم."
+      : allItems.length > 0
+        ? "لا شيء عاجل — بعض البنود بحاجة إلى مراجعة."
+        : "كل شيء تحت السيطرة اليوم.";
+
   return (
     <>
-      <PageHeader title="الرئيسية" />
+      <PageHeader eyebrow={dateLabel} title={greeting} description={summary} />
 
       {!data.month ? (
         <Card className="mb-4 border-brand/30 bg-brand-subtle">
@@ -122,20 +136,37 @@ export default function DashboardPage() {
       {allItems.length === 0 ? (
         <EmptyState icon={<Sparkles className="h-8 w-8 text-brand" aria-hidden />} title="لا يوجد ما يحتاج إجراء الآن" description="كل شيء تحت السيطرة. سنعرض هنا أي أمر يحتاج قرارك فور ظهوره." />
       ) : (
-        <div className="flex flex-col gap-6">
-          {needsActionNow.length > 0 ? <ActionSection title="يحتاج إجراء الآن" items={needsActionNow} /> : null}
-          {needsFollowUpSoon.length > 0 ? <ActionSection title="يحتاج متابعة قريبًا" items={needsFollowUpSoon} /> : null}
-          {contextual.length > 0 ? <ActionSection title="معلومات سياقية" items={contextual} /> : null}
+        <div className="flex flex-col gap-8">
+          {needsActionNow.length > 0 ? <ActionSection title="يحتاج إجراء الآن" items={needsActionNow} variant="urgent" /> : null}
+          {needsFollowUpSoon.length > 0 ? <ActionSection title="يحتاج متابعة قريبًا" items={needsFollowUpSoon} variant="normal" /> : null}
+          {contextual.length > 0 ? <ActionSection title="معلومات سياقية" items={contextual} variant="quiet" /> : null}
         </div>
       )}
     </>
   );
 }
 
-function ActionSection({ title, items }: { title: string; items: ActionItem[] }) {
+/**
+ * The urgent section dominates visually (a heavier heading + a danger-tinted
+ * count) so the eye lands there first; follow-up and contextual sections are
+ * progressively quieter, so unrelated blocks never carry equal weight (§4).
+ */
+function ActionSection({ title, items, variant }: { title: string; items: ActionItem[]; variant: "urgent" | "normal" | "quiet" }) {
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-text-secondary">{title}</h2>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2.5">
+        {variant === "urgent" ? <span className="h-2 w-2 rounded-full bg-danger" aria-hidden /> : null}
+        <h2 className={variant === "urgent" ? "text-base font-semibold text-text-primary" : "text-sm font-semibold text-text-secondary"}>{title}</h2>
+        <span
+          className={
+            variant === "urgent"
+              ? "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-danger-subtle px-1.5 text-xs font-semibold text-danger"
+              : "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-surface-sunken px-1.5 text-xs font-medium text-text-tertiary"
+          }
+        >
+          {items.length}
+        </span>
+      </div>
       <div className="flex flex-col gap-2">
         {items.map((item) => (
           <ActionItemRow key={`${item.entityType}-${item.entityId}`} item={item} />
