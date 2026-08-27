@@ -55,7 +55,7 @@ export class InMemoryFinanceRepository implements FinanceRepositoryPort {
     if (!enrollment) return undefined;
     const groupMonth = this.shared.groupMonthsById.get(enrollment.groupMonthId);
     if (!groupMonth) return undefined;
-    return { groupId: groupMonth.groupId, groupMonthId: groupMonth.id, studentId: enrollment.studentId };
+    return { workspaceId: obligation.workspaceId, groupId: groupMonth.groupId, groupMonthId: groupMonth.id, studentId: enrollment.studentId };
   }
 
   async findPaymentById(id: string): Promise<PaymentRow | undefined> {

@@ -3,6 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { loadServerEnv } from "@academic-precision/config";
+import { closeDb } from "@academic-precision/database";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { RequestContextInterceptor } from "./common/interceptors/request-context.interceptor";
@@ -108,6 +109,42 @@ async function bootstrap() {
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup(`${API_PREFIX}/docs`, app, document);
+
+  // Phase 15D — graceful shutdown. Railway sends SIGTERM on every deploy /
+  // scale-down; without a handler the process is killed mid-request and the
+  // postgres pool's connections are dropped abruptly rather than returned to
+  // the scarce `app_runtime` budget (28 connections, shared across replicas —
+  // an abrupt kill can leave server-side backends lingering until timeout).
+  // On signal: stop accepting new connections and let in-flight requests
+  // drain (`app.close()` also runs Nest shutdown hooks), then close the DB
+  // pool cleanly, then exit. Idempotent — a second signal during shutdown is
+  // ignored. A hard cap guarantees the process still exits if a request hangs.
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // eslint-disable-next-line no-console
+    console.log(`Received ${signal} — draining requests and closing DB pool…`);
+    const hardExit = setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.error("Graceful shutdown timed out after 15s — forcing exit.");
+      process.exit(1);
+    }, 15_000);
+    hardExit.unref?.();
+    try {
+      await app.close();
+      await closeDb();
+      // eslint-disable-next-line no-console
+      console.log("Shutdown complete.");
+      process.exit(0);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Error during shutdown:", error);
+      process.exit(1);
+    }
+  };
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port, "0.0.0.0");

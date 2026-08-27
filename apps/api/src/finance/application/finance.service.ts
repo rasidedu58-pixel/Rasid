@@ -349,12 +349,13 @@ export class FinanceService {
     obligationId: string,
     permission: "payments.record",
   ): Promise<void> {
-    const obligation = await this.repository.findObligationById(obligationId);
-    if (!obligation || obligation.workspaceId !== workspaceContext.workspaceId) {
-      throw new ResourceNotFoundException();
-    }
+    // Phase 15D — ONE read does both the existence + workspace-ownership check
+    // and the group-scope anchor (was two reads on the same obligation). A
+    // missing obligation, an obligation in another workspace, or one whose
+    // enrollment/group-month join is broken all yield `undefined`/mismatch
+    // here → the SAME safe no-leak 404 as before.
     const context = await this.repository.findObligationGroupContext(obligationId);
-    if (!context) {
+    if (!context || context.workspaceId !== workspaceContext.workspaceId) {
       throw new ResourceNotFoundException();
     }
     const inScope = await this.permissionResolver.isGroupInScope(workspaceContext.workspaceId, authUser.id, permission, context.groupId);

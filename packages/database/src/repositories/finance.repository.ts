@@ -144,6 +144,8 @@ export function findPaymentById(db: Db, id: string): Promise<PaymentRow | undefi
 }
 
 export interface ObligationGroupContext {
+  /** Phase 15D — the obligation's own workspace, so a caller can do the existence + workspace-ownership check AND the group-scope check from this ONE query (was two: findObligationById then findObligationGroupContext). */
+  workspaceId: string;
   groupId: string;
   groupMonthId: string;
   studentId: string;
@@ -152,7 +154,7 @@ export interface ObligationGroupContext {
 /** Resolves the Group an obligation's Enrollment belongs to — the Group Scope anchor for `payments.record`/`payments.view_student_status` checks. */
 export async function findObligationGroupContext(db: Db, obligationId: string): Promise<ObligationGroupContext | undefined> {
   const [row] = await db
-    .select({ groupId: groupMonths.groupId, groupMonthId: groupMonths.id, studentId: enrollments.studentId })
+    .select({ workspaceId: financialObligations.workspaceId, groupId: groupMonths.groupId, groupMonthId: groupMonths.id, studentId: enrollments.studentId })
     .from(financialObligations)
     .innerJoin(enrollments, eq(enrollments.id, financialObligations.enrollmentId))
     .innerJoin(groupMonths, eq(groupMonths.id, enrollments.groupMonthId))

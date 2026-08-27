@@ -25,10 +25,31 @@ import { registerGracefulShutdown } from "./shutdown";
 const logger = createLogger("academic-precision-worker");
 
 const POLL_EVENT_TYPES = ["SessionCompleted"];
-const IDLE_POLL_DELAY_MS = 5_000; // nothing was claimed — wait a bit before checking again.
+const IDLE_POLL_DELAY_MS = 5_000; // first empty poll — wait a bit before checking again.
+// Phase 15D — progressive backoff on CONSECUTIVE empty polls. The idle
+// outbox claim (`SELECT ... FOR UPDATE SKIP LOCKED`) is a real transaction on
+// every cycle; at a fixed 5s it was ~12 tx/min of pure idle DB churn (the
+// dominant background contributor, and the source of the xact_commit
+// contamination seen during read-path measurement). Growing the delay
+// 5s→10s→20s→30s while nothing is claimed cuts steady-state idle churn to
+// ~2 tx/min. The FIRST claimed event immediately resets to the fast active
+// cadence, so once work arrives dispatch latency is unchanged; the only cost
+// is that the first event after a long quiet stretch can wait up to the cap
+// (30s) — acceptable for the attention/notification generation this drives
+// (a day/hour-granularity concern, never user-blocking). The module's serial
+// loop and the subscription/notification interval checks are unaffected (they
+// gate on elapsed wall-clock, which a longer sleep only makes coarser within
+// their own 60s/300s tolerances).
+const IDLE_POLL_MAX_DELAY_MS = 30_000;
 const ACTIVE_POLL_DELAY_MS = 250; // something WAS claimed — check again soon, more may be waiting.
 const ERROR_POLL_DELAY_MS = 15_000; // an unexpected (non-event-scoped) error — back off harder.
 const MAX_EVENTS_PER_CYCLE = 20;
+
+/** Empty-poll backoff: 5s, 10s, 20s, then capped at 30s. `emptyStreak` is the count of consecutive empty polls so far (1 for the first). */
+function idlePollDelayMs(emptyStreak: number): number {
+  const delay = IDLE_POLL_DELAY_MS * 2 ** (emptyStreak - 1);
+  return Math.min(delay, IDLE_POLL_MAX_DELAY_MS);
+}
 
 // Phase 8 — Subscription expiry is a day-granularity concern (`period_end`),
 // not a sub-second one like outbox dispatch — running it on every ~250ms
@@ -63,6 +84,7 @@ function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
 async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<typeof getWorkerDb>): Promise<void> {
   let lastSubscriptionExpiryCheckAt = 0;
   let lastNotificationsScanAt = 0;
+  let emptyPollStreak = 0;
 
   while (!state.stopped) {
     const bootId = randomUUID();
@@ -107,8 +129,10 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
       }
 
       if (result.claimed === 0) {
-        await sleep(IDLE_POLL_DELAY_MS, state);
+        emptyPollStreak += 1;
+        await sleep(idlePollDelayMs(emptyPollStreak), state);
       } else {
+        emptyPollStreak = 0; // work arrived — return to the fast active cadence immediately.
         logger.info({ ...result }, "Outbox dispatch cycle completed.");
         await sleep(ACTIVE_POLL_DELAY_MS, state);
       }
@@ -162,7 +186,7 @@ function bootstrap(): void {
   });
 }
 
-export { bootstrap, runPollingLoop };
+export { bootstrap, runPollingLoop, idlePollDelayMs };
 
 // `require.main === module` (CommonJS — this package compiles to CommonJS,
 // see tsconfig.json) guards the real process bootstrap so this module can
