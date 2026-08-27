@@ -197,20 +197,27 @@ export interface ActionCenterData {
 }
 
 export async function loadActionCenterData(db: Db, p: ActionCenterDataParams): Promise<ActionCenterData> {
+  // The CURRENT month is needed by the missing-records query, so resolve it
+  // first; every other section is independent and is issued concurrently on
+  // this ONE transaction's connection (postgres.js pipelines them — so this
+  // keeps the single-transaction win of ~7→1 while recovering the
+  // parallelism the seven separate transactions used to have).
   const month = await getCurrentMonth(db, p.workspaceId);
-  const attentionCases = p.attention
-    ? await listAttentionCasesForWorkspace(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.attention.restrictToGroupIds, limit: p.limit })
-    : undefined;
-  const followups = p.followups
-    ? await listScheduledFollowups(db, { workspaceId: p.workspaceId, status: "PENDING", restrictToGroupIds: p.followups.restrictToGroupIds, limit: p.limit })
-    : undefined;
-  const missingRecords = p.missing
-    ? await listSessionsWithMissingRecords(db, p.workspaceId, p.missing.visibleGroupIds, p.limit, month?.id)
-    : undefined;
-  const collection = p.collection
-    ? await listCollectionQueue(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.collection.restrictToGroupIds, limit: p.limit })
-    : undefined;
-  const subscription = p.subscription ? await findSubscriptionByWorkspaceId(db, p.workspaceId) : undefined;
-  const nextSession = await getNextSession(db, p.workspaceId, p.nextSession.visibleGroupIds, p.now);
+  const [attentionCases, followups, missingRecords, collection, subscription, nextSession] = await Promise.all([
+    p.attention
+      ? listAttentionCasesForWorkspace(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.attention.restrictToGroupIds, limit: p.limit })
+      : Promise.resolve(undefined),
+    p.followups
+      ? listScheduledFollowups(db, { workspaceId: p.workspaceId, status: "PENDING", restrictToGroupIds: p.followups.restrictToGroupIds, limit: p.limit })
+      : Promise.resolve(undefined),
+    p.missing
+      ? listSessionsWithMissingRecords(db, p.workspaceId, p.missing.visibleGroupIds, p.limit, month?.id)
+      : Promise.resolve(undefined),
+    p.collection
+      ? listCollectionQueue(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.collection.restrictToGroupIds, limit: p.limit })
+      : Promise.resolve(undefined),
+    p.subscription ? findSubscriptionByWorkspaceId(db, p.workspaceId) : Promise.resolve(undefined),
+    getNextSession(db, p.workspaceId, p.nextSession.visibleGroupIds, p.now),
+  ]);
   return { month, attentionCases, followups, missingRecords, collection, subscription, nextSession };
 }
