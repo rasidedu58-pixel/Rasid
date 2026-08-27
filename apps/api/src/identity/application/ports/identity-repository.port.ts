@@ -6,6 +6,7 @@ import type {
   ProvisionInput,
   SubscriptionRow,
   UserWithMemberships,
+  WorkspaceCommercialState,
   WorkspaceRow,
 } from "@academic-precision/database";
 
@@ -26,6 +27,8 @@ export interface IdentityRepositoryPort {
   findSubscriptionByWorkspaceId(workspaceId: string): Promise<SubscriptionRow | undefined>;
   /** Phase 8 — the workspace's CURRENT entitlement snapshot (ALLOWED capabilities only — a caller only needs to know what it CAN do), for the same response's `entitlements` field. */
   listAllowedEntitlementsForWorkspace(workspaceId: string): Promise<EntitlementRow[]>;
+  /** Phase 15C — subscription + allowed entitlements in ONE transaction, for `GET /me/workspaces/:id/context`. */
+  loadWorkspaceCommercialState(workspaceId: string): Promise<WorkspaceCommercialState>;
 }
 
 export const IDENTITY_REPOSITORY = Symbol("IDENTITY_REPOSITORY");

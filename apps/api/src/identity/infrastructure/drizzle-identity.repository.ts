@@ -9,6 +9,7 @@ import {
   listMembershipsForUser,
   loadProvisionedIdentity,
   loadUserWithMemberships,
+  loadWorkspaceCommercialState,
   withRuntimeContext,
   type EntitlementRow,
   type MembershipWithWorkspace,
@@ -17,6 +18,7 @@ import {
   type ProvisionInput,
   type SubscriptionRow,
   type UserWithMemberships,
+  type WorkspaceCommercialState,
   type WorkspaceRow,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
@@ -116,6 +118,11 @@ export class DrizzleIdentityRepository implements IdentityRepositoryPort {
 
   listAllowedEntitlementsForWorkspace(workspaceId: string): Promise<EntitlementRow[]> {
     return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => listAllowedEntitlementsForWorkspace(db, workspaceId));
+  }
+
+  /** Phase 15C — subscription + entitlements in one transaction. */
+  loadWorkspaceCommercialState(workspaceId: string): Promise<WorkspaceCommercialState> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => loadWorkspaceCommercialState(db, workspaceId));
   }
 
   private runtimeCtx(workspaceId: string) {

@@ -137,6 +137,46 @@ describe("IdentityService", () => {
         service.getWorkspaceContext(AUTH_USER, "some-other-workspace-id"),
       ).rejects.toBeInstanceOf(ResourceNotFoundException);
     });
+
+    // ---- Phase 15C: /context consolidation ----
+    it("member fast path does NOT re-provision (no write on the hot path)", async () => {
+      const me = await service.getMe(AUTH_USER); // provisions once
+      const workspaceId = me.workspaces[0]!.id;
+      teamRepository.seedMembership({ workspaceId, userId: AUTH_USER.id, roleLabel: "OWNER" });
+
+      const provisionCallsBefore = repository.provisionCalls;
+      const ctx = await service.getWorkspaceContext(AUTH_USER, workspaceId);
+
+      expect(ctx.workspace.id).toBe(workspaceId);
+      expect(repository.provisionCalls).toBe(provisionCallsBefore); // membership found → no ensureProvisioned
+    });
+
+    it("still provisions a brand-new identity that hits /context first, then returns safe 404 for a non-member workspace", async () => {
+      // No prior getMe — the very first request is /context.
+      expect(repository.provisionCalls).toBe(0);
+
+      await expect(
+        service.getWorkspaceContext(AUTH_USER, "unknown-workspace"),
+      ).rejects.toBeInstanceOf(ResourceNotFoundException);
+
+      // Provisioning-on-first-request is preserved (side effect), and the
+      // caller is still correctly denied the foreign workspace.
+      expect(repository.provisionCalls).toBe(1);
+    });
+
+    it("subscription + entitlement truth is unchanged via the combined one-transaction read", async () => {
+      const me = await service.getMe(AUTH_USER);
+      const workspaceId = me.workspaces[0]!.id;
+      teamRepository.seedMembership({ workspaceId, userId: AUTH_USER.id, roleLabel: "OWNER" });
+
+      const ctx = await service.getWorkspaceContext(AUTH_USER, workspaceId);
+      // Fresh workspace: 14-day TRIAL, all V1 capabilities ALLOWED — same as
+      // when subscription/entitlements were two separate transactions.
+      expect(ctx.subscriptionState).toBe("TRIAL");
+      expect(ctx.entitlements.sort()).toEqual(
+        ["CORE_OPERATIONS", "CREATE_MONTH", "REPORT_EXPORT", "TEAM_MANAGEMENT"].sort(),
+      );
+    });
   });
 
   describe("completeOnboarding", () => {

@@ -75,6 +75,24 @@ export async function listAllowedEntitlementsForWorkspace(db: Db, workspaceId: s
   return current.filter((row) => row.state === "ALLOWED");
 }
 
+export interface WorkspaceCommercialState {
+  subscription: SubscriptionRow | undefined;
+  allowedEntitlements: EntitlementRow[];
+}
+
+/**
+ * Phase 15C — the subscription + allowed-entitlements pair a `GET
+ * /me/workspaces/:id/context` needs, read in ONE transaction (one
+ * BEGIN/COMMIT) instead of two. Same rows as the separate calls; the point
+ * is one fewer transaction against the shared connection-pool budget. Both
+ * are workspace-scoped reads under the caller's already-set RLS context.
+ */
+export async function loadWorkspaceCommercialState(db: Db, workspaceId: string): Promise<WorkspaceCommercialState> {
+  const subscription = await findSubscriptionByWorkspaceId(db, workspaceId);
+  const allowedEntitlements = await listAllowedEntitlementsForWorkspace(db, workspaceId);
+  return { subscription, allowedEntitlements };
+}
+
 export async function findCurrentEntitlement(
   db: Db,
   workspaceId: string,

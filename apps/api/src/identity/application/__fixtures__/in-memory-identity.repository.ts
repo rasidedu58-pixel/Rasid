@@ -148,6 +148,13 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
     return { user, memberships };
   }
 
+  /** Phase 15C — subscription + allowed entitlements together (mirrors the one-transaction repo read). */
+  async loadWorkspaceCommercialState(workspaceId: string) {
+    const subscription = await this.findSubscriptionByWorkspaceId(workspaceId);
+    const allowedEntitlements = await this.listAllowedEntitlementsForWorkspace(workspaceId);
+    return { subscription, allowedEntitlements };
+  }
+
   /** Test helper: give `userId` an ADDITIONAL membership (multi-workspace). */
   seedExtraMembership(userId: string, entry: MembershipWithWorkspace): void {
     const list = this.extraMembershipsByUserId.get(userId) ?? [];

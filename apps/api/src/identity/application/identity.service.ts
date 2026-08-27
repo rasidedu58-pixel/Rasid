@@ -84,8 +84,16 @@ export class IdentityService {
     authUser: VerifiedSupabaseToken,
     workspaceId: string,
   ): Promise<WorkspaceContextResponse> {
-    await this.ensureProvisioned(authUser);
-    const found = await this.repository.findMembership(workspaceId, authUser.id);
+    // Phase 15C — membership FIRST. A caller who is a member of this
+    // workspace is necessarily provisioned, so the provision fast-path read
+    // is pure overhead on the hot path. We only run `ensureProvisioned` on
+    // a miss, preserving the "first authenticated request provisions a
+    // brand-new identity" behaviour before returning the same safe 404.
+    let found = await this.repository.findMembership(workspaceId, authUser.id);
+    if (!found) {
+      await this.ensureProvisioned(authUser);
+      found = await this.repository.findMembership(workspaceId, authUser.id);
+    }
 
     if (!found || found.membership.status !== ACTIVE_STATUS) {
       // Safe no-leak (API Contract §5.2/§12): identical response whether
@@ -94,9 +102,16 @@ export class IdentityService {
       throw new ResourceNotFoundException();
     }
 
-    const [subscription, allowedEntitlements, effectiveGrants] = await Promise.all([
-      this.repository.findSubscriptionByWorkspaceId(workspaceId),
-      this.repository.listAllowedEntitlementsForWorkspace(workspaceId),
+    const [commercial, effectiveGrants] = await Promise.all([
+      // Phase 15C — subscription + entitlements in ONE transaction.
+      this.repository.loadWorkspaceCommercialState(workspaceId),
+      // NOTE: deliberately NOT passing `found.membership` as a resolver
+      // hint here. `found` comes from the IDENTITY repository, which is a
+      // separate membership source from the resolver's TEAM repository
+      // (defense-in-depth: the permission set must never be fabricated from
+      // the identity-side membership alone — see this method's own test).
+      // The resolver does its own independent membership lookup. This is
+      // the one place the /students /groups guard-hint reuse does NOT apply.
       this.permissionResolver.resolveEffectivePermissions(workspaceId, authUser.id),
     ]);
 
@@ -117,8 +132,8 @@ export class IdentityService {
       // (show/hide nav and actions) — every mutation still re-checks
       // authorization server-side on its own, unconditionally.
       permissions: [...new Set(effectiveGrants.map((g) => g.permission))],
-      entitlements: allowedEntitlements.map((e) => e.capability),
-      subscriptionState: subscription?.state ?? null,
+      entitlements: commercial.allowedEntitlements.map((e) => e.capability),
+      subscriptionState: commercial.subscription?.state ?? null,
     };
   }
 
