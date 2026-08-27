@@ -219,4 +219,63 @@ describe("Student Group-Scope Security Delta", () => {
       studentsService.getStudent(owner, ownerContext, foreignStudent.id),
     ).rejects.toBeInstanceOf(ResourceNotFoundException);
   });
+
+  // ---- Phase 15C: /students list reusing the guard-resolved grant ----
+  // The guard resolves the route's required permission and stores the grant
+  // on the WorkspaceContext; listStudents reuses it instead of re-resolving.
+  // These prove the reuse path yields IDENTICAL isolation to the fallback,
+  // and does not re-query membership.
+  describe("11. grant-reuse path (guard-provided grant on WorkspaceContext)", () => {
+    async function grantFor(userId: string, membership: WorkspaceContext["membership"]) {
+      // Exactly what PermissionGuard computes for the route's @RequirePermission.
+      return resolver.hasPermission(WORKSPACE_A, userId, "students.view_basic", membership);
+    }
+
+    it("scoped assistant with reused grant still excludes Group B (== fallback path)", async () => {
+      const studentA = await seedEnrolledStudent("طالب أ", groupMonthA.id);
+      const studentB = await seedEnrolledStudent("طالب ب", groupMonthB.id);
+
+      const grant = await grantFor(assistantA.id, assistantAContext.membership);
+      const ctxWithGrant: WorkspaceContext = { ...assistantAContext, grant };
+
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      const viaGrant = await studentsService.listStudents(assistantA, ctxWithGrant, {});
+      const grantPathMembershipQueries = teamRepo.findMembershipByUserAndWorkspaceCalls;
+      const viaFallback = await studentsService.listStudents(assistantA, assistantAContext, {});
+
+      const idsGrant = viaGrant.items.map((s) => s.id).sort();
+      const idsFallback = viaFallback.items.map((s) => s.id).sort();
+      expect(idsGrant).toEqual(idsFallback); // identical result
+      expect(idsGrant).toContain(studentA.student.id);
+      expect(idsGrant).not.toContain(studentB.student.id); // isolation preserved
+      expect(grantPathMembershipQueries).toBe(0); // reuse avoided the re-query
+    });
+
+    it("owner with reused grant sees all workspace students, still no cross-tenant reach", async () => {
+      const studentA = await seedEnrolledStudent("طالب أ", groupMonthA.id);
+      const studentB = await seedEnrolledStudent("طالب ب", groupMonthB.id);
+      const foreign = repo.seedStudent({ workspaceId: WORKSPACE_B, studentCode: "AP-FOREIGN-2", name: "خارجي" });
+
+      const grant = await grantFor(owner.id, ownerContext.membership);
+      const ctxWithGrant: WorkspaceContext = { ...ownerContext, grant };
+
+      const results = await studentsService.listStudents(owner, ctxWithGrant, {});
+      const ids = results.items.map((s) => s.id);
+      expect(ids).toContain(studentA.student.id);
+      expect(ids).toContain(studentB.student.id);
+      expect(ids).not.toContain(foreign.id); // WORKSPACE_B never leaks
+    });
+
+    it("a mismatched-permission grant on the context is ignored (falls back safely)", async () => {
+      const studentA = await seedEnrolledStudent("طالب أ", groupMonthA.id);
+      // Put an unrelated grant on the context; listStudents must ignore it
+      // (permission !== students.view_basic) and fall back to a real resolve.
+      const bogus = { permission: "finance.overview" as const, scope: "ALL_GROUPS" as const };
+      const ctx: WorkspaceContext = { ...assistantAContext, grant: bogus };
+
+      const results = await studentsService.listStudents(assistantA, ctx, {});
+      // Falls back to the assistant's real scope (Group A only).
+      expect(results.items.map((s) => s.id)).toContain(studentA.student.id);
+    });
+  });
 });

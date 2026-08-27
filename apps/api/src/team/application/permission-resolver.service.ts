@@ -80,9 +80,35 @@ export class PermissionResolverService {
     });
   }
 
-  resolveEffectivePermissions(workspaceId: string, userId: string): Promise<EffectiveGrant[]> {
+  /**
+   * Phase 15C — accepts the membership row `PermissionGuard` already fetched
+   * for this exact (workspaceId, userId), so callers on the request's hot
+   * path can avoid re-querying it. The hint is USED ONLY if it genuinely
+   * matches this workspace+user and is ACTIVE — otherwise it is ignored and
+   * the row is fetched exactly as before. This never widens access: a
+   * mismatched or non-active hint falls through to the real lookup, and the
+   * final data query still runs under RLS. When no hint is passed behaviour
+   * is byte-for-byte identical to before (every existing caller).
+   */
+  private usableMembershipHint(
+    hint: MembershipRow | undefined,
+    workspaceId: string,
+    userId: string,
+  ): MembershipRow | undefined {
+    return hint && hint.workspaceId === workspaceId && hint.userId === userId && hint.status === ACTIVE_STATUS
+      ? hint
+      : undefined;
+  }
+
+  resolveEffectivePermissions(
+    workspaceId: string,
+    userId: string,
+    knownActiveMembership?: MembershipRow,
+  ): Promise<EffectiveGrant[]> {
     return this.memoized(this.grantsMemo, `${workspaceId}:${userId}`, async () => {
-      const membership = await this.findActiveMembership(workspaceId, userId);
+      const membership =
+        this.usableMembershipHint(knownActiveMembership, workspaceId, userId) ??
+        (await this.findActiveMembership(workspaceId, userId));
       if (!membership) {
         return [];
       }
@@ -139,8 +165,9 @@ export class PermissionResolverService {
     workspaceId: string,
     userId: string,
     permission: PermissionKey,
+    knownActiveMembership?: MembershipRow,
   ): Promise<EffectiveGrant | undefined> {
-    const effective = await this.resolveEffectivePermissions(workspaceId, userId);
+    const effective = await this.resolveEffectivePermissions(workspaceId, userId, knownActiveMembership);
     return effective.find((g) => g.permission === permission);
   }
 

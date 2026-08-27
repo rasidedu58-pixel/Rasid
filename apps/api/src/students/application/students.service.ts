@@ -28,7 +28,7 @@ import {
 } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
-import { PermissionResolverService } from "../../team/application/permission-resolver.service";
+import { PermissionResolverService, type EffectiveGrant } from "../../team/application/permission-resolver.service";
 import { STUDENTS_REPOSITORY, type StudentsRepositoryPort } from "./ports/students-repository.port";
 
 const DEFAULT_LIST_LIMIT = 50;
@@ -92,11 +92,16 @@ export class StudentsService {
       }
     }
 
-    const restrictToGroupIds = await this.resolveGroupScopeFilter(
-      workspaceContext.workspaceId,
-      authUser.id,
-      "students.view_basic",
-    );
+    // Phase 15C latency fix — reuse the grant `PermissionGuard` already
+    // resolved for this route's required permission (students.view_basic)
+    // instead of re-resolving it, which re-queried membership + grants.
+    // The stored grant is exactly what `resolveGroupScopeFilter` computes;
+    // if for any reason it is absent (e.g. a caller path without the guard),
+    // fall back to the original resolve so behaviour is never weakened.
+    const restrictToGroupIds =
+      workspaceContext.grant && workspaceContext.grant.permission === "students.view_basic"
+        ? this.scopeFilterFromGrant(workspaceContext.grant)
+        : await this.resolveGroupScopeFilter(workspaceContext.workspaceId, authUser.id, "students.view_basic");
 
     const rows = await this.repository.searchStudents({
       workspaceId: workspaceContext.workspaceId,
@@ -639,7 +644,19 @@ export class StudentsService {
     permission: ScopedPermission,
   ): Promise<string[] | undefined> {
     const grant = await this.permissionResolver.hasPermission(workspaceId, authUserId, permission);
-    if (!grant) return []; // defensive — PermissionGuard already required this permission workspace-wide
+    return this.scopeFilterFromGrant(grant);
+  }
+
+  /**
+   * Phase 15C — the pure grant → group-scope-filter mapping, factored out so
+   * a pre-resolved grant (from `PermissionGuard`, stored on the request
+   * context) can be reused without another permission resolution. Identical
+   * semantics to the tail of `resolveGroupScopeFilter`: `undefined` =
+   * unrestricted (ALL_GROUPS/Owner), `[]` = no grant (deny — belt-and-braces,
+   * the guard already required the permission), otherwise the granted groups.
+   */
+  private scopeFilterFromGrant(grant: EffectiveGrant | undefined): string[] | undefined {
+    if (!grant) return [];
     if (grant.scope === "ALL_GROUPS") return undefined;
     return grant.groupIds ?? [];
   }

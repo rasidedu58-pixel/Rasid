@@ -127,4 +127,57 @@ describe("PermissionResolverService", () => {
     expect(inScope).toBe(true);
     expect(outOfScope).toBe(false);
   });
+
+  // ---- Phase 15C: membership hint (guard reuse) — must never widen access ----
+  describe("membership hint (Phase 15C hot-path reuse)", () => {
+    it("uses a valid ACTIVE hint and does NOT re-query the membership", async () => {
+      const owner = repository.seedMembership({ id: "m-owner", workspaceId: WORKSPACE_ID, userId: "u-owner", roleLabel: "OWNER" });
+      repository.findMembershipByUserAndWorkspaceCalls = 0;
+
+      const effective = await resolver.resolveEffectivePermissions(WORKSPACE_ID, "u-owner", owner);
+
+      expect(effective).toHaveLength(PERMISSION_KEYS.length);
+      expect(repository.findMembershipByUserAndWorkspaceCalls).toBe(0); // reused, not re-queried
+    });
+
+    it("hint produces byte-for-byte the same result as no hint (non-owner grants)", async () => {
+      const m = repository.seedMembership({ workspaceId: WORKSPACE_ID, userId: "u-assistant", roleLabel: "ASSISTANT" });
+      await repository.replaceMembershipGrants({
+        workspaceId: WORKSPACE_ID, membershipId: m.id, createdByUserId: "u-owner",
+        desiredGrants: [{ permissionKey: "students.view_basic", scopeType: "SELECTED_GROUPS", groupIds: ["group-a"] }],
+      });
+
+      const withHint = await resolver.resolveEffectivePermissions(WORKSPACE_ID, "u-assistant", m);
+      const withoutHint = await resolver.resolveEffectivePermissions(WORKSPACE_ID, "u-assistant");
+
+      expect(withHint).toEqual(withoutHint);
+    });
+
+    it("IGNORES a hint whose workspace does not match — falls back to the real lookup", async () => {
+      // Real membership: assistant with NO grants in WORKSPACE_ID.
+      repository.seedMembership({ workspaceId: WORKSPACE_ID, userId: "u-assistant", roleLabel: "ASSISTANT" });
+      // Forged hint: an OWNER row from a DIFFERENT workspace.
+      const foreignOwner = repository.seedMembership({ workspaceId: "other-ws", userId: "u-assistant", roleLabel: "OWNER" });
+      repository.findMembershipByUserAndWorkspaceCalls = 0;
+
+      const effective = await resolver.resolveEffectivePermissions(WORKSPACE_ID, "u-assistant", foreignOwner);
+
+      // Must NOT inherit the foreign OWNER's full access; must reflect the
+      // real (grant-less) membership, and must have re-queried.
+      expect(effective).toEqual([]);
+      expect(repository.findMembershipByUserAndWorkspaceCalls).toBe(1);
+    });
+
+    it("IGNORES a DISABLED hint — falls back to the real lookup", async () => {
+      const owner = repository.seedMembership({ workspaceId: WORKSPACE_ID, userId: "u-owner", roleLabel: "OWNER" });
+      const disabledHint = { ...owner, status: "DISABLED" as const };
+      repository.findMembershipByUserAndWorkspaceCalls = 0;
+
+      const effective = await resolver.resolveEffectivePermissions(WORKSPACE_ID, "u-owner", disabledHint);
+
+      // The real row is ACTIVE OWNER → full access; the DISABLED hint is ignored.
+      expect(effective).toHaveLength(PERMISSION_KEYS.length);
+      expect(repository.findMembershipByUserAndWorkspaceCalls).toBe(1);
+    });
+  });
 });

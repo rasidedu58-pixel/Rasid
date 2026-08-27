@@ -21,6 +21,8 @@ export class InMemoryTeamRepository implements TeamRepositoryPort {
   readonly grantsById = new Map<string, PermissionGrantRow>();
   readonly groupIdsByGrantId = new Map<string, string[]>();
   readonly auditEvents: AuditEventRow[] = [];
+  /** Phase 15C — lets tests assert the membership lookup was (not) re-queried. */
+  findMembershipByUserAndWorkspaceCalls = 0;
 
   private now(): Date {
     return new Date();
@@ -54,6 +56,7 @@ export class InMemoryTeamRepository implements TeamRepositoryPort {
   }
 
   async findMembershipByUserAndWorkspace(userId: string, workspaceId: string): Promise<MembershipRow | undefined> {
+    this.findMembershipByUserAndWorkspaceCalls += 1;
     for (const m of this.membershipsById.values()) {
       if (m.userId === userId && m.workspaceId === workspaceId) return m;
     }

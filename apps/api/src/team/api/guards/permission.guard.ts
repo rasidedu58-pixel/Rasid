@@ -12,15 +12,24 @@ import {
   type AuthenticatedRequest,
 } from "../../../identity/api/guards/supabase-auth.guard";
 import { TEAM_REPOSITORY, type TeamRepositoryPort } from "../../application/ports/team-repository.port";
-import { PermissionResolverService } from "../../application/permission-resolver.service";
+import { PermissionResolverService, type EffectiveGrant } from "../../application/permission-resolver.service";
 import { REQUIRED_PERMISSION_METADATA_KEY } from "../decorators/require-permission.decorator";
 
-export const WORKSPACE_CONTEXT_REQUEST_KEY = "workspaceContext";
 export const WORKSPACE_ID_HEADER = "x-workspace-id";
+export const WORKSPACE_CONTEXT_REQUEST_KEY = "workspaceContext";
 
 export interface WorkspaceContext {
   workspaceId: string;
   membership: MembershipRow;
+  /**
+   * Phase 15C — the effective grant the guard already resolved for THIS
+   * route's `@RequirePermission(...)` key (undefined for routes without
+   * one). Hot read paths reuse it to derive their group-scope filter
+   * instead of re-resolving permissions (which re-queried membership +
+   * grants). It is exactly what `PermissionResolverService.hasPermission`
+   * would return for that permission, so behaviour is unchanged.
+   */
+  grant?: EffectiveGrant;
 }
 
 export interface WorkspaceScopedRequest extends AuthenticatedRequest {
@@ -76,8 +85,12 @@ export class PermissionGuard implements CanActivate {
       throw new ResourceNotFoundException();
     }
 
+    let grant: EffectiveGrant | undefined;
     if (required) {
-      const grant = await this.resolver.hasPermission(workspaceId, authUser.id, required);
+      // Phase 15C — hand the membership we just fetched to the resolver so
+      // it does not re-query the same row. The resolved grant is stashed on
+      // the request context for hot read paths to reuse (see WorkspaceContext).
+      grant = await this.resolver.hasPermission(workspaceId, authUser.id, required, membership);
       if (!grant) {
         throw new ForbiddenApiException();
       }
@@ -87,7 +100,7 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenApiException();
     }
 
-    request[WORKSPACE_CONTEXT_REQUEST_KEY] = { workspaceId, membership };
+    request[WORKSPACE_CONTEXT_REQUEST_KEY] = { workspaceId, membership, grant };
     return true;
   }
 }
