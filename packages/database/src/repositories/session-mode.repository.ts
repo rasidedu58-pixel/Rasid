@@ -199,16 +199,13 @@ export async function applyAttendanceBatchTransaction(
       enrollmentIds: input.records.map((r) => r.enrollmentId),
     },
     async (tx, session) => {
-      for (const record of input.records) {
-        await upsertSessionRecordPatch(tx, {
-          workspaceId: input.workspaceId,
-          groupMonthId: input.groupMonthId,
-          sessionId: input.sessionId,
-          enrollmentId: record.enrollmentId,
-          actorUserId: input.actorUserId,
-          patch: { attendanceStatus: record.status },
-        });
-      }
+      await bulkUpsertSessionRecordPatches(tx, {
+        workspaceId: input.workspaceId,
+        groupMonthId: input.groupMonthId,
+        sessionId: input.sessionId,
+        actorUserId: input.actorUserId,
+        records: input.records.map((record) => ({ enrollmentId: record.enrollmentId, patch: { attendanceStatus: record.status } })),
+      });
       return { session };
     },
   );
@@ -243,19 +240,16 @@ export async function applyHomeworkBatchTransaction(
       enrollmentIds: input.records.map((r) => r.enrollmentId),
     },
     async (tx, session) => {
-      for (const record of input.records) {
-        await upsertSessionRecordPatch(tx, {
-          workspaceId: input.workspaceId,
-          groupMonthId: input.groupMonthId,
-          sessionId: input.sessionId,
-          enrollmentId: record.enrollmentId,
-          actorUserId: input.actorUserId,
-          // Absence never suppresses homework — this writes ONLY the
-          // homework column, leaving any already-recorded
-          // attendance_status (however it was set) completely untouched.
-          patch: { homeworkStatus: record.status },
-        });
-      }
+      // Absence never suppresses homework — this writes ONLY the homework
+      // column, leaving any already-recorded attendance_status (however it
+      // was set) completely untouched.
+      await bulkUpsertSessionRecordPatches(tx, {
+        workspaceId: input.workspaceId,
+        groupMonthId: input.groupMonthId,
+        sessionId: input.sessionId,
+        actorUserId: input.actorUserId,
+        records: input.records.map((record) => ({ enrollmentId: record.enrollmentId, patch: { homeworkStatus: record.status } })),
+      });
       return { session };
     },
   );
@@ -315,24 +309,31 @@ export async function applyExamScoresBatchTransaction(
         if (!exam) throw new ExamNotDefinedMarker();
 
         const maxScore = Number(exam.maxScore);
+        // Validate every record first (pure JS — no DB), then write the whole
+        // batch in one upsert. Validation still throws on the FIRST offending
+        // record, exactly as before, so a bad batch writes nothing.
+        const records: Array<{ enrollmentId: string; patch: SessionRecordPatch }> = [];
         for (const record of input.records) {
           if (record.status === "SCORED") {
             if (record.score === undefined || record.score < 0 || record.score > maxScore) {
               throw new ExamScoreOutOfRangeMarker(record.enrollmentId);
             }
           }
-          await upsertSessionRecordPatch(tx, {
-            workspaceId: input.workspaceId,
-            groupMonthId: input.groupMonthId,
-            sessionId: input.sessionId,
+          records.push({
             enrollmentId: record.enrollmentId,
-            actorUserId: input.actorUserId,
             patch:
               record.status === "SCORED"
                 ? { examStatus: "SCORED", examScore: record.score!.toString() }
                 : { examStatus: "ABSENT_FROM_EXAM", examScore: null },
           });
         }
+        await bulkUpsertSessionRecordPatches(tx, {
+          workspaceId: input.workspaceId,
+          groupMonthId: input.groupMonthId,
+          sessionId: input.sessionId,
+          actorUserId: input.actorUserId,
+          records,
+        });
         return { session };
       },
     );
@@ -362,30 +363,79 @@ interface UpsertSessionRecordPatchInput {
   }>;
 }
 
-async function upsertSessionRecordPatch(tx: Db, input: UpsertSessionRecordPatchInput): Promise<void> {
+type SessionRecordPatch = UpsertSessionRecordPatchInput["patch"];
+
+/**
+ * Phase 15D.1 — bulk counterpart of the former per-row `upsertSessionRecordPatch`.
+ *
+ * Attendance/homework/exam batches used to call the single-row upsert once
+ * PER record — N sequential DB round-trips inside one transaction, each
+ * ~75-150ms on the eu-west pooler, so a 30-student class held its connection
+ * for ~2-4s. This issues ONE multi-row `INSERT ... ON CONFLICT DO UPDATE`.
+ *
+ * Semantics are preserved EXACTLY:
+ * - Partial-field independence: the conflict `SET` updates ONLY the columns
+ *   present in this batch's patch shape (via `excluded.<col>`), so a homework
+ *   batch never touches attendance_status/exam_*, and vice versa — identical
+ *   to the old `set: { ...patch }`. Insert defaults for absent columns
+ *   (`homework_status = NULL`, `exam_status = 'NO_EXAM'`, `exam_score = NULL`)
+ *   match the old row-at-a-time inserts, so first-time rows are byte-identical.
+ * - `version = version + 1`, `updated_by`, `updated_at` bumped on conflict.
+ * - Duplicate enrollmentIds in one payload are collapsed keeping the LAST
+ *   occurrence — the same final stored state the old sequential "last write
+ *   wins" loop produced (and it avoids Postgres's "cannot affect row a second
+ *   time" error a naive multi-row upsert would hit). All patches in a single
+ *   batch share the same key shape, so the derived SET is uniform.
+ */
+async function bulkUpsertSessionRecordPatches(
+  tx: Db,
+  input: {
+    workspaceId: string;
+    groupMonthId: string;
+    sessionId: string;
+    actorUserId: string;
+    records: Array<{ enrollmentId: string; patch: SessionRecordPatch }>;
+  },
+): Promise<void> {
+  if (input.records.length === 0) return;
+
+  // Last-write-wins dedupe by enrollmentId (preserves input order for the rest).
+  const byEnrollment = new Map<string, SessionRecordPatch>();
+  for (const r of input.records) byEnrollment.set(r.enrollmentId, r.patch);
+
+  const values = [...byEnrollment.entries()].map(([enrollmentId, patch]) => ({
+    workspaceId: input.workspaceId,
+    groupMonthId: input.groupMonthId,
+    sessionId: input.sessionId,
+    enrollmentId,
+    attendanceStatus: patch.attendanceStatus ?? null,
+    homeworkStatus: patch.homeworkStatus ?? null,
+    examStatus: patch.examStatus ?? "NO_EXAM",
+    examScore: patch.examScore ?? null,
+    createdBy: input.actorUserId,
+    updatedBy: input.actorUserId,
+  }));
+
+  // Update ONLY the columns this batch actually patches (uniform across the
+  // batch), mirroring the old `set: { ...patch }` exactly.
+  const patchKeys = new Set<keyof SessionRecordPatch>();
+  for (const patch of byEnrollment.values()) {
+    for (const key of Object.keys(patch) as Array<keyof SessionRecordPatch>) patchKeys.add(key);
+  }
+  const set: Record<string, unknown> = {
+    updatedBy: input.actorUserId,
+    updatedAt: new Date(),
+    version: rawSql`${sessionRecords.version} + 1`,
+  };
+  if (patchKeys.has("attendanceStatus")) set.attendanceStatus = rawSql`excluded.attendance_status`;
+  if (patchKeys.has("homeworkStatus")) set.homeworkStatus = rawSql`excluded.homework_status`;
+  if (patchKeys.has("examStatus")) set.examStatus = rawSql`excluded.exam_status`;
+  if (patchKeys.has("examScore")) set.examScore = rawSql`excluded.exam_score`;
+
   await tx
     .insert(sessionRecords)
-    .values({
-      workspaceId: input.workspaceId,
-      groupMonthId: input.groupMonthId,
-      sessionId: input.sessionId,
-      enrollmentId: input.enrollmentId,
-      attendanceStatus: input.patch.attendanceStatus ?? null,
-      homeworkStatus: input.patch.homeworkStatus ?? null,
-      examStatus: input.patch.examStatus ?? "NO_EXAM",
-      examScore: input.patch.examScore ?? null,
-      createdBy: input.actorUserId,
-      updatedBy: input.actorUserId,
-    })
-    .onConflictDoUpdate({
-      target: [sessionRecords.sessionId, sessionRecords.enrollmentId],
-      set: {
-        ...input.patch,
-        updatedBy: input.actorUserId,
-        updatedAt: new Date(),
-        version: rawSql`${sessionRecords.version} + 1`,
-      },
-    });
+    .values(values)
+    .onConflictDoUpdate({ target: [sessionRecords.sessionId, sessionRecords.enrollmentId], set });
 }
 
 // ---------------------------------------------------------------------------

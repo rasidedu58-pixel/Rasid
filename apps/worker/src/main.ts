@@ -1,4 +1,4 @@
-import { createLogger, runWithContext } from "@academic-precision/observability";
+import { createLogger, runWithContext, initErrorTracking, flushErrorTracking } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
 import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
@@ -151,6 +151,10 @@ function bootstrap(): void {
     logger.info({ bootId }, "Academic Precision worker starting (Phase 7 — outbox dispatcher).");
   });
 
+  // Phase 15D.1 — error tracking (no-op unless SENTRY_DSN is set). Fire-and-
+  // forget: never block worker startup on the tracker's async init.
+  void initErrorTracking("academic-precision-worker");
+
   // Resolved SYNCHRONOUSLY, before any connection opens or the polling loop
   // starts — `getWorkerDb()` throws immediately (via `getWorkerDatabaseUrl()`)
   // if `WORKER_DATABASE_URL` is unset. Deliberately NOT called from inside
@@ -182,6 +186,7 @@ function bootstrap(): void {
     // claim+process transaction before closing the connection — never cut
     // a transaction off mid-flight.
     await loopPromise;
+    await flushErrorTracking();
     await closeDb();
   });
 }

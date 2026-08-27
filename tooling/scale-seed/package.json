@@ -1,0 +1,19 @@
+{
+  "name": "scale-seed",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "STAGING-ONLY deterministic scale-data seeder + cleanup tool for the Rasid staging Postgres. Not a pnpm workspace package by design; resolves the 'postgres' driver from packages/database.",
+  "bin": {
+    "scale-seed": "./scale-seed.mjs"
+  },
+  "scripts": {
+    "seed:dense-3000": "node scale-seed.mjs --profile dense-3000",
+    "seed:workspaces-100": "node scale-seed.mjs --profile workspaces-100",
+    "seed:workspaces-500": "node scale-seed.mjs --profile workspaces-500",
+    "seed:workspaces-1000": "node scale-seed.mjs --profile workspaces-1000",
+    "seed:probe": "node scale-seed.mjs --profile probe",
+    "verify": "node scale-seed.mjs --verify",
+    "cleanup": "node scale-seed.mjs --cleanup"
+  }
+}

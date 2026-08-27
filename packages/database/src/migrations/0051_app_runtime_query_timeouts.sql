@@ -1,0 +1,31 @@
+-- 0051 — Phase 15D.1: bound how long a single app_runtime statement and an
+-- idle-in-transaction app_runtime session may hold one of the scarce backend
+-- connections (role CONNECTION LIMIT = 28, see 0050).
+--
+-- Rationale / evidence:
+--   * Before this migration app_runtime inherited the cluster default
+--     statement_timeout = 120s and idle_in_transaction_session_timeout = 0
+--     (disabled). A single runaway query or a transaction left open by a
+--     crashed/stuck request could pin a connection for up to two minutes (or
+--     indefinitely, when idle mid-transaction), starving the whole 28-slot
+--     budget the user-facing API shares.
+--   * Measured p99 for every read endpoint is < 1s; the heaviest write (a
+--     50-student attendance batch, now a single multi-row upsert — Phase
+--     15D.1) is ~0.6s. 30s is therefore ~30x the observed worst case — ample
+--     headroom for report/export aggregations while still being 4x tighter
+--     than the old 120s default.
+--   * idle_in_transaction_session_timeout = 30s never interrupts an actively
+--     running query — it only reclaims a connection whose transaction is
+--     sitting idle (an abandoned/stuck request), which is exactly the leak
+--     that endangers the connection budget.
+--
+-- Scope: app_runtime ONLY. app_worker is left on the cluster default — its
+-- rule-engine work over a student's full session history can legitimately run
+-- longer, and it is a single sequential loop that never competes for the API's
+-- connection budget. app_platform_admin (read-only backoffice) is also left
+-- as-is. Settings apply on each role's NEXT connection (ALTER ROLE ... SET),
+-- so a rolling restart / redeploy picks them up cleanly.
+
+ALTER ROLE "app_runtime" SET statement_timeout = '30s';
+--> statement-breakpoint
+ALTER ROLE "app_runtime" SET idle_in_transaction_session_timeout = '30s';

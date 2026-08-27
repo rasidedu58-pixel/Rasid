@@ -12,6 +12,13 @@
  */
 export interface GroupOwnershipPort {
   isGroupInWorkspace(groupId: string, workspaceId: string): Promise<boolean>;
+  /**
+   * Phase 15D.1 — batched membership check: returns the subset of `groupIds`
+   * that belong to `workspaceId`, in ONE query (replaces calling
+   * `isGroupInWorkspace` once per group id — a per-item N+1 on grant replace).
+   * A requested id absent from the result is out-of-workspace.
+   */
+  findGroupIdsInWorkspace(groupIds: string[], workspaceId: string): Promise<Set<string>>;
 }
 
 export const GROUP_OWNERSHIP_PORT = Symbol("GROUP_OWNERSHIP_PORT");

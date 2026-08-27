@@ -60,6 +60,21 @@ export class PermissionScopeInvalidException extends ApiException {
   }
 }
 
+/**
+ * 409 — Phase 15D.1: refuses an operation that would leave the workspace
+ * without its single owner. The approved data model defines exactly one
+ * owner per workspace (`workspaces.owner_user_id NOT NULL`, "Owner واحد في
+ * Teacher V1"), and `team.manage` is owner-only — so disabling the owner's
+ * own membership would strand `owner_user_id` on a disabled row and lock the
+ * workspace out of all team management (an owner-lockout). There is no
+ * ownership-transfer command in V1, so disabling the owner is never valid.
+ */
+export class OwnerMembershipProtectedException extends ApiException {
+  constructor(message = "لا يمكن تعطيل عضوية مالك مساحة العمل.", details?: Record<string, unknown>) {
+    super(409, "OWNER_MEMBERSHIP_PROTECTED", message, details);
+  }
+}
+
 /** 409 — Database Schema INT-01: a (workspace, year, month) OperatingMonth already exists. */
 export class MonthAlreadyExistsException extends ApiException {
   constructor(message = "يوجد شهر تشغيلي بنفس السنة والشهر بالفعل.", details?: Record<string, unknown>) {

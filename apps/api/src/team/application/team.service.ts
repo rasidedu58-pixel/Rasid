@@ -11,6 +11,7 @@ import {
 import type { DesiredGrantInput, GrantWithScopes } from "@academic-precision/database";
 import type { ZodError } from "zod";
 import {
+  OwnerMembershipProtectedException,
   PermissionScopeInvalidException,
   ResourceNotFoundException,
   ValidationApiException,
@@ -74,17 +75,27 @@ export class TeamService {
       throw new ValidationApiException(this.toFieldErrors(parsed.error));
     }
 
+    // Phase 15D.1 — validate all SELECTED_GROUPS group ids in ONE query
+    // instead of one RLS transaction PER group id (a per-item N+1). The
+    // per-grant loop below is otherwise UNCHANGED — same coherence check,
+    // same order, same PermissionScopeInvalidException (with the offending
+    // groupId) for any id not in this workspace; it just tests membership
+    // against this prefetched set rather than re-querying each id.
+    const requestedGroupIds = [
+      ...new Set(parsed.data.grants.flatMap((g) => (g.scope === "SELECTED_GROUPS" ? (g.groupIds ?? []) : []))),
+    ];
+    const validGroupIds = await this.groupOwnership.findGroupIdsInWorkspace(
+      requestedGroupIds,
+      workspaceContext.workspaceId,
+    );
+
     const desiredGrants: DesiredGrantInput[] = [];
     for (const grant of parsed.data.grants) {
       this.assertCoherentGrant(grant.permission, grant.scope, target.roleLabel);
 
       if (grant.scope === "SELECTED_GROUPS") {
         for (const groupId of grant.groupIds ?? []) {
-          const inWorkspace = await this.groupOwnership.isGroupInWorkspace(
-            groupId,
-            workspaceContext.workspaceId,
-          );
-          if (!inWorkspace) {
+          if (!validGroupIds.has(groupId)) {
             throw new PermissionScopeInvalidException(
               "أحد المجموعات المحددة لا ينتمي إلى نفس مساحة العمل.",
               { groupId },
@@ -136,6 +147,18 @@ export class TeamService {
     correlationId: string | null,
   ): Promise<DisableMembershipResponse> {
     const target = await this.loadTargetMembership(workspaceContext, membershipId);
+
+    // Phase 15D.1 — enforce the approved single-owner invariant
+    // (`workspaces.owner_user_id NOT NULL`, one OWNER membership per
+    // workspace, owner-only `team.manage`): the owner's own membership can
+    // never be disabled (this also covers an owner attempting to self-disable
+    // — the only membership an owner could target that is OWNER-role is their
+    // own). Assistants remain fully disable-able. V1 has no ownership-transfer
+    // command, so this is the only lockout-safe behaviour.
+    if (target.roleLabel === OWNER_ROLE_LABEL) {
+      throw new OwnerMembershipProtectedException();
+    }
+
     const before = { status: target.status };
 
     const updated = await this.repository.disableMembership(target.id);

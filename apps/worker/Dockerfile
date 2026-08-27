@@ -37,4 +37,9 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/worker/node_modules ./apps/worker/node_modules
 
+# Phase 15D.1 — drop from root to the image's built-in unprivileged `node`
+# user. Copied files are world-readable and the worker needs no write access
+# to the filesystem (it only talks to Postgres and logs to stdout).
+USER node
+
 CMD ["node", "apps/worker/dist/main.js"]

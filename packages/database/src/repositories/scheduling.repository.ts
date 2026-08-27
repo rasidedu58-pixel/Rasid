@@ -73,6 +73,26 @@ export function findGroupById(db: Db, groupId: string): Promise<GroupRow | undef
   return db.select().from(groups).where(eq(groups.id, groupId)).limit(1).then((rows) => rows[0]);
 }
 
+/**
+ * Phase 15D.1 — batched counterpart of {@link findGroupById} for the "do all
+ * these group ids belong to this workspace?" check. Team grant-replace used
+ * to call `findGroupById` once PER group id in the payload (one RLS
+ * transaction each — a genuine per-item N+1); this returns, in ONE query, the
+ * subset of `groupIds` that actually exist in `workspaceId`. The caller
+ * treats any requested id NOT in the returned set as out-of-workspace (the
+ * same rejection as before). Empty input ⇒ no query. Note: this is a direct
+ * SQL `IN (...)` via postgres.js (NOT PostgREST), so it is not subject to the
+ * REST `.in()` URL-length limit — a team's group count is small regardless.
+ */
+export async function findGroupIdsInWorkspace(db: Db, groupIds: string[], workspaceId: string): Promise<string[]> {
+  if (groupIds.length === 0) return [];
+  const rows = await db
+    .select({ id: groups.id })
+    .from(groups)
+    .where(and(eq(groups.workspaceId, workspaceId), inArray(groups.id, groupIds)));
+  return rows.map((r) => r.id);
+}
+
 export function listGroupsForWorkspace(db: Db, workspaceId: string): Promise<GroupRow[]> {
   // Phase 15: deterministic ordering — without it the groups screen
   // reshuffled between reloads (heap order is not stable).

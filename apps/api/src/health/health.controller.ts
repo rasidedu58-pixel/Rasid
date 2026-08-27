@@ -16,7 +16,7 @@ export class HealthController {
   }
 
   @Get("ready")
-  getReadiness(): HealthStatus {
+  getReadiness(): Promise<HealthStatus> {
     return this.healthService.getReadiness();
   }
 }

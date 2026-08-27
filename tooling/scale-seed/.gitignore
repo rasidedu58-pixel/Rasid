@@ -1,0 +1,5 @@
+# Never commit real connection strings or per-run manifests.
+.env
+.env.local
+manifests/
+!manifests/.gitkeep

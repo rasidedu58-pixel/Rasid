@@ -37,5 +37,10 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/api/node_modules ./apps/api/node_modules
 
+# Phase 15D.1 — drop from root to the image's built-in unprivileged `node`
+# user. Copied files are world-readable and the API needs no filesystem write
+# access; it listens on 3000 (>1024, no privileged bind).
+USER node
+
 EXPOSE 3000
 CMD ["node", "apps/api/dist/main.js"]

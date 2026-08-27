@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { findGroupById, withRuntimeContext } from "@academic-precision/database";
+import { findGroupById, findGroupIdsInWorkspace, withRuntimeContext } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
 import type { GroupOwnershipPort } from "../application/ports/group-ownership.port";
 
@@ -25,5 +25,15 @@ export class DrizzleGroupOwnershipAdapter implements GroupOwnershipPort {
       findGroupById(db, groupId),
     );
     return !!group && group.workspaceId === workspaceId;
+  }
+
+  /** Phase 15D.1 — one query for the whole set (replaces per-id isGroupInWorkspace). */
+  async findGroupIdsInWorkspace(groupIds: string[], workspaceId: string): Promise<Set<string>> {
+    if (groupIds.length === 0) return new Set();
+    const ctx = getContext();
+    const found = await withRuntimeContext({ userId: ctx?.userId, workspaceId }, (db) =>
+      findGroupIdsInWorkspace(db, groupIds, workspaceId),
+    );
+    return new Set(found);
   }
 }

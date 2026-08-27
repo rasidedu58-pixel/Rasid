@@ -4,6 +4,7 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { loadServerEnv } from "@academic-precision/config";
 import { closeDb } from "@academic-precision/database";
+import { initErrorTracking, flushErrorTracking } from "@academic-precision/observability";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { RequestContextInterceptor } from "./common/interceptors/request-context.interceptor";
@@ -36,6 +37,10 @@ function resolveAllowedOrigins(): string[] {
 const API_PREFIX = "api/v1";
 
 async function bootstrap() {
+  // Phase 15D.1 — initialize error tracking as early as possible so a crash
+  // during startup is still captured. No-op unless SENTRY_DSN is configured.
+  await initErrorTracking("academic-precision-api");
+
   // `trustProxy: true` — Phase 10: the app is deployed behind a reverse
   // proxy/load balancer in every real environment (Render, or any future
   // container host per ADR-012's portability requirement); without this,
@@ -133,6 +138,7 @@ async function bootstrap() {
     hardExit.unref?.();
     try {
       await app.close();
+      await flushErrorTracking();
       await closeDb();
       // eslint-disable-next-line no-console
       console.log("Shutdown complete.");

@@ -66,6 +66,27 @@ export function getDb(): PostgresJsDatabase<typeof schema> {
   return db;
 }
 
+/**
+ * Phase 15D.1 — lightweight readiness probe for `GET /ready`. Runs a bare
+ * `SELECT 1` on the runtime (`app_runtime`) pool with a bounded timeout so a
+ * hung/unreachable database fails the probe fast instead of hanging it. No
+ * tenant context, no business query, no secrets — just "can this process
+ * reach Postgres right now?". Throws on failure or timeout; the caller maps
+ * that to a 503.
+ */
+export async function pingDatabase(timeoutMs = 2_000): Promise<void> {
+  const ping = getDb().execute(sql`select 1`);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("database readiness ping timed out")), timeoutMs);
+  });
+  try {
+    await Promise.race([ping, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function closeDb(): Promise<void> {
   if (client) {
     await client.end({ timeout: 5 });

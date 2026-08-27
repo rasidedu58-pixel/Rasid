@@ -1,4 +1,4 @@
-import { PermissionScopeInvalidException, ResourceNotFoundException } from "../../common/exceptions/api.exception";
+import { OwnerMembershipProtectedException, PermissionScopeInvalidException, ResourceNotFoundException } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../api/guards/permission.guard";
 import { FakeGroupOwnershipPort } from "./__fixtures__/fake-group-ownership.port";
@@ -205,6 +205,25 @@ describe("TeamService", () => {
       await expect(
         service.disableMembership(owner, ownerContext, foreignMembership.id, null),
       ).rejects.toBeInstanceOf(ResourceNotFoundException);
+    });
+
+    // Phase 15D.1 — single-owner invariant (workspaces.owner_user_id NOT NULL,
+    // owner-only team.manage): the owner membership can never be disabled,
+    // which also blocks an owner self-disabling into an owner-lockout.
+    it("refuses to disable the workspace OWNER membership (single-owner invariant) — 409, no state change, no audit", async () => {
+      const auditsBefore = repository.auditEvents.length;
+      await expect(
+        service.disableMembership(owner, ownerContext, ownerMembership.id, "corr-owner"),
+      ).rejects.toBeInstanceOf(OwnerMembershipProtectedException);
+      // Owner membership stays ACTIVE and nothing was written.
+      expect(repository.membershipsById.get(ownerMembership.id)!.status).toBe("ACTIVE");
+      expect(repository.auditEvents).toHaveLength(auditsBefore);
+    });
+
+    it("an owner cannot self-disable (their own membership is OWNER-role) — 409", async () => {
+      await expect(
+        service.disableMembership(owner, ownerContext, ownerContext.membership.id, null),
+      ).rejects.toBeInstanceOf(OwnerMembershipProtectedException);
     });
   });
 });

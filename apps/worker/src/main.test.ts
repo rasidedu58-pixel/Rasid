@@ -30,6 +30,8 @@ describe("worker bootstrap — fail-fast on missing app_worker connection", () =
     vi.doMock("@academic-precision/observability", () => ({
       createLogger: () => ({ info: vi.fn(), debug: vi.fn(), error: vi.fn() }),
       runWithContext: (_ctx: unknown, fn: () => unknown) => fn(),
+      initErrorTracking: vi.fn(),
+      flushErrorTracking: vi.fn(),
     }));
 
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {

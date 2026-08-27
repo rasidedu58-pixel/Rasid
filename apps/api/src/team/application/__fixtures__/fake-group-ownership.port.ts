@@ -18,4 +18,9 @@ export class FakeGroupOwnershipPort implements GroupOwnershipPort {
   async isGroupInWorkspace(groupId: string, workspaceId: string): Promise<boolean> {
     return this.allowed.has(`${groupId}:${workspaceId}`);
   }
+
+  /** Batched counterpart — mirrors the real adapter: the subset of `groupIds` allowed for `workspaceId`. */
+  async findGroupIdsInWorkspace(groupIds: string[], workspaceId: string): Promise<Set<string>> {
+    return new Set(groupIds.filter((id) => this.allowed.has(`${id}:${workspaceId}`)));
+  }
 }

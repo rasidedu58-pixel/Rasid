@@ -1,0 +1,5 @@
+# Never commit secrets or generated results.
+.env
+results/
+# ...but keep the results directory itself present.
+!results/.gitkeep
