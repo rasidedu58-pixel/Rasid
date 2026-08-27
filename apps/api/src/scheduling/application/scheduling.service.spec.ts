@@ -390,6 +390,71 @@ describe("SchedulingService", () => {
     });
   });
 
+  // ---- Phase 15C: /groups list reusing the guard-resolved grant ----
+  // The guard resolves the route's required permission (groups.view) and
+  // stores the grant on WorkspaceContext; listGroups reuses it instead of
+  // re-resolving. These prove the reuse path yields IDENTICAL visibility to
+  // the fallback and does not re-query membership.
+  describe("listGroups grant-reuse (Phase 15C)", () => {
+    async function grantFor(userId: string, membership: WorkspaceContext["membership"]) {
+      return resolver.hasPermission(WORKSPACE_A, userId, "groups.view", membership);
+    }
+
+    it("owner with reused grant sees all groups, no cross-tenant leak, 0 re-query", async () => {
+      const gA = seedActiveGroup();
+      const gB = seedActiveGroup();
+      const foreign = seedActiveGroup(WORKSPACE_B);
+
+      const grant = await grantFor(owner.id, ownerContext.membership);
+      const ctxWithGrant: WorkspaceContext = { ...ownerContext, grant };
+
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      const viaGrant = await service.listGroups(owner, ctxWithGrant);
+      const reuseQueries = teamRepo.findMembershipByUserAndWorkspaceCalls;
+      const viaFallback = await service.listGroups(owner, ownerContext);
+
+      const idsGrant = viaGrant.groups.map((g) => g.id).sort();
+      expect(idsGrant).toEqual(viaFallback.groups.map((g) => g.id).sort()); // identical
+      expect(idsGrant).toEqual([gA.id, gB.id].sort());
+      expect(idsGrant).not.toContain(foreign.id); // WORKSPACE_B never leaks
+      expect(reuseQueries).toBe(0); // reuse avoided the re-query
+    });
+
+    it("SELECTED_GROUPS assistant with reused grant sees only in-scope groups (== fallback)", async () => {
+      const inScope = seedActiveGroup();
+      const outOfScope = seedActiveGroup();
+      const assistant = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: "u-assist-lg", roleLabel: "ASSISTANT" });
+      const assistantContext: WorkspaceContext = { workspaceId: WORKSPACE_A, membership: assistant };
+      await teamRepo.replaceMembershipGrants({
+        workspaceId: WORKSPACE_A,
+        membershipId: assistant.id,
+        createdByUserId: owner.id,
+        desiredGrants: [{ permissionKey: "groups.view", scopeType: "SELECTED_GROUPS", groupIds: [inScope.id] }],
+      });
+      const assistantUser: VerifiedSupabaseToken = { id: "u-assist-lg", email: null };
+      const grant = await grantFor(assistantUser.id, assistant);
+      const ctxWithGrant: WorkspaceContext = { ...assistantContext, grant };
+
+      const viaGrant = await service.listGroups(assistantUser, ctxWithGrant);
+      const viaFallback = await service.listGroups(assistantUser, assistantContext);
+
+      const ids = viaGrant.groups.map((g) => g.id);
+      expect(viaGrant.groups.map((g) => g.id).sort()).toEqual(viaFallback.groups.map((g) => g.id).sort());
+      expect(ids).toContain(inScope.id);
+      expect(ids).not.toContain(outOfScope.id); // scope preserved
+    });
+
+    it("a mismatched-permission grant on the context is ignored (falls back safely)", async () => {
+      const gA = seedActiveGroup();
+      const bogus = { permission: "finance.overview" as const, scope: "ALL_GROUPS" as const };
+      const ctx: WorkspaceContext = { ...ownerContext, grant: bogus };
+
+      const results = await service.listGroups(owner, ctx);
+      // Falls back to a real resolve → owner still sees their group.
+      expect(results.groups.map((g) => g.id)).toContain(gA.id);
+    });
+  });
+
   describe("Group version conflict", () => {
     it("returns VERSION_CONFLICT when the supplied version is stale", async () => {
       const group = seedActiveGroup();

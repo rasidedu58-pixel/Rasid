@@ -120,11 +120,16 @@ export class SchedulingService {
 
   async listGroups(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<ListGroupsResponse> {
     const all = await this.repository.listGroups(workspaceContext.workspaceId);
-    const grant = await this.permissionResolver.hasPermission(
-      workspaceContext.workspaceId,
-      authUser.id,
-      "groups.view",
-    );
+    // Phase 15C latency fix — reuse the grant PermissionGuard already
+    // resolved for this route's required permission (groups.view) instead
+    // of re-resolving it (which re-queried membership + grants). The stored
+    // grant is exactly what hasPermission returns for groups.view; if it is
+    // absent or for a different permission, fall back to the original
+    // resolve so visibility/scope behaviour is never weakened.
+    const grant =
+      workspaceContext.grant && workspaceContext.grant.permission === "groups.view"
+        ? workspaceContext.grant
+        : await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "groups.view");
     const visible =
       !grant || grant.scope === "ALL_GROUPS"
         ? all
