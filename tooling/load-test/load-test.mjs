@@ -426,7 +426,13 @@ function summarize(profileLabel, samples, wallMs) {
 let STOP = false; // flipped by SIGINT
 
 function sleep(ms) {
-  return new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
+  // NOTE: the timer is deliberately NOT unref'd. When every virtual user is in
+  // its think-time window simultaneously (no request in flight), an unref'd
+  // timer is the only thing left on the event loop, so Node would exit early —
+  // before the profile deadline — producing an empty/absent summary. Keeping
+  // the timer ref'd holds the loop open for the full duration; SIGINT is still
+  // handled promptly via the STOP flag checked at the top of each VU loop.
+  return new Promise((r) => { setTimeout(r, ms); });
 }
 
 /**
