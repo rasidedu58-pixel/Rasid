@@ -199,6 +199,35 @@ export function listMembershipsForUser(db: Db, userId: string): Promise<Membersh
     .where(eq(memberships.userId, userId));
 }
 
+export interface UserWithMemberships {
+  user: UserRow;
+  memberships: MembershipWithWorkspace[];
+}
+
+/**
+ * Phase 15C — the user row PLUS all their memberships/workspaces in ONE
+ * query (one RLS transaction), for `GET /me`'s steady-state fast path.
+ * Replaces the previous two transactions (`loadProvisionedIdentity` LIMIT-1
+ * read + `listMembershipsForUser`) that read the same identity graph twice.
+ * Returns `undefined` when the identity has never been provisioned (no
+ * rows) — the caller then falls back to the provisioning path, so a
+ * brand-new user is still created exactly as before. Runs under the same
+ * `app.user_id` self-read RLS policies as the queries it replaces.
+ */
+export async function loadUserWithMemberships(db: Db, userId: string): Promise<UserWithMemberships | undefined> {
+  const rows = await db
+    .select({ user: users, membership: memberships, workspace: workspaces })
+    .from(users)
+    .innerJoin(memberships, eq(memberships.userId, users.id))
+    .innerJoin(workspaces, eq(workspaces.id, memberships.workspaceId))
+    .where(eq(users.id, userId));
+  if (rows.length === 0) return undefined;
+  return {
+    user: rows[0]!.user,
+    memberships: rows.map((r) => ({ membership: r.membership, workspace: r.workspace })),
+  };
+}
+
 /** A user's membership in one specific workspace, if any (any status). */
 export async function findMembership(
   db: Db,

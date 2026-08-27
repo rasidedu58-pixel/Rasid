@@ -5,6 +5,7 @@ import type {
   ProvisionedIdentity,
   ProvisionInput,
   SubscriptionRow,
+  UserWithMemberships,
   WorkspaceRow,
 } from "@academic-precision/database";
 
@@ -16,6 +17,8 @@ import type {
  */
 export interface IdentityRepositoryPort {
   provision(input: ProvisionInput): Promise<ProvisionedIdentity>;
+  /** Phase 15C — GET /me steady-state fast path: user + all memberships in one transaction. `undefined` = not yet provisioned. */
+  loadUserWithMemberships(userId: string): Promise<UserWithMemberships | undefined>;
   listMemberships(userId: string): Promise<MembershipWithWorkspace[]>;
   findMembership(workspaceId: string, userId: string): Promise<MembershipWithWorkspace | undefined>;
   completeOnboarding(input: OnboardingCompleteInput): Promise<WorkspaceRow>;

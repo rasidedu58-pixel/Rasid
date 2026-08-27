@@ -25,6 +25,11 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
   readonly membershipsByUserId = new Map<string, ProvisionedIdentity["membership"]>();
   readonly subscriptionsByWorkspaceId = new Map<string, SubscriptionRow>();
   readonly entitlementsByWorkspaceId = new Map<string, EntitlementRow[]>();
+  /** Phase 15C — additional memberships for a user (multi-workspace tests). */
+  readonly extraMembershipsByUserId = new Map<string, MembershipWithWorkspace[]>();
+  /** Phase 15C — lets tests assert the fast path was taken (0 writes). */
+  provisionCalls = 0;
+  loadUserWithMembershipsCalls = 0;
 
   private newId(): string {
     return `test-id-${this.nextId++}`;
@@ -67,6 +72,7 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
   }
 
   async provision(input: ProvisionInput): Promise<ProvisionedIdentity> {
+    this.provisionCalls += 1;
     const existingUser = this.usersById.get(input.authUserId);
     if (existingUser) {
       const workspace = this.workspacesByUserId.get(input.authUserId);
@@ -124,10 +130,29 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
   async listMemberships(userId: string): Promise<MembershipWithWorkspace[]> {
     const membership = this.membershipsByUserId.get(userId);
     const workspace = this.workspacesByUserId.get(userId);
-    if (!membership || !workspace) {
-      return [];
-    }
-    return [{ membership, workspace }];
+    const primary = membership && workspace ? [{ membership, workspace }] : [];
+    return [...primary, ...(this.extraMembershipsByUserId.get(userId) ?? [])];
+  }
+
+  /**
+   * Phase 15C — the single-transaction combined read. Mirrors the real
+   * repository: returns the user + ALL their memberships, or undefined when
+   * the identity has never been provisioned. Only this user's memberships
+   * are ever returned (isolation).
+   */
+  async loadUserWithMemberships(userId: string) {
+    this.loadUserWithMembershipsCalls += 1;
+    const user = this.usersById.get(userId);
+    const memberships = await this.listMemberships(userId);
+    if (!user || memberships.length === 0) return undefined;
+    return { user, memberships };
+  }
+
+  /** Test helper: give `userId` an ADDITIONAL membership (multi-workspace). */
+  seedExtraMembership(userId: string, entry: MembershipWithWorkspace): void {
+    const list = this.extraMembershipsByUserId.get(userId) ?? [];
+    list.push(entry);
+    this.extraMembershipsByUserId.set(userId, list);
   }
 
   async findMembership(

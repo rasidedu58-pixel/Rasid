@@ -37,6 +37,64 @@ describe("IdentityService", () => {
     });
   });
 
+  // ---- Phase 15C: GET /me single-transaction fast path ----
+  describe("getMe fast path (Phase 15C)", () => {
+    it("first request provisions (fallback), then the second is served by the combined read WITHOUT another provision write", async () => {
+      const first = await service.getMe(AUTH_USER); // unprovisioned → fallback
+      expect(repository.provisionCalls).toBe(1);
+
+      repository.loadUserWithMembershipsCalls = 0;
+      const provisionCallsBefore = repository.provisionCalls;
+      const second = await service.getMe(AUTH_USER); // provisioned → fast path
+
+      expect(second.user.id).toBe(first.user.id);
+      expect(second.workspaces[0]?.id).toBe(first.workspaces[0]?.id);
+      // Fast path: exactly one combined read, and NO extra provision (no write on hot path).
+      expect(repository.loadUserWithMembershipsCalls).toBe(1);
+      expect(repository.provisionCalls).toBe(provisionCallsBefore);
+    });
+
+    it("returns the correct user and ALL memberships for a multi-workspace user", async () => {
+      await service.getMe(AUTH_USER); // provision the owner workspace
+      const ownerWorkspaceId = (await service.getMe(AUTH_USER)).workspaces[0]!.id;
+
+      // A second membership in a different workspace (e.g. invited as assistant).
+      const now = new Date();
+      const otherWorkspace = {
+        id: "ws-other", ownerUserId: "someone-else", name: "Other Workspace",
+        workspaceType: "TEACHER", locale: "ar-EG", timezone: "Africa/Cairo",
+        status: "ACTIVE", dueDatePolicy: "PER_GROUP", unifiedDueDay: null,
+        createdAt: now, updatedAt: now,
+      };
+      repository.seedExtraMembership(AUTH_USER.id, {
+        workspace: otherWorkspace as never,
+        membership: {
+          id: "m-other", workspaceId: "ws-other", userId: AUTH_USER.id, roleLabel: "ASSISTANT",
+          status: "ACTIVE", joinedAt: now, disabledAt: null, createdAt: now, updatedAt: now,
+        } as never,
+      });
+
+      const me = await service.getMe(AUTH_USER);
+      const ids = me.workspaces.map((w) => w.id).sort();
+      expect(ids).toEqual([ownerWorkspaceId, "ws-other"].sort());
+      const other = me.workspaces.find((w) => w.id === "ws-other");
+      expect(other?.roleLabel).toBe("ASSISTANT");
+      expect(me.user.id).toBe(AUTH_USER.id);
+    });
+
+    it("does not leak another user's workspaces (isolation)", async () => {
+      await service.getMe(AUTH_USER);
+      const OTHER: VerifiedSupabaseToken = { id: "auth-user-2", email: "other@example.com" };
+      await service.getMe(OTHER);
+
+      const me = await service.getMe(AUTH_USER);
+      // AUTH_USER never sees auth-user-2's workspace.
+      const other = await service.getMe(OTHER);
+      expect(me.workspaces.map((w) => w.id)).not.toContain(other.workspaces[0]!.id);
+      expect(me.user.id).toBe(AUTH_USER.id);
+    });
+  });
+
   describe("getWorkspaceContext", () => {
     it("returns the §11.2 shape for an active member, including the OWNER's real full effective permission set (Phase 11 fix)", async () => {
       const me = await service.getMe(AUTH_USER);

@@ -8,6 +8,7 @@ import {
   listAllowedEntitlementsForWorkspace,
   listMembershipsForUser,
   loadProvisionedIdentity,
+  loadUserWithMemberships,
   withRuntimeContext,
   type EntitlementRow,
   type MembershipWithWorkspace,
@@ -15,6 +16,7 @@ import {
   type ProvisionedIdentity,
   type ProvisionInput,
   type SubscriptionRow,
+  type UserWithMemberships,
   type WorkspaceRow,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
@@ -76,6 +78,14 @@ export class DrizzleIdentityRepository implements IdentityRepositoryPort {
    */
   listMemberships(userId: string): Promise<MembershipWithWorkspace[]> {
     return withRuntimeContext({ userId }, (db) => listMembershipsForUser(db, userId));
+  }
+
+  /**
+   * Phase 15C — one transaction returning the user + all memberships, under
+   * the same `app.user_id` self-read policies as `listMemberships`.
+   */
+  loadUserWithMemberships(userId: string): Promise<UserWithMemberships | undefined> {
+    return withRuntimeContext({ userId }, (db) => loadUserWithMemberships(db, userId));
   }
 
   /**

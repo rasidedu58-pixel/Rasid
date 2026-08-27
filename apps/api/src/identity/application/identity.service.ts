@@ -6,6 +6,7 @@ import {
   type WorkspaceContextResponse,
 } from "@academic-precision/contracts";
 import type { ZodError } from "zod";
+import type { MembershipWithWorkspace } from "@academic-precision/database";
 import {
   ForbiddenApiException,
   ResourceNotFoundException,
@@ -45,11 +46,31 @@ export class IdentityService {
   }
 
   async getMe(authUser: VerifiedSupabaseToken): Promise<MeResponse> {
+    // Phase 15C — steady-state fast path: ONE transaction fetches the user
+    // + all their memberships/workspaces. Previously this was two reads
+    // (provision fast-path + listMemberships) of the same identity graph.
+    // Only when the identity has never been provisioned (no rows) do we
+    // fall back to the provisioning path — so a brand-new user is still
+    // created exactly as before (no provisioning regression, no write on
+    // the hot path). Supabase identity verification is unchanged (this runs
+    // only after SupabaseAuthGuard has verified the token).
+    const loaded = await this.repository.loadUserWithMemberships(authUser.id);
+    if (loaded) {
+      return this.toMeResponse(loaded.user.id, loaded.user.fullName, loaded.memberships);
+    }
+
     const provisioned = await this.ensureProvisioned(authUser);
     const memberships = await this.repository.listMemberships(provisioned.user.id);
+    return this.toMeResponse(provisioned.user.id, provisioned.user.fullName, memberships);
+  }
 
+  private toMeResponse(
+    userId: string,
+    fullName: string,
+    memberships: MembershipWithWorkspace[],
+  ): MeResponse {
     return {
-      user: { id: provisioned.user.id, fullName: provisioned.user.fullName },
+      user: { id: userId, fullName },
       workspaces: memberships.map(({ membership, workspace }) => ({
         id: workspace.id,
         name: workspace.name,
