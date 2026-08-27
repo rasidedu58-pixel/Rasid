@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock } from "lucide-react";
-import { Badge, EmptyState, ErrorState, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, formatDateTime } from "@academic-precision/ui";
+import { CalendarClock, ChevronLeft } from "lucide-react";
+import { Badge, EmptyState, ErrorState, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, formatDateTime } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
@@ -19,6 +20,7 @@ const STATUS_LABEL: Record<string, { label: string; tone: "brand" | "success" | 
 
 export default function SessionsPage() {
   const { workspaceId } = useWorkspace();
+  const router = useRouter();
   const query = useQuery({
     queryKey: workspaceId ? qk.sessions.list(workspaceId, {}) : ["sessions", "none"],
     queryFn: () => fetchSessions(workspaceId!, { limit: 50 }),
@@ -42,20 +44,30 @@ export default function SessionsPage() {
               <TableRow>
                 <TableHead>الموعد</TableHead>
                 <TableHead>الحالة</TableHead>
+                <TableHead className="w-8" aria-label="فتح" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {query.data!.items.map((session) => {
                 const status = STATUS_LABEL[session.status] ?? { label: session.status, tone: "neutral" as const };
+                const live = session.status === "IN_PROGRESS";
                 return (
-                  <TableRow key={session.id}>
+                  <TableRow
+                    key={session.id}
+                    className={cn("group cursor-pointer transition-colors hover:bg-surface-sunken/50", live && "bg-brand-subtle/25")}
+                    onClick={() => router.push(`/sessions/${session.id}`)}
+                  >
                     <TableCell>
-                      <Link href={`/sessions/${session.id}`} className="font-medium text-text-primary hover:text-brand hover:underline">
-                        {formatDateTime(session.scheduledAt)}
+                      <Link href={`/sessions/${session.id}`} className="flex items-center gap-2 font-medium text-text-primary group-hover:text-brand" onClick={(e) => e.stopPropagation()}>
+                        {live ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-hidden /> : null}
+                        <span className="tabular-nums">{formatDateTime(session.scheduledAt)}</span>
                       </Link>
                     </TableCell>
                     <TableCell>
                       <Badge tone={status.tone}>{status.label}</Badge>
+                    </TableCell>
+                    <TableCell className="text-text-tertiary">
+                      <ChevronLeft className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
                     </TableCell>
                   </TableRow>
                 );

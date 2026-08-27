@@ -8,11 +8,13 @@ import { cn } from "../lib/cn";
  * value. Wraps to two columns on narrow widths. Never invents data — the
  * caller passes only values it already has.
  */
-export function MetricStrip({ children, className }: { children: ReactNode; className?: string }) {
+export function MetricStrip({ children, className, columns = 4 }: { children: ReactNode; className?: string; columns?: 2 | 3 | 4 }) {
+  const cols: Record<2 | 3 | 4, string> = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-4" };
   return (
     <div
       className={cn(
-        "grid grid-cols-2 divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface sm:grid-cols-4 sm:divide-x sm:divide-y-0 sm:divide-x-reverse",
+        "grid grid-cols-2 divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface sm:divide-x sm:divide-y-0 sm:divide-x-reverse",
+        cols[columns],
         className,
       )}
     >

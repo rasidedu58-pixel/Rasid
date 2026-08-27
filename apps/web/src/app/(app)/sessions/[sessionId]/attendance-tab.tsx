@@ -7,13 +7,13 @@ import { Button, toast } from "@academic-precision/ui";
 import { markAllPresent, saveAttendance } from "../../../../lib/api/session-mode";
 import { qk } from "../../../../lib/query-keys";
 import { useWorkspace } from "../../../../lib/workspace-provider";
+import { RosterList, RosterProgress, RosterRow, SegmentedStatus, type StatusOption } from "./session-mode-ui";
 
-const STATUS_LABEL: Record<AttendanceStatus, string> = { PRESENT: "حاضر", ABSENT: "غائب", LATE: "متأخر" };
-const STATUS_TONE: Record<AttendanceStatus, string> = {
-  PRESENT: "border-success bg-success-subtle text-success",
-  ABSENT: "border-danger bg-danger-subtle text-danger",
-  LATE: "border-warning bg-warning-subtle text-warning",
-};
+const ATTENDANCE_OPTIONS: ReadonlyArray<StatusOption<AttendanceStatus>> = [
+  { value: "PRESENT", label: "حاضر", tone: "success" },
+  { value: "LATE", label: "متأخر", tone: "warning" },
+  { value: "ABSENT", label: "غائب", tone: "danger" },
+];
 
 /**
  * Fast attendance entry (§16): bulk "الكل حاضر" first, then per-student
@@ -44,37 +44,32 @@ export function AttendanceTab({ sessionId, sessionVersion, students }: { session
     onSettled: () => setSavingId(null),
   });
 
-  const unrecorded = students.filter((s) => !s.record.attendance).length;
+  const recorded = students.filter((s) => s.record.attendance).length;
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-text-secondary">{unrecorded > 0 ? `${unrecorded} من ${students.length} لم يُسجّل بعد` : `تم تسجيل الجميع (${students.length})`}</p>
-        <Button size="sm" variant="outline" onClick={() => markAllMutation.mutate()} loading={markAllMutation.isPending}>
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <RosterProgress recorded={recorded} total={students.length} />
+        </div>
+        <Button size="sm" variant="outline" onClick={() => markAllMutation.mutate()} loading={markAllMutation.isPending} className="shrink-0">
           الكل حاضر
         </Button>
       </div>
 
-      <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
-        {students.map((s) => (
-          <div key={s.enrollmentId} className="flex items-center justify-between gap-3 px-4 py-3">
-            <span className="text-sm font-medium text-text-primary">{s.studentName}</span>
-            <div className="flex gap-2">
-              {(["PRESENT", "LATE", "ABSENT"] as AttendanceStatus[]).map((status) => (
-                <button
-                  key={status}
-                  type="button"
-                  disabled={savingId === s.enrollmentId}
-                  onClick={() => setOneMutation.mutate({ enrollmentId: s.enrollmentId, status })}
-                  className={`min-w-14 rounded-md border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${s.record.attendance === status ? STATUS_TONE[status] : "border-border text-text-secondary hover:bg-surface-sunken"}`}
-                >
-                  {STATUS_LABEL[status]}
-                </button>
-              ))}
-            </div>
-          </div>
+      <RosterList>
+        {students.map((s, i) => (
+          <RosterRow key={s.enrollmentId} index={i + 1} name={s.studentName} saving={savingId === s.enrollmentId}>
+            <SegmentedStatus
+              aria-label={`حضور ${s.studentName}`}
+              options={ATTENDANCE_OPTIONS}
+              value={s.record.attendance}
+              disabled={savingId === s.enrollmentId}
+              onChange={(status) => setOneMutation.mutate({ enrollmentId: s.enrollmentId, status })}
+            />
+          </RosterRow>
         ))}
-      </div>
+      </RosterList>
     </div>
   );
 }

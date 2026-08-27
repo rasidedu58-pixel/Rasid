@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
-import { Badge, Button, Card, ErrorState, LoadingRegion, toast } from "@academic-precision/ui";
+import { Button, Card, ErrorState, LoadingRegion, MetricCell, MetricStrip, toast } from "@academic-precision/ui";
 import { completeSession, fetchSessionReview } from "../../../../lib/api/session-mode";
 import { qk } from "../../../../lib/query-keys";
 import { useWorkspace } from "../../../../lib/workspace-provider";
@@ -44,11 +44,28 @@ export function ReviewTab({ sessionId, sessionVersion, onCompleted }: { sessionI
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <ReviewStat label="الحضور" value={`${review.attendanceSummary.present + review.attendanceSummary.absent + review.attendanceSummary.late}`} missing={review.attendanceSummary.missing} />
-        <ReviewStat label="الواجب" value={`${review.homeworkSummary.done + review.homeworkSummary.partial + review.homeworkSummary.notDone + review.homeworkSummary.noHomework}`} missing={review.homeworkSummary.missing} />
-        {review.examSummary.hasExam ? <ReviewStat label="الامتحان" value={`${review.examSummary.scored + review.examSummary.absent}`} missing={review.examSummary.missing} /> : null}
-      </div>
+      <MetricStrip columns={review.examSummary.hasExam ? 3 : 2}>
+        <MetricCell
+          label="الحضور"
+          value={review.attendanceSummary.present + review.attendanceSummary.absent + review.attendanceSummary.late}
+          sub={review.attendanceSummary.missing > 0 ? `${review.attendanceSummary.missing} ناقص` : "مكتمل"}
+          tone={review.attendanceSummary.missing > 0 ? "warning" : "success"}
+        />
+        <MetricCell
+          label="الواجب"
+          value={review.homeworkSummary.done + review.homeworkSummary.partial + review.homeworkSummary.notDone + review.homeworkSummary.noHomework}
+          sub={review.homeworkSummary.missing > 0 ? `${review.homeworkSummary.missing} ناقص` : "مكتمل"}
+          tone={review.homeworkSummary.missing > 0 ? "warning" : "success"}
+        />
+        {review.examSummary.hasExam ? (
+          <MetricCell
+            label="الامتحان"
+            value={review.examSummary.scored + review.examSummary.absent}
+            sub={review.examSummary.missing > 0 ? `${review.examSummary.missing} ناقص` : "مكتمل"}
+            tone={review.examSummary.missing > 0 ? "warning" : "success"}
+          />
+        ) : null}
+      </MetricStrip>
 
       {review.missingRecords.length > 0 ? (
         <Card className="border-warning/30 bg-warning-subtle p-4">
@@ -93,17 +110,5 @@ export function ReviewTab({ sessionId, sessionVersion, onCompleted }: { sessionI
         إنهاء الحصة
       </Button>
     </div>
-  );
-}
-
-function ReviewStat({ label, value, missing }: { label: string; value: string; missing: number }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-text-secondary">{label}</p>
-      <div className="mt-1 flex items-center gap-2">
-        <span className="text-lg font-semibold tabular-nums text-text-primary">{value}</span>
-        {missing > 0 ? <Badge tone="warning">{missing} ناقص</Badge> : null}
-      </div>
-    </Card>
   );
 }

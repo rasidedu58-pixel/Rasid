@@ -7,14 +7,14 @@ import { Button, toast } from "@academic-precision/ui";
 import { markAllHomeworkDone, markNoHomework, saveHomework } from "../../../../lib/api/session-mode";
 import { qk } from "../../../../lib/query-keys";
 import { useWorkspace } from "../../../../lib/workspace-provider";
+import { RosterList, RosterProgress, RosterRow, SegmentedStatus, type StatusOption } from "./session-mode-ui";
 
-const STATUS_LABEL: Record<HomeworkStatus, string> = { DONE: "منجز", PARTIAL: "جزئي", NOT_DONE: "غير منجز", NO_HOMEWORK: "لا يوجد واجب" };
-const STATUS_TONE: Record<HomeworkStatus, string> = {
-  DONE: "border-success bg-success-subtle text-success",
-  PARTIAL: "border-warning bg-warning-subtle text-warning",
-  NOT_DONE: "border-danger bg-danger-subtle text-danger",
-  NO_HOMEWORK: "border-text-tertiary bg-surface-sunken text-text-secondary",
-};
+const HOMEWORK_OPTIONS: ReadonlyArray<StatusOption<HomeworkStatus>> = [
+  { value: "DONE", label: "منجز", tone: "success" },
+  { value: "PARTIAL", label: "جزئي", tone: "warning" },
+  { value: "NOT_DONE", label: "غير منجز", tone: "danger" },
+  { value: "NO_HOMEWORK", label: "لا واجب", tone: "neutral" },
+];
 
 /** §17: absence never implies "no homework" — homework recording is fully independent of attendance status, and the UI never assumes one from the other. */
 export function HomeworkTab({ sessionId, sessionVersion, students }: { sessionId: string; sessionVersion: number; students: RosterStudent[] }) {
@@ -41,37 +41,37 @@ export function HomeworkTab({ sessionId, sessionVersion, students }: { sessionId
     onSettled: () => setSavingId(null),
   });
 
+  const recorded = students.filter((s) => s.record.homework).length;
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={() => noHomeworkMutation.mutate()} loading={noHomeworkMutation.isPending}>
-          لا يوجد واجب لهذه الحصة
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => markAllDoneMutation.mutate()} loading={markAllDoneMutation.isPending}>
-          الكل منجز
-        </Button>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <RosterProgress recorded={recorded} total={students.length} />
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button size="sm" variant="outline" onClick={() => noHomeworkMutation.mutate()} loading={noHomeworkMutation.isPending}>
+            لا يوجد واجب
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => markAllDoneMutation.mutate()} loading={markAllDoneMutation.isPending}>
+            الكل منجز
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
-        {students.map((s) => (
-          <div key={s.enrollmentId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-            <span className="text-sm font-medium text-text-primary">{s.studentName}</span>
-            <div className="flex flex-wrap gap-2">
-              {(Object.keys(STATUS_LABEL) as HomeworkStatus[]).map((status) => (
-                <button
-                  key={status}
-                  type="button"
-                  disabled={savingId === s.enrollmentId}
-                  onClick={() => setOneMutation.mutate({ enrollmentId: s.enrollmentId, status })}
-                  className={`min-w-12 rounded-md border px-2.5 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${s.record.homework === status ? STATUS_TONE[status] : "border-border text-text-secondary hover:bg-surface-sunken"}`}
-                >
-                  {STATUS_LABEL[status]}
-                </button>
-              ))}
-            </div>
-          </div>
+      <RosterList>
+        {students.map((s, i) => (
+          <RosterRow key={s.enrollmentId} index={i + 1} name={s.studentName} saving={savingId === s.enrollmentId}>
+            <SegmentedStatus
+              aria-label={`واجب ${s.studentName}`}
+              options={HOMEWORK_OPTIONS}
+              value={s.record.homework}
+              disabled={savingId === s.enrollmentId}
+              onChange={(status) => setOneMutation.mutate({ enrollmentId: s.enrollmentId, status })}
+            />
+          </RosterRow>
         ))}
-      </div>
+      </RosterList>
     </div>
   );
 }
