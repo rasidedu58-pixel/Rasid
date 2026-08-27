@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle } from "lucide-react";
-import { Badge, Button, Card, ErrorState, LoadingRegion, SectionCard, formatDate, formatRelativeToNow, toast } from "@academic-precision/ui";
+import { Badge, Button, Card, ErrorState, LoadingRegion, SectionCard, StatusDot, formatDate, formatRelativeToNow, toast } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
@@ -53,9 +53,15 @@ export default function AttentionCaseDetailPage() {
   return (
     <>
       <PageHeader
+        eyebrow="حالة متابعة"
         title={item.student.name}
         description={`كود الطالب: ${item.student.studentCode}`}
-        actions={<Badge tone={item.priority === "HIGH" ? "danger" : "warning"}>{STATUS_LABEL[item.status] ?? item.status}</Badge>}
+        actions={
+          <div className="flex items-center gap-3">
+            <StatusDot tone={item.priority === "HIGH" ? "danger" : "warning"} label={item.priority === "HIGH" ? "عاجلة" : "متوسطة"} />
+            <Badge tone="neutral">{STATUS_LABEL[item.status] ?? item.status}</Badge>
+          </div>
+        }
       />
 
       <div className="flex flex-col gap-4">
@@ -75,16 +81,21 @@ export default function AttentionCaseDetailPage() {
           </div>
         </SectionCard>
 
-        {item.nextFollowUp ? (
-          <SectionCard title="المتابعة القادمة">
-            <p className="text-sm text-text-secondary">موعدها {formatRelativeToNow(item.nextFollowUp.dueAt)}</p>
-          </SectionCard>
-        ) : null}
-
-        {item.lastContact ? (
-          <SectionCard title="آخر تواصل">
-            <p className="text-sm text-text-secondary">{formatRelativeToNow(item.lastContact.createdAt)}</p>
-          </SectionCard>
+        {item.nextFollowUp || item.lastContact ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {item.lastContact ? (
+              <div className="rounded-lg border border-border bg-surface px-4 py-3">
+                <p className="text-xs font-medium text-text-tertiary">آخر تواصل</p>
+                <p className="mt-1 text-sm font-medium text-text-primary">{formatRelativeToNow(item.lastContact.createdAt)}</p>
+              </div>
+            ) : null}
+            {item.nextFollowUp ? (
+              <div className="rounded-lg border border-brand/20 bg-brand-subtle/30 px-4 py-3">
+                <p className="text-xs font-medium text-text-tertiary">المتابعة القادمة</p>
+                <p className="mt-1 text-sm font-medium text-brand">{formatRelativeToNow(item.nextFollowUp.dueAt)}</p>
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         {canWrite("CORE_OPERATIONS") ? (

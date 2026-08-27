@@ -2,16 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HeartHandshake } from "lucide-react";
-import { Badge, Button, EmptyState, ErrorState, SkeletonRows, Tabs, TabsContent, TabsList, TabsTrigger, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, formatRelativeToNow, toast } from "@academic-precision/ui";
+import { ChevronLeft, HeartHandshake } from "lucide-react";
+import { Button, EmptyState, ErrorState, SkeletonRows, StatusDot, Tabs, TabsContent, TabsList, TabsTrigger, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, formatRelativeToNow, toast } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
 import { completeFollowup, fetchAttentionCases, fetchFollowups } from "../../../lib/api/attention";
 
 const STATUS_LABEL: Record<string, string> = { NEW: "جديدة", IN_FOLLOWUP: "قيد المتابعة", CONTACTED: "تم التواصل", MONITORING: "تحت الملاحظة", CLOSED: "مغلقة" };
-const PRIORITY_TONE: Record<string, "danger" | "warning"> = { HIGH: "danger", MEDIUM: "warning" };
 
 export default function AttentionPage() {
   const [tab, setTab] = useState<"cases" | "followups">("cases");
@@ -36,6 +36,7 @@ export default function AttentionPage() {
 
 function CasesList() {
   const { workspaceId } = useWorkspace();
+  const router = useRouter();
   const query = useQuery({
     queryKey: workspaceId ? qk.attention.cases(workspaceId, {}) : ["cases", "none"],
     queryFn: () => fetchAttentionCases(workspaceId!, { limit: 50 }),
@@ -53,27 +54,39 @@ function CasesList() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>الطالب</TableHead>
             <TableHead>الأولوية</TableHead>
-            <TableHead>الحالة</TableHead>
-            <TableHead>آخر تحديث</TableHead>
+            <TableHead>الطالب</TableHead>
+            <TableHead className="hidden sm:table-cell">الحالة</TableHead>
+            <TableHead className="text-end">آخر تحديث</TableHead>
+            <TableHead className="w-8" aria-label="فتح" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {query.data!.items.map((c) => (
-            <TableRow key={c.id}>
-              <TableCell>
-                <Link href={`/attention/${c.id}`} className="font-medium text-text-primary hover:text-brand hover:underline">
-                  {c.studentName}
-                </Link>
-              </TableCell>
-              <TableCell>
-                <Badge tone={PRIORITY_TONE[c.priority] ?? "neutral"}>{c.priority === "HIGH" ? "عاجلة" : "متوسطة"}</Badge>
-              </TableCell>
-              <TableCell className="text-text-secondary">{STATUS_LABEL[c.status] ?? c.status}</TableCell>
-              <TableCell className="text-text-tertiary">{formatRelativeToNow(c.lastQualifiedAt)}</TableCell>
-            </TableRow>
-          ))}
+          {query.data!.items.map((c) => {
+            const high = c.priority === "HIGH";
+            return (
+              <TableRow
+                key={c.id}
+                className={cn("group cursor-pointer border-s-2 transition-colors hover:bg-surface-sunken/40", high ? "border-s-danger" : "border-s-warning")}
+                onClick={() => router.push(`/attention/${c.id}`)}
+              >
+                <TableCell>
+                  <StatusDot tone={high ? "danger" : "warning"} label={high ? "عاجلة" : "متوسطة"} />
+                </TableCell>
+                <TableCell>
+                  <Link href={`/attention/${c.id}`} className="font-medium text-text-primary group-hover:text-brand" onClick={(e) => e.stopPropagation()}>
+                    {c.studentName}
+                  </Link>
+                  <span className="mt-0.5 block text-xs text-text-tertiary sm:hidden">{STATUS_LABEL[c.status] ?? c.status}</span>
+                </TableCell>
+                <TableCell className="hidden text-text-secondary sm:table-cell">{STATUS_LABEL[c.status] ?? c.status}</TableCell>
+                <TableCell className="text-end text-text-tertiary">{formatRelativeToNow(c.lastQualifiedAt)}</TableCell>
+                <TableCell className="text-text-tertiary">
+                  <ChevronLeft className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </TableScroll>

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Wallet } from "lucide-react";
-import { Button, EmptyState, ErrorState, SkeletonRows, StatCard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, formatDate, formatMoney } from "@academic-precision/ui";
+import { Button, EmptyState, ErrorState, MetricCell, MetricStrip, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, formatDate, formatMoney } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
@@ -33,18 +33,25 @@ export default function FinancePage() {
   });
 
   const queueItems = queueQuery.data?.pages.flatMap((p) => p.items) ?? [];
+  const TODAY = new Date();
+  TODAY.setHours(0, 0, 0, 0);
 
   return (
     <>
       <PageHeader title="المالية" description="الالتزامات المستحقة والمتأخرة عبر كل الطلاب." />
 
       {summaryQuery.data ? (
-        <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard label="إجمالي المستحق" value={formatMoney(summaryQuery.data.totalNetDueMinor)} />
-          <StatCard label="المحصّل" value={formatMoney(summaryQuery.data.totalPaidMinor)} tone="success" />
-          <StatCard label="المتبقي" value={formatMoney(summaryQuery.data.totalRemainingMinor)} />
-          <StatCard label="متأخرات" value={String(summaryQuery.data.overdueCount)} tone={summaryQuery.data.overdueCount > 0 ? "danger" : undefined} />
-        </div>
+        <MetricStrip className="mb-6">
+          <MetricCell label="إجمالي المستحق" value={formatMoney(summaryQuery.data.totalNetDueMinor)} />
+          <MetricCell label="المحصّل" value={formatMoney(summaryQuery.data.totalPaidMinor)} tone="success" />
+          <MetricCell label="المتبقّي" value={formatMoney(summaryQuery.data.totalRemainingMinor)} />
+          <MetricCell
+            label="المتأخر"
+            value={formatMoney(summaryQuery.data.overdueRemainingMinor)}
+            tone={summaryQuery.data.overdueCount > 0 ? "danger" : "default"}
+            sub={summaryQuery.data.overdueCount > 0 ? `${summaryQuery.data.overdueCount} التزام متأخر` : "لا متأخرات"}
+          />
+        </MetricStrip>
       ) : null}
 
       {queueQuery.isLoading ? (
@@ -60,32 +67,44 @@ export default function FinancePage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>الطالب</TableHead>
-                  <TableHead>الاستحقاق</TableHead>
-                  <TableHead>المتبقي</TableHead>
+                  <TableHead className="hidden lg:table-cell">الاستحقاق</TableHead>
+                  <TableHead className="text-end">المتبقّي</TableHead>
                   <TableHead>الحالة</TableHead>
-                  <TableHead />
+                  <TableHead className="text-end" aria-label="إجراء" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {queueItems.map((item) => (
-                  <TableRow key={item.obligationId}>
-                    <TableCell>
-                      <Link href={`/students/${item.studentId}`} className="font-medium text-text-primary hover:text-brand hover:underline">
-                        {item.studentName}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-text-secondary">{formatDate(item.dueDate)}</TableCell>
-                    <TableCell className="text-base font-semibold tabular-nums text-text-primary">{formatMoney(item.remainingMinor)}</TableCell>
-                    <TableCell>
-                      <ObligationStatusBadge status={item.status} />
-                    </TableCell>
-                    <TableCell>
-                      <Button size="sm" onClick={() => setPayingObligation({ id: item.obligationId, remainingMinor: item.remainingMinor })}>
-                        تسجيل دفعة
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {queueItems.map((item) => {
+                  const overdue = new Date(item.dueDate) < TODAY;
+                  return (
+                    <TableRow key={item.obligationId} className="transition-colors hover:bg-surface-sunken/40">
+                      <TableCell>
+                        <Link href={`/students/${item.studentId}`} className="font-medium text-text-primary hover:text-brand">
+                          {item.studentName}
+                        </Link>
+                        <span className={cn("mt-0.5 block text-xs tabular-nums lg:hidden", overdue ? "text-danger" : "text-text-tertiary")}>
+                          {overdue ? "متأخر · " : ""}
+                          {formatDate(item.dueDate)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <span className={cn("inline-flex items-center gap-1.5 text-sm tabular-nums", overdue ? "font-medium text-danger" : "text-text-secondary")}>
+                          {overdue ? <span className="h-1.5 w-1.5 rounded-full bg-danger" aria-hidden /> : null}
+                          {formatDate(item.dueDate)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-end text-base font-semibold tabular-nums text-text-primary">{formatMoney(item.remainingMinor)}</TableCell>
+                      <TableCell>
+                        <ObligationStatusBadge status={item.status} />
+                      </TableCell>
+                      <TableCell className="text-end">
+                        <Button size="sm" onClick={() => setPayingObligation({ id: item.obligationId, remainingMinor: item.remainingMinor })}>
+                          تسجيل دفعة
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableScroll>
