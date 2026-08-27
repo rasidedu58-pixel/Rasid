@@ -75,28 +75,34 @@ export default function LandingPage() {
       <StructuredData />
 
       {/* Hero */}
-      <section className="mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pt-20">
-        <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
-          <div className="flex flex-col gap-6">
-            <Badge tone="brand" className="w-fit">لأصحاب المجموعات التعليمية والمدرسين المستقلين</Badge>
-            <h1 className="text-3xl font-bold leading-tight text-text-primary sm:text-4xl lg:text-5xl">
-              نظام تشغيل ومتابعة كامل لمجموعاتك التعليمية
-            </h1>
-            <p className="text-lg text-text-secondary">
-              سجّل حضور طلابك وواجباتهم، افهم ما يحتاج قرارك الآن، اتخذ الإجراء، ثم تابع كل شيء — كل هذا في مكان واحد، بدلًا من دفاتر ومجموعات واتساب متفرقة.
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button asChild size="lg">
-                <Link href="/signup">ابدأ تجربتك المجانية</Link>
-              </Button>
-              <Button asChild size="lg" variant="outline">
-                <Link href="#how-it-works">اكتشف كيف يعمل</Link>
-              </Button>
+      <section className="relative overflow-hidden">
+        {/* One soft brand-tinted wash behind the hero — depth without a heavy gradient. */}
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-brand-subtle/40 to-transparent" />
+        <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pt-20">
+          <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
+            <div className="flex flex-col gap-6">
+              <Badge tone="brand" className="w-fit">لأصحاب المجموعات التعليمية والمدرسين المستقلين</Badge>
+              <h1 className="text-3xl font-bold leading-tight text-text-primary sm:text-4xl lg:text-5xl">
+                مركز التشغيل اليومي لمجموعاتك التعليمية
+              </h1>
+              {/* The core product idea (§4), as a distinctive signature line. */}
+              <OperatingRhythm />
+              <p className="text-lg text-text-secondary">
+                سجّل حضور طلابك وواجباتهم، افهم ما يحتاج قرارك الآن، اتخذ الإجراء، ثم تابع كل شيء — كل هذا في مكان واحد، بدلًا من دفاتر ومجموعات واتساب متفرقة.
+              </p>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button asChild size="lg">
+                  <Link href="/signup">ابدأ تجربتك المجانية</Link>
+                </Button>
+                <Button asChild size="lg" variant="outline">
+                  <Link href="#how-it-works">اكتشف كيف يعمل</Link>
+                </Button>
+              </div>
+              <p className="text-sm text-text-tertiary">تجربة {TRIAL_DAYS} يومًا كاملة، بدون بطاقة ائتمان.</p>
             </div>
-            <p className="text-sm text-text-tertiary">تجربة {TRIAL_DAYS} يومًا كاملة، بدون بطاقة ائتمان.</p>
-          </div>
 
-          <ProductPreviewPanel />
+            <ProductPreviewPanel />
+          </div>
         </div>
       </section>
 
@@ -234,6 +240,21 @@ export default function LandingPage() {
         </div>
       </section>
     </>
+  );
+}
+
+/** The سجّل → افهم → تصرّف → تابع rhythm as a compact right-to-left flow; arrows point in the reading direction. */
+function OperatingRhythm() {
+  const steps = ["سجّل", "افهم", "تصرّف", "تابع"];
+  return (
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-base font-semibold">
+      {steps.map((step, i) => (
+        <span key={step} className="flex items-center gap-2.5">
+          <span className="text-brand">{step}</span>
+          {i < steps.length - 1 ? <ArrowLeft className="h-4 w-4 text-text-tertiary" aria-hidden /> : null}
+        </span>
+      ))}
+    </div>
   );
 }
 

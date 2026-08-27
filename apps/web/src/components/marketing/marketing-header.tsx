@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { Button } from "@academic-precision/ui";
+import { BrandMark } from "../brand-mark";
 
 const NAV_LINKS = [
   { href: "/#features", label: "المزايا" },
@@ -19,8 +20,8 @@ export function MarketingHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="text-xl font-bold text-brand">
-          راصد
+        <Link href="/" aria-label="راصد — الصفحة الرئيسية">
+          <BrandMark size="sm" />
         </Link>
 
         <nav className="hidden items-center gap-6 md:flex">

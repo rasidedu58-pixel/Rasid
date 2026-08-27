@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandMark } from "../brand-mark";
 
 const FOOTER_LINKS = [
   { href: "/pricing", label: "الأسعار" },
@@ -14,8 +15,8 @@ export function MarketingFooter() {
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10 sm:px-6">
         <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
           <div>
-            <span className="text-lg font-bold text-brand">راصد</span>
-            <p className="mt-1 max-w-xs text-sm text-text-secondary">نظام تشغيل ومتابعة للمدرسين وأصحاب المجموعات التعليمية.</p>
+            <BrandMark size="sm" />
+            <p className="mt-2 max-w-xs text-sm text-text-secondary">نظام تشغيل ومتابعة للمدرسين وأصحاب المجموعات التعليمية.</p>
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-2">
             {FOOTER_LINKS.map((link) => (

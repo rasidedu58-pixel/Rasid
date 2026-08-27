@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Field, Input } from "@academic-precision/ui";
 import { getSupabaseClient } from "../../lib/supabase-client";
 import { AuthCard } from "../../components/auth/auth-card";
+import { PasswordInput } from "../../components/auth/password-input";
 
 type LoginState = "idle" | "loading" | "locked" | "error";
 
@@ -85,7 +86,7 @@ function LoginForm() {
           <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>
         <Field label="كلمة المرور" htmlFor="password">
-          <Input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <PasswordInput id="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
 
         {errorMessage ? (

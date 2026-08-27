@@ -3,9 +3,10 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
-import { Button, Field, Input } from "@academic-precision/ui";
+import { Button, Field } from "@academic-precision/ui";
 import { getSupabaseClient } from "../../lib/supabase-client";
 import { AuthCard } from "../../components/auth/auth-card";
+import { PasswordInput } from "../../components/auth/password-input";
 
 type ResetState = "idle" | "loading" | "success" | "error";
 
@@ -72,10 +73,10 @@ export default function ResetPasswordPage() {
     <AuthCard title="تعيين كلمة مرور جديدة">
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
         <Field label="كلمة المرور الجديدة" htmlFor="password" hint="8 أحرف على الأقل." error={fieldError ?? undefined}>
-          <Input id="password" type="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required invalid={!!fieldError} />
+          <PasswordInput id="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required invalid={!!fieldError} />
         </Field>
         <Field label="تأكيد كلمة المرور" htmlFor="confirmPassword">
-          <Input id="confirmPassword" type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required />
+          <PasswordInput id="confirmPassword" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required />
         </Field>
 
         {errorMessage ? (

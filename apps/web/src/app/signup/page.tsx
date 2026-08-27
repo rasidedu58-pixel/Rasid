@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button, Field, Input } from "@academic-precision/ui";
 import { getSupabaseClient } from "../../lib/supabase-client";
 import { AuthCard } from "../../components/auth/auth-card";
+import { PasswordInput } from "../../components/auth/password-input";
 
 type SignupState = "idle" | "loading" | "error";
 
@@ -88,7 +89,7 @@ export default function SignupPage() {
           <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>
         <Field label="كلمة المرور" htmlFor="password" hint="8 أحرف على الأقل." error={fieldError ?? undefined}>
-          <Input id="password" type="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required invalid={!!fieldError} />
+          <PasswordInput id="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required invalid={!!fieldError} />
         </Field>
 
         {errorMessage ? (
