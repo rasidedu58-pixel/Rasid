@@ -40,7 +40,7 @@ export function GuardiansTab({ studentId, guardians }: { studentId: string; guar
         <Card className="p-6 text-center text-sm text-text-secondary">لا يوجد أولياء أمور مسجّلون بعد.</Card>
       ) : (
         guardians.map((g) => (
-          <Card key={g.id} className="flex items-center justify-between p-4">
+          <Card key={g.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <p className="font-medium text-text-primary">{g.name ?? "بدون اسم"}</p>
@@ -51,7 +51,7 @@ export function GuardiansTab({ studentId, guardians }: { studentId: string; guar
               </p>
               <p className="text-xs text-text-tertiary">{ROLE_LABEL[g.relationship ?? ""] ?? g.relationship}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               {!g.isPrimary && canWrite("CORE_OPERATIONS") ? (
                 <Button variant="ghost" size="sm" onClick={() => setPrimaryMutation.mutate(g.guardianId)} loading={setPrimaryMutation.isPending}>
                   <Star className="h-4 w-4" aria-hidden />

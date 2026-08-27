@@ -131,6 +131,7 @@ export default function NewMonthPage() {
         <SectionCard title="الشهر المستهدف">
           <input
             type="month"
+            aria-label="الشهر المستهدف"
             value={monthInputValue}
             onChange={(e) => {
               const [y, m] = e.target.value.split("-").map(Number);

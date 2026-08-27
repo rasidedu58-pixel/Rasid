@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageCircle } from "lucide-react";
-import { Badge, Button, Card, ErrorState, LoadingRegion, SectionCard, StatusDot, formatDate, formatRelativeToNow, toast } from "@academic-precision/ui";
+import { ChevronDown, MessageCircle } from "lucide-react";
+import type { AttentionEvidenceDto } from "@academic-precision/contracts";
+import { Badge, Button, Card, ErrorState, LoadingRegion, SectionCard, StatusDot, cn, formatDate, formatRelativeToNow, toast } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
@@ -14,6 +15,42 @@ import { fetchStudentDetail } from "../../../../lib/api/students";
 import { ContactGuardianDialog } from "../../../../components/attention/contact-guardian-dialog";
 
 const STATUS_LABEL: Record<string, string> = { NEW: "جديدة", IN_FOLLOWUP: "قيد المتابعة", CONTACTED: "تم التواصل", MONITORING: "تحت الملاحظة", CLOSED: "مغلقة" };
+const EVIDENCE_SOURCE_LABEL: Record<string, string> = { SESSION_RECORD: "سجل حصة", SESSION: "حصة" };
+
+/**
+ * Progressive disclosure for a reason's evidence (§2B). The evidence
+ * `snapshot` is an untyped freeform record, so we deliberately surface only
+ * the honest, stable fields — the source kind and when it was observed —
+ * rather than dumping raw internal snapshot keys. Collapsed by default to
+ * keep the reasons list scan-friendly.
+ */
+function ReasonEvidence({ evidence }: { evidence: AttentionEvidenceDto[] }) {
+  const [open, setOpen] = useState(false);
+  if (evidence.length === 0) return null;
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="focus-ring flex items-center gap-1 rounded-sm text-xs font-medium text-brand hover:underline"
+      >
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} aria-hidden />
+        {open ? "إخفاء الأدلة" : `عرض الأدلة (${evidence.length})`}
+      </button>
+      {open ? (
+        <ul className="mt-2 flex flex-col gap-1.5 border-s-2 border-border ps-3">
+          {evidence.map((e) => (
+            <li key={e.id} className="flex items-center justify-between gap-2 text-xs text-text-secondary">
+              <span>{EVIDENCE_SOURCE_LABEL[e.sourceType] ?? e.sourceType}</span>
+              <span className="tabular-nums text-text-tertiary">{formatDate(e.observedAt)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 const RULE_LABEL: Record<string, string> = {
   ATTENDANCE_ABSENCE_STREAK: "غياب متكرر",
   HOMEWORK_NOT_DONE_STREAK: "تقصير متكرر في الواجب",
@@ -76,6 +113,7 @@ export default function AttentionCaseDetailPage() {
                 <p className="mt-1 text-xs text-text-tertiary">
                   من {formatDate(reason.firstDetectedAt)} — {reason.evidence.length} دليل مسجّل
                 </p>
+                <ReasonEvidence evidence={reason.evidence} />
               </Card>
             ))}
           </div>

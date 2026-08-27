@@ -44,7 +44,7 @@ export function MarketingHeader() {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex h-9 w-9 items-center justify-center rounded-md text-text-secondary md:hidden"
+          className="focus-ring flex h-9 w-9 items-center justify-center rounded-md text-text-secondary transition-colors hover:text-text-primary md:hidden"
           aria-label={open ? "إغلاق القائمة" : "فتح القائمة"}
           aria-expanded={open}
         >

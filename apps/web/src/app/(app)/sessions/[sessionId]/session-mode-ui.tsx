@@ -59,7 +59,7 @@ export function SegmentedStatus<T extends string>({
             disabled={disabled}
             onClick={() => onChange(opt.value)}
             className={cn(
-              "min-w-[52px] rounded-[6px] px-2.5 py-1.5 text-[13px] font-medium outline-none transition-all focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] disabled:opacity-40",
+              "min-w-[52px] rounded-[6px] px-2.5 py-1.5 text-[13px] font-medium outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40",
               active ? cn("bg-surface shadow-xs", ACTIVE_TEXT[opt.tone]) : "text-text-tertiary hover:text-text-secondary",
             )}
           >

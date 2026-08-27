@@ -7,11 +7,19 @@ import { Button, Field, Input, Switch, toast } from "@academic-precision/ui";
 import { defineExam, saveExamScores } from "../../../../lib/api/session-mode";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
+import { RosterList, RosterProgress, RosterRow } from "./session-mode-ui";
 
 /**
  * Exam is optional per session (§18). Absent-from-exam and score=0 are
  * DISTINCT states, never merged — a dedicated "غياب عن الامتحان" toggle
  * per student prevents a 0 ever being typed to mean "didn't attend".
+ *
+ * UI-7: brought into the shared Session-Mode roster grammar (RosterProgress
+ * + RosterList/RosterRow) so the exam roster scans identically to attendance
+ * and homework — an indexed dense row with the field control on the end.
+ * Exam is numeric, so the control is a score input + absent switch rather
+ * than a SegmentedStatus, but the row rhythm, index, and progress readout
+ * now match. Save/version semantics are unchanged.
  *
  * Backend note: there is no GET endpoint for exam definition (only
  * PUT .../exam to define, PUT .../exam/scores to score) — `hasExam` comes
@@ -77,34 +85,51 @@ export function ExamTab({ sessionId, sessionVersion, students, hasExam }: { sess
     );
   }
 
+  const recorded = students.filter((s) => {
+    const local = scores[s.enrollmentId];
+    if (local) return local.absent || local.score !== "";
+    return s.record.examStatus === "SCORED" || s.record.examStatus === "ABSENT_FROM_EXAM";
+  }).length;
+
   return (
-    <div className="flex flex-col gap-3">
-      {examName ? <p className="text-sm text-text-secondary">{examName} — من {maxScore}</p> : null}
-      <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
-        {students.map((s) => {
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <RosterProgress recorded={recorded} total={students.length} unit="مُقيَّم" />
+        </div>
+        {examName ? <span className="shrink-0 text-xs text-text-tertiary">{examName} · من {maxScore}</span> : null}
+      </div>
+
+      <RosterList>
+        {students.map((s, i) => {
           const local = scores[s.enrollmentId] ?? { absent: s.record.examStatus === "ABSENT_FROM_EXAM", score: s.record.examScore !== null ? String(s.record.examScore) : "" };
           return (
-            <div key={s.enrollmentId} className="flex items-center justify-between gap-3 px-4 py-3">
-              <span className="text-sm font-medium text-text-primary">{s.studentName}</span>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <Switch checked={local.absent} onCheckedChange={(v) => setScores((prev) => ({ ...prev, [s.enrollmentId]: { ...local, absent: v } }))} />
-                  غياب عن الامتحان
+            <RosterRow key={s.enrollmentId} index={i + 1} name={s.studentName}>
+              <div className="flex items-center gap-2.5">
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                  <Switch
+                    checked={local.absent}
+                    onCheckedChange={(v) => setScores((prev) => ({ ...prev, [s.enrollmentId]: { ...local, absent: v } }))}
+                    aria-label={`غياب ${s.studentName} عن الامتحان`}
+                  />
+                  غائب
                 </label>
                 <Input
                   type="number"
                   min="0"
                   dir="ltr"
                   disabled={local.absent}
-                  value={local.score}
+                  value={local.absent ? "" : local.score}
                   onChange={(e) => setScores((prev) => ({ ...prev, [s.enrollmentId]: { ...local, score: e.target.value } }))}
-                  className="w-20"
+                  aria-label={`درجة ${s.studentName}`}
+                  className="w-16"
                 />
               </div>
-            </div>
+            </RosterRow>
           );
         })}
-      </div>
+      </RosterList>
+
       <Button onClick={() => scoresMutation.mutate()} loading={scoresMutation.isPending} disabled={Object.keys(scores).length === 0} className="self-end">
         حفظ الدرجات
       </Button>
