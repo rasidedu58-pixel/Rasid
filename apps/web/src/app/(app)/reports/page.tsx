@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileBarChart } from "lucide-react";
-import { Card, ErrorState, LoadingRegion, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SectionCard, StatCard, formatMoney, formatMonthLabel } from "@academic-precision/ui";
+import { Card, ErrorState, LoadingRegion, MetricCell, MetricStrip, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SectionCard, formatMoney, formatMonthLabel } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
@@ -40,6 +40,7 @@ export default function ReportsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="التقرير الشهري"
         title="التقارير"
         actions={effectiveMonthId ? <ExportCsvButton type="MONTHLY_TEACHER" monthId={effectiveMonthId} filename="monthly-report.csv" /> : undefined}
       />
@@ -66,23 +67,27 @@ export default function ReportsPage() {
       ) : reportQuery.isError || !reportQuery.data ? (
         <ErrorState onRetry={() => reportQuery.refetch()} />
       ) : (
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatCard label="الطلاب" value={String(reportQuery.data.totals.studentsCount)} />
-            <StatCard label="الحصص" value={String(reportQuery.data.totals.sessionsCount)} />
-            <StatCard label="المتبقي" value={formatMoney(reportQuery.data.totals.collection.totalRemainingMinor)} />
-            <StatCard label="متأخرات" value={String(reportQuery.data.totals.overdueCount)} tone={reportQuery.data.totals.overdueCount > 0 ? "danger" : undefined} />
-          </div>
+        <div className="flex flex-col gap-6">
+          <MetricStrip>
+            <MetricCell label="الطلاب" value={reportQuery.data.totals.studentsCount} />
+            <MetricCell label="الحصص" value={reportQuery.data.totals.sessionsCount} />
+            <MetricCell label="المتبقّي" value={formatMoney(reportQuery.data.totals.collection.totalRemainingMinor)} />
+            <MetricCell
+              label="متأخرات"
+              value={reportQuery.data.totals.overdueCount}
+              tone={reportQuery.data.totals.overdueCount > 0 ? "danger" : "default"}
+            />
+          </MetricStrip>
 
-          <SectionCard title="المجموعات">
+          <SectionCard title="المجموعات" description="ملخّص كل مجموعة ضمن نطاق رؤيتك لهذا الشهر.">
             {reportQuery.data.groups.length === 0 ? (
               <p className="text-sm text-text-secondary">لا توجد مجموعات ضمن نطاق رؤيتك لهذا الشهر.</p>
             ) : (
               <ul className="flex flex-col divide-y divide-border">
                 {reportQuery.data.groups.map((g) => (
-                  <li key={g.groupId} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-text-primary">{g.groupName}</span>
-                    <span className="text-text-secondary tabular-nums">
+                  <li key={g.groupId} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="truncate text-sm font-medium text-text-primary">{g.groupName}</span>
+                    <span className="shrink-0 text-sm text-text-secondary tabular-nums">
                       {g.studentsCount} طالب · {g.sessionsCount} حصة
                     </span>
                   </li>
@@ -91,11 +96,13 @@ export default function ReportsPage() {
             )}
           </SectionCard>
 
-          <SectionCard title="متابعة نشطة">
-            <p className="text-sm text-text-secondary">
-              {reportQuery.data.totals.openAttentionCount} حالة متابعة مفتوحة · {reportQuery.data.totals.openFollowupsCount} متابعة مجدولة
-            </p>
-          </SectionCard>
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold text-text-secondary">المتابعة النشطة</h2>
+            <MetricStrip columns={2}>
+              <MetricCell label="حالات متابعة مفتوحة" value={reportQuery.data.totals.openAttentionCount} tone={reportQuery.data.totals.openAttentionCount > 0 ? "warning" : "default"} />
+              <MetricCell label="متابعات مجدولة" value={reportQuery.data.totals.openFollowupsCount} />
+            </MetricStrip>
+          </section>
         </div>
       )}
 

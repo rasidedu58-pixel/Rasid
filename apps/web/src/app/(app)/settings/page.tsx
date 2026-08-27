@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { SectionCard, Tabs, TabsContent, TabsList, TabsTrigger } from "@academic-precision/ui";
+import { Avatar, AvatarFallback, SectionCard, Tabs, TabsContent, TabsList, TabsTrigger, initialsFromName } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useSession } from "../../../lib/session-provider";
 import { useWorkspace } from "../../../lib/workspace-provider";
@@ -34,7 +34,16 @@ function SettingsContent() {
 
         <TabsContent value="account">
           <SectionCard title="بيانات الحساب">
-            <div className="flex flex-col gap-2 text-sm">
+            <div className="flex items-center gap-4 border-b border-border pb-4">
+              <Avatar className="h-12 w-12">
+                <AvatarFallback>{initialsFromName(session?.user.email ?? "")}</AvatarFallback>
+              </Avatar>
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate text-sm font-medium text-text-primary" dir="ltr">{session?.user.email ?? "—"}</span>
+                <span className="text-xs text-text-tertiary">{roleLabel === "OWNER" ? "مالك مساحة العمل" : roleLabel ?? "—"}</span>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-col gap-2 text-sm">
               <Row label="البريد الإلكتروني" value={session?.user.email ?? "—"} />
               <Row label="الدور" value={roleLabel === "OWNER" ? "مالك مساحة العمل" : roleLabel ?? "—"} />
             </div>

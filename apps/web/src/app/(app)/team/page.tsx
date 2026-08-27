@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck } from "lucide-react";
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, toast, useConfirmDialog } from "@academic-precision/ui";
+import { Crown, ShieldCheck, User } from "lucide-react";
+import { Button, ConfirmDialog, EmptyState, ErrorState, SkeletonRows, StatusDot, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, toast, useConfirmDialog } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
@@ -44,7 +44,7 @@ export default function TeamPage() {
 
   return (
     <>
-      <PageHeader title="الفريق والصلاحيات" />
+      <PageHeader title="الفريق والصلاحيات" description="أعضاء مساحة العمل وأدوارهم. مالك المساحة محميّ ولا يمكن تعطيله." />
 
       {query.isLoading ? (
         <SkeletonRows rows={4} />
@@ -57,34 +57,48 @@ export default function TeamPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>الدور</TableHead>
+                <TableHead>العضو</TableHead>
                 <TableHead>الحالة</TableHead>
-                <TableHead />
+                <TableHead className="text-end" aria-label="إجراء" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {query.data!.members.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell className="font-medium text-text-primary">{m.roleLabel === "OWNER" ? "مالك مساحة العمل" : m.roleLabel}</TableCell>
-                  <TableCell>
-                    <Badge tone={STATUS_TONE[m.status] ?? "neutral"}>{STATUS_LABEL[m.status] ?? m.status}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {isOwner && m.roleLabel !== "OWNER" && m.status !== "DISABLED" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setDisabling(m.id);
-                          confirm.openDialog();
-                        }}
-                      >
-                        تعطيل
-                      </Button>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {query.data!.members.map((m) => {
+                const owner = m.roleLabel === "OWNER";
+                return (
+                  <TableRow key={m.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", owner ? "bg-brand-subtle text-brand" : "bg-surface-sunken text-text-secondary")} aria-hidden>
+                          {owner ? <Crown className="h-4 w-4" /> : <User className="h-4 w-4" />}
+                        </span>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium text-text-primary">{owner ? "مالك مساحة العمل" : m.roleLabel === "ASSISTANT" ? "مساعد" : m.roleLabel}</span>
+                          {owner ? <span className="text-xs text-text-tertiary">صلاحيات كاملة · محميّ</span> : null}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <StatusDot tone={STATUS_TONE[m.status] ?? "neutral"} label={STATUS_LABEL[m.status] ?? m.status} />
+                    </TableCell>
+                    <TableCell className="text-end">
+                      {isOwner && !owner && m.status !== "DISABLED" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-danger hover:bg-danger-subtle hover:text-danger"
+                          onClick={() => {
+                            setDisabling(m.id);
+                            confirm.openDialog();
+                          }}
+                        >
+                          تعطيل
+                        </Button>
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </TableScroll>
