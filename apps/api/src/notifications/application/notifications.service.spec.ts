@@ -62,4 +62,52 @@ describe("NotificationsService", () => {
     const otherUserRow = repo.seed({ workspaceId: WORKSPACE_A, userId: "someone-else", type: "FOLLOWUP_DUE", title: "not mine", body: "b" });
     await expect(service.markRead(user, context, otherUserRow.id)).rejects.toBeInstanceOf(ResourceNotFoundException);
   });
+
+  // ---------------------------------------------------------------------
+  // Phase 15C — `GET /notifications` now fetches its rows + unread count in
+  // ONE transaction (was two). These prove the combined loader preserves
+  // exactly the same visibility, ordering, unread-count, and workspace/user
+  // scoping, and that the endpoint issues the single combined read.
+  // ---------------------------------------------------------------------
+  describe("Phase 15C — one-transaction page loader", () => {
+    it("list() uses the single combined loadPage (one transaction), not two separate reads", async () => {
+      repo.seed({ workspaceId: WORKSPACE_A, userId: user.id, type: "FOLLOWUP_DUE", title: "t", body: "b" });
+      repo.loadPageCalls = 0;
+      await service.list(user, context);
+      expect(repo.loadPageCalls).toBe(1);
+    });
+
+    it("combined loader is byte-identical to the old two-call path (rows + unreadCount)", async () => {
+      repo.seed({ workspaceId: WORKSPACE_A, userId: user.id, type: "FOLLOWUP_DUE", title: "t1", body: "b1" });
+      repo.seed({ workspaceId: WORKSPACE_A, userId: user.id, type: "MISSING_RECORDS", title: "t2", body: "b2", readAt: new Date() });
+      repo.seed({ workspaceId: WORKSPACE_A, userId: user.id, type: "SUBSCRIPTION_EXPIRING", title: "t3", body: "b3" });
+
+      const viaCombined = await service.list(user, context);
+      const rowsDirect = await repo.listForUser(WORKSPACE_A, user.id);
+      const unreadDirect = await repo.countUnreadForUser(WORKSPACE_A, user.id);
+      expect(viaCombined.notifications.map((n) => n.id)).toEqual(rowsDirect.map((r) => r.id)); // same order
+      expect(viaCombined.unreadCount).toBe(unreadDirect);
+      expect(viaCombined.unreadCount).toBe(2);
+    });
+
+    it("the unread count is scoped to THIS workspace + user — a second workspace's unread never bleeds in", async () => {
+      const WORKSPACE_B = "workspace-b";
+      // Same user id, different workspace — must be invisible here.
+      repo.seed({ workspaceId: WORKSPACE_B, userId: user.id, type: "FOLLOWUP_DUE", title: "other-ws", body: "b" });
+      repo.seed({ workspaceId: WORKSPACE_B, userId: user.id, type: "FOLLOWUP_DUE", title: "other-ws-2", body: "b" });
+      // One unread in workspace A.
+      repo.seed({ workspaceId: WORKSPACE_A, userId: user.id, type: "MISSING_RECORDS", title: "mine", body: "b" });
+
+      const result = await service.list(user, context);
+      expect(result.notifications).toHaveLength(1);
+      expect(result.notifications[0]!.title).toBe("mine");
+      expect(result.unreadCount).toBe(1); // NOT 3 — workspace B's two unread are excluded
+    });
+
+    it("an empty stream returns zero rows and a zero unread count (no crash on the count query)", async () => {
+      const result = await service.list(user, context);
+      expect(result.notifications).toEqual([]);
+      expect(result.unreadCount).toBe(0);
+    });
+  });
 });

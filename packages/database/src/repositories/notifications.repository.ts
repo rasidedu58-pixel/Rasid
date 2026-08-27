@@ -30,11 +30,41 @@ export async function listNotificationsForUser(
 }
 
 export async function countUnreadForUser(db: Db, params: { workspaceId: string; userId: string }): Promise<number> {
-  const rows = await db
-    .select({ id: notifications.id })
+  // Phase 15C — DB-side COUNT(*) (one row back) instead of SELECTing every
+  // unread id and counting them in JS. Same value, no per-row transfer.
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
     .from(notifications)
     .where(and(eq(notifications.workspaceId, params.workspaceId), eq(notifications.userId, params.userId), isNull(notifications.readAt)));
-  return rows.length;
+  return row?.count ?? 0;
+}
+
+export interface NotificationsPage {
+  rows: NotificationRow[];
+  unreadCount: number;
+}
+
+/**
+ * Phase 15C — the whole `GET /notifications` payload (the page of rows AND
+ * the total unread count) in ONE transaction. The list endpoint used to open
+ * TWO separate `withRuntimeContext` transactions — one for the rows, one for
+ * the count — for a response that is always a single small page. This runs
+ * the SAME two queries (`listNotificationsForUser` + the DB-side
+ * `countUnreadForUser`) on one connection inside one transaction; postgres.js
+ * pipelines the pair, so it keeps the concurrency of the old two-transaction
+ * `Promise.all` while paying one BEGIN/COMMIT. No visibility, ordering,
+ * unread-state, or user/workspace-scoping logic changes — both queries carry
+ * the exact same workspace_id + user_id predicates as before (RLS unchanged).
+ */
+export async function loadNotificationsPage(
+  db: Db,
+  params: { workspaceId: string; userId: string; limit?: number },
+): Promise<NotificationsPage> {
+  const [rows, unreadCount] = await Promise.all([
+    listNotificationsForUser(db, params),
+    countUnreadForUser(db, params),
+  ]);
+  return { rows, unreadCount };
 }
 
 /** Column-restricted UPDATE (`read_at` only) — matches the grant exactly (migration 0043). Scoped to the caller's own notification via the RLS policy AND an explicit id match; a foreign/nonexistent id simply updates 0 rows (safe no-leak — never a distinguishable 403/404). */

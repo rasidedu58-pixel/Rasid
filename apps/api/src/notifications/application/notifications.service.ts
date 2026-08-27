@@ -24,10 +24,11 @@ export class NotificationsService {
   constructor(@Inject(NOTIFICATIONS_REPOSITORY) private readonly repository: NotificationsRepositoryPort) {}
 
   async list(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<ListNotificationsResponse> {
-    const [rows, unreadCount] = await Promise.all([
-      this.repository.listForUser(workspaceContext.workspaceId, authUser.id),
-      this.repository.countUnreadForUser(workspaceContext.workspaceId, authUser.id),
-    ]);
+    // Phase 15C — the page of rows AND the unread count are fetched in ONE
+    // transaction (was two separate ones). Both queries keep the exact same
+    // workspace_id + user_id scoping, so visibility/ordering/unread semantics
+    // are unchanged — this only collapses the transaction count.
+    const { rows, unreadCount } = await this.repository.loadPage(workspaceContext.workspaceId, authUser.id);
     return { notifications: rows.map((r) => this.toDto(r)), unreadCount };
   }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { NotificationRow, NotificationType } from "@academic-precision/database";
+import type { NotificationRow, NotificationsPage, NotificationType } from "@academic-precision/database";
 import type { NotificationsRepositoryPort } from "../ports/notifications-repository.port";
 
 export class InMemoryNotificationsRepository implements NotificationsRepositoryPort {
@@ -31,6 +31,13 @@ export class InMemoryNotificationsRepository implements NotificationsRepositoryP
 
   async countUnreadForUser(workspaceId: string, userId: string): Promise<number> {
     return [...this.rows.values()].filter((r) => r.workspaceId === workspaceId && r.userId === userId && r.readAt === null).length;
+  }
+
+  loadPageCalls = 0;
+  async loadPage(workspaceId: string, userId: string): Promise<NotificationsPage> {
+    this.loadPageCalls += 1;
+    const [rows, unreadCount] = await Promise.all([this.listForUser(workspaceId, userId), this.countUnreadForUser(workspaceId, userId)]);
+    return { rows, unreadCount };
   }
 
   async markRead(workspaceId: string, userId: string, id: string): Promise<boolean> {

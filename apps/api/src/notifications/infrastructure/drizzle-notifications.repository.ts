@@ -2,10 +2,12 @@ import { Injectable } from "@nestjs/common";
 import {
   countUnreadForUser,
   listNotificationsForUser,
+  loadNotificationsPage,
   markAllNotificationsRead,
   markNotificationRead,
   withRuntimeContext,
   type NotificationRow,
+  type NotificationsPage,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
 import type { NotificationsRepositoryPort } from "../application/ports/notifications-repository.port";
@@ -23,6 +25,11 @@ export class DrizzleNotificationsRepository implements NotificationsRepositoryPo
 
   countUnreadForUser(workspaceId: string, userId: string): Promise<number> {
     return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => countUnreadForUser(db, { workspaceId, userId }));
+  }
+
+  /** Phase 15C — rows + unread count in ONE transaction (was two). */
+  loadPage(workspaceId: string, userId: string): Promise<NotificationsPage> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => loadNotificationsPage(db, { workspaceId, userId }));
   }
 
   markRead(workspaceId: string, userId: string, id: string): Promise<boolean> {
