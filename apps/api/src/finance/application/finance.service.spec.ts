@@ -268,4 +268,124 @@ describe("FinanceService", () => {
       await expect(service.getFinanceSummary(assistant, assistantContext)).rejects.toBeInstanceOf(ForbiddenApiException);
     });
   });
+
+  // ---------------------------------------------------------------------
+  // Phase 15C — guard grant/membership reuse on the two hot read paths.
+  // `getFinanceSummary` reuses the "finance.overview" grant the guard
+  // already resolved; `getCollectionQueue` (an OR-permission route with no
+  // single grant) reuses the ACTIVE membership the guard fetched. Both
+  // sources are the SAME team repository the resolver uses. These prove the
+  // reuse preserves scope EXACTLY, never lets `payments.record` satisfy
+  // `finance.overview`, and does no extra permission resolution.
+  // ---------------------------------------------------------------------
+  describe("Phase 15C — guard grant/membership reuse", () => {
+    async function withGuardGrant(context: WorkspaceContext, userId: string, permission: string): Promise<WorkspaceContext> {
+      const grant = await resolver.hasPermission(context.workspaceId, userId, permission as never, context.membership);
+      return { ...context, grant };
+    }
+
+    async function seedScopedAssistant(email: string, permissionKey: string, groupIds: string[]) {
+      const user: VerifiedSupabaseToken = { id: `u-${email}`, email };
+      const membership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: user.id, roleLabel: "ASSISTANT" });
+      await teamRepo.replaceMembershipGrants({
+        workspaceId: WORKSPACE_A,
+        membershipId: membership.id,
+        createdByUserId: owner.id,
+        desiredGrants: [{ permissionKey, scopeType: "SELECTED_GROUPS" as const, groupIds }],
+      });
+      return { user, context: { workspaceId: WORKSPACE_A, membership } as WorkspaceContext };
+    }
+
+    it("finance summary: reusing the finance.overview grant returns the same totals AND does zero extra resolution", async () => {
+      await seedEnrolledStudent("طالب صيف");
+      const fallback = await service.getFinanceSummary(owner, ownerContext);
+
+      const ctxWithGrant = await withGuardGrant(ownerContext, owner.id, "finance.overview");
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      const reuse = await service.getFinanceSummary(owner, ctxWithGrant);
+
+      expect(reuse).toEqual(fallback);
+      expect(reuse.totalNetDueMinor).toBe(60000);
+      expect(teamRepo.findMembershipByUserAndWorkspaceCalls).toBe(0);
+    });
+
+    it("finance summary: a stashed payments.record grant is NEVER accepted as finance.overview (invariant preserved)", async () => {
+      await seedEnrolledStudent();
+      const { user: assistant, context } = await seedScopedAssistant("pay-only@example.com", "payments.record", [groupA.id]);
+
+      // Even if a payments.record grant is (defensively) present on the
+      // context, the summary path must refuse it and resolve finance.overview
+      // for real — which this assistant lacks.
+      const payGrant = await resolver.hasPermission(WORKSPACE_A, assistant.id, "payments.record", context.membership);
+      const ctx: WorkspaceContext = { ...context, grant: payGrant };
+      await expect(service.getFinanceSummary(assistant, ctx)).rejects.toBeInstanceOf(ForbiddenApiException);
+    });
+
+    it("finance summary: a SELECTED_GROUPS finance.overview grant reused from the guard restricts totals to that scope", async () => {
+      // Group A obligation (in scope) + a Group B obligation (out of scope).
+      await seedEnrolledStudent("طالب أ");
+      const groupB = shared.seedGroup({ workspaceId: WORKSPACE_A, name: "Group B" });
+      const groupMonthB = shared.seedGroupMonth({ workspaceId: WORKSPACE_A, groupId: groupB.id, joinFeePolicy: "FULL", baseFeeMinor: 60000 });
+      const studentB = await studentsService.createStudent(owner, ownerContext, { name: "طالب ب" }, null);
+      const previewB = await enrollmentsService.previewEnrollment(owner, ownerContext, groupMonthB.id, { studentId: studentB.student.id, joinDate: "2026-08-01" });
+      await enrollmentsService.createEnrollment(
+        owner,
+        ownerContext,
+        groupMonthB.id,
+        { studentId: studentB.student.id, joinDate: "2026-08-01", feeMethod: "FULL_MONTH", previewToken: previewB.previewToken },
+        null,
+      );
+
+      const { user: assistant, context } = await seedScopedAssistant("overview-a@example.com", "finance.overview", [groupA.id]);
+      const ctxWithGrant = await withGuardGrant(context, assistant.id, "finance.overview");
+      const summary = await service.getFinanceSummary(assistant, ctxWithGrant);
+      // Only Group A's single obligation is counted — Group B is invisible.
+      expect(summary.totalNetDueMinor).toBe(60000);
+      expect(summary.unpaidCount).toBe(1);
+    });
+
+    it("collection queue: the guard's ACTIVE membership hint is consumed — the queue resolves with zero membership re-queries", async () => {
+      await seedEnrolledStudent("طالب قائمة");
+
+      // Baseline: resolving a permission WITHOUT the hint re-queries the
+      // membership from the team repository (no request-scoped memoization in
+      // unit tests). This proves the counter is load-bearing.
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      await resolver.hasPermission(WORKSPACE_A, owner.id, "finance.overview");
+      expect(teamRepo.findMembershipByUserAndWorkspaceCalls).toBeGreaterThan(0);
+
+      // The endpoint passes the membership PermissionGuard already fetched, so
+      // both OR-permission resolutions reuse it — zero additional fetches.
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      const reuse = await service.getCollectionQueue(owner, ownerContext);
+      expect(reuse.items).toHaveLength(1);
+      expect(teamRepo.findMembershipByUserAndWorkspaceCalls).toBe(0);
+    });
+
+    it("collection queue: a group-scoped payments.view_student_status caller sees only their group's queue", async () => {
+      await seedEnrolledStudent("طالب أ"); // Group A obligation
+      const groupB = shared.seedGroup({ workspaceId: WORKSPACE_A, name: "Group B" });
+      const groupMonthB = shared.seedGroupMonth({ workspaceId: WORKSPACE_A, groupId: groupB.id, joinFeePolicy: "FULL", baseFeeMinor: 60000 });
+      const studentB = await studentsService.createStudent(owner, ownerContext, { name: "طالب ب" }, null);
+      const previewB = await enrollmentsService.previewEnrollment(owner, ownerContext, groupMonthB.id, { studentId: studentB.student.id, joinDate: "2026-08-01" });
+      await enrollmentsService.createEnrollment(
+        owner,
+        ownerContext,
+        groupMonthB.id,
+        { studentId: studentB.student.id, joinDate: "2026-08-01", feeMethod: "FULL_MONTH", previewToken: previewB.previewToken },
+        null,
+      );
+
+      const { user: assistant, context } = await seedScopedAssistant("queue-a@example.com", "payments.view_student_status", [groupA.id]);
+      const queue = await service.getCollectionQueue(assistant, context);
+      expect(queue.items).toHaveLength(1);
+      expect(queue.items[0]!.studentName).toBe("طالب أ");
+    });
+
+    it("collection queue: a caller with NEITHER payments.view_student_status NOR finance.overview is forbidden", async () => {
+      await seedEnrolledStudent();
+      const { user: assistant, context } = await seedScopedAssistant("nobody@example.com", "attendance.read", [groupA.id]);
+      await expect(service.getCollectionQueue(assistant, context)).rejects.toBeInstanceOf(ForbiddenApiException);
+    });
+  });
 });

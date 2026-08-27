@@ -46,6 +46,19 @@ export function listAttentionReasonsForCase(db: Db, attentionCaseId: string): Pr
   return db.select().from(attentionReasons).where(eq(attentionReasons.attentionCaseId, attentionCaseId));
 }
 
+/**
+ * Phase 15C — batched (single `inArray` query, no N+1) counterpart of
+ * {@link listAttentionReasonsForCase}. `GET /attention-cases` used to call
+ * the single-case version once PER listed case (a genuine per-row fan-out —
+ * N extra RLS transactions per page); this fetches every listed case's
+ * Reasons in one query. Grouping by `attentionCaseId` back into per-case
+ * arrays is the caller's job. Returns `[]` for an empty id set (no query).
+ */
+export function listAttentionReasonsForCases(db: Db, attentionCaseIds: string[]): Promise<AttentionReasonRow[]> {
+  if (attentionCaseIds.length === 0) return Promise.resolve([]);
+  return db.select().from(attentionReasons).where(inArray(attentionReasons.attentionCaseId, attentionCaseIds));
+}
+
 export async function listAttentionEvidenceForReasons(
   db: Db,
   attentionReasonIds: string[],
@@ -124,6 +137,50 @@ export function listStudentNamesByIds(db: Db, workspaceId: string, studentIds: s
     .select({ id: students.id, name: students.name, studentCode: students.studentCode })
     .from(students)
     .where(and(eq(students.workspaceId, workspaceId), inArray(students.id, studentIds)));
+}
+
+export interface AttentionCaseListData {
+  cases: AttentionCaseRow[];
+  /** Every listed case's Reasons, grouped by `attentionCaseId` (empty array for a case with none). */
+  reasonsByCaseId: Map<string, AttentionReasonRow[]>;
+  studentsById: Map<string, { id: string; name: string; studentCode: string }>;
+}
+
+/**
+ * Phase 15C — the whole `GET /attention-cases` page in ONE transaction.
+ *
+ * The list endpoint used to open a separate RLS transaction for the cases
+ * query, another for the batched student names, and then ONE MORE PER CASE
+ * for that case's Reasons (the N+1 the DTO builder needed to compute each
+ * row's visible priority). This runs the SAME three queries — the exact
+ * `listAttentionCasesForWorkspace`, `listStudentNamesByIds`, and a single
+ * batched `listAttentionReasonsForCases` — inside one `withRuntimeContext`
+ * transaction. The cases query must complete first (its result set decides
+ * which student/reason ids to fetch); the reasons + student-name queries are
+ * then independent and issued together (postgres.js pipelines them on the
+ * one connection). No filtering/scoping logic changes — the caller still
+ * applies its Group-Scope reason filter and priority computation exactly as
+ * before; this only collapses the transaction count.
+ */
+export async function loadAttentionCaseList(db: Db, filter: ListAttentionCasesFilter): Promise<AttentionCaseListData> {
+  const cases = await listAttentionCasesForWorkspace(db, filter);
+  const caseIds = cases.map((c) => c.id);
+  const studentIds = [...new Set(cases.map((c) => c.studentId))];
+
+  const [reasons, studentNames] = await Promise.all([
+    listAttentionReasonsForCases(db, caseIds),
+    listStudentNamesByIds(db, filter.workspaceId, studentIds),
+  ]);
+
+  const reasonsByCaseId = new Map<string, AttentionReasonRow[]>();
+  for (const reason of reasons) {
+    const list = reasonsByCaseId.get(reason.attentionCaseId) ?? [];
+    list.push(reason);
+    reasonsByCaseId.set(reason.attentionCaseId, list);
+  }
+  const studentsById = new Map(studentNames.map((s) => [s.id, s]));
+
+  return { cases, reasonsByCaseId, studentsById };
 }
 
 export function findScheduledFollowupById(db: Db, id: string): Promise<ScheduledFollowupRow | undefined> {

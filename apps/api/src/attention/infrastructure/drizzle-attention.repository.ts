@@ -15,6 +15,7 @@ import {
   listAttentionCasesForWorkspace,
   listAttentionEvidenceForReasons,
   listAttentionReasonsForCase,
+  loadAttentionCaseList,
   listGroupIdsForAttentionCase,
   listGroupIdsForStudent,
   listGuardiansForStudent,
@@ -23,6 +24,7 @@ import {
   rescheduleScheduledFollowupWithVersion,
   updateAttentionCaseStatusWithVersion,
   withRuntimeContext,
+  type AttentionCaseListData,
   type AttentionCaseRow,
   type AttentionEvidenceRow,
   type AttentionReasonRow,
@@ -78,6 +80,17 @@ export class DrizzleAttentionRepository implements AttentionRepositoryPort {
     cursorId?: string;
   }): Promise<AttentionCaseRow[]> {
     return withRuntimeContext(this.runtimeCtx(filter.workspaceId), (db) => listAttentionCasesForWorkspace(db, filter));
+  }
+
+  /** Phase 15C — cases + reasons + student names in ONE transaction (was N+2). */
+  loadAttentionCaseList(filter: {
+    workspaceId: string;
+    status?: string;
+    restrictToGroupIds?: string[];
+    limit: number;
+    cursorId?: string;
+  }): Promise<AttentionCaseListData> {
+    return withRuntimeContext(this.runtimeCtx(filter.workspaceId), (db) => loadAttentionCaseList(db, filter));
   }
 
   listStudentNamesByIds(workspaceId: string, studentIds: string[]): Promise<Array<{ id: string; name: string; studentCode: string }>> {

@@ -364,4 +364,111 @@ describe("AttentionService", () => {
 
     await expect(service.getAttentionCase(owner, ownerContext, foreignCase.id)).rejects.toBeInstanceOf(ResourceNotFoundException);
   });
+
+  // ---------------------------------------------------------------------
+  // Phase 15C — `GET /attention-cases` guard-grant reuse + one-transaction
+  // list loader. The guard already resolves the route's "followup.read"
+  // grant (from the SAME team repository the resolver uses) and stashes it
+  // on WorkspaceContext.grant; the list path reuses it instead of
+  // re-resolving. These prove the reuse is (a) byte-identical in scope to
+  // the fallback and (b) never widens visibility, plus that the N+1 per-case
+  // Reasons fetch is gone.
+  // ---------------------------------------------------------------------
+  describe("Phase 15C — guard-grant reuse (list)", () => {
+    /** Simulate PermissionGuard: resolve the route's grant with the membership it already fetched, and stash it on the context. */
+    async function withGuardGrant(context: WorkspaceContext, userId: string, permission: string): Promise<WorkspaceContext> {
+      const grant = await resolver.hasPermission(context.workspaceId, userId, permission as never, context.membership);
+      return { ...context, grant };
+    }
+
+    it("owner: reusing the stashed followup.read grant lists every case AND performs zero extra membership/permission resolution", async () => {
+      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "Student A" });
+      const group = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group A" });
+      const c = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id, priority: "MEDIUM" });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: c.id, groupId: group.id, ruleKey: "absence.consecutive", severity: "MEDIUM" });
+
+      const ctxWithGrant = await withGuardGrant(ownerContext, owner.id, "followup.read");
+
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      const list = await service.listAttentionCases(owner, ctxWithGrant, {});
+      expect(list.items).toHaveLength(1);
+      expect(list.items[0]!.priority).toBe("MEDIUM");
+      // Reuse path: the service resolved scope from the stashed grant, so it
+      // never re-queried the membership row.
+      expect(teamRepo.findMembershipByUserAndWorkspaceCalls).toBe(0);
+      // One combined transaction fetched cases + reasons + names (no N+1).
+      expect(repo.loadAttentionCaseListCalls).toBe(1);
+    });
+
+    it("scoped assistant: grant reuse yields EXACTLY the same group-scoped visibility as a fresh resolution", async () => {
+      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "Multi-Group Student" });
+      const groupA = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group A" });
+      const groupB = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group B" });
+      const c = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id, priority: "HIGH" });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: c.id, groupId: groupA.id, ruleKey: "absence.consecutive", severity: "MEDIUM" });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: c.id, groupId: groupB.id, ruleKey: "combined.medium", severity: "HIGH" });
+
+      const { user: assistantA, context: contextA } = await seedAssistant("assistant-a@example.com", [groupA.id]);
+
+      // Fallback path (no grant on context) — the baseline behaviour.
+      const listFallback = await service.listAttentionCases(assistantA, contextA, {});
+      expect(listFallback.items).toHaveLength(1);
+      expect(listFallback.items[0]!.priority).toBe("MEDIUM"); // Group B's HIGH never leaks
+
+      // Reuse path (grant stashed as the guard would) — must match exactly.
+      const ctxWithGrant = await withGuardGrant(contextA, assistantA.id, "followup.read");
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      const listReuse = await service.listAttentionCases(assistantA, ctxWithGrant, {});
+      expect(listReuse).toEqual(listFallback);
+      expect(teamRepo.findMembershipByUserAndWorkspaceCalls).toBe(0);
+    });
+
+    it("mismatched stashed grant (different permission) is ignored — falls back to a real followup.read resolution", async () => {
+      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "Student A" });
+      const group = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group A" });
+      const c = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id, priority: "MEDIUM" });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: c.id, groupId: group.id, ruleKey: "absence.consecutive", severity: "MEDIUM" });
+
+      // A grant for a DIFFERENT permission must never be used as the
+      // followup.read scope — the service ignores it and resolves for real.
+      const wrongGrant = await resolver.hasPermission(WORKSPACE_A, owner.id, "attendance.read", ownerContext.membership);
+      const ctx: WorkspaceContext = { ...ownerContext, grant: wrongGrant };
+
+      teamRepo.findMembershipByUserAndWorkspaceCalls = 0;
+      const list = await service.listAttentionCases(owner, ctx, {});
+      expect(list.items).toHaveLength(1);
+      // Fallback engaged: a real resolution DID happen (membership re-queried).
+      expect(teamRepo.findMembershipByUserAndWorkspaceCalls).toBeGreaterThan(0);
+    });
+
+    it("a scoped assistant's stashed grant never exposes another group's case (no widening)", async () => {
+      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "Student" });
+      const groupA = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group A" });
+      const groupC = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group C — unrelated" });
+      const c = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: c.id, groupId: groupA.id, ruleKey: "absence.consecutive" });
+
+      const { user: outsider, context: outsiderContext } = await seedAssistant("outsider@example.com", [groupC.id]);
+      const ctxWithGrant = await withGuardGrant(outsiderContext, outsider.id, "followup.read");
+      const list = await service.listAttentionCases(outsider, ctxWithGrant, {});
+      expect(list.items).toHaveLength(0);
+    });
+
+    it("grant reuse never crosses workspaces — a Workspace B grant on a Workspace A context still lists only Workspace A cases", async () => {
+      const studentA = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "A student" });
+      const groupA = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group A" });
+      const caseA = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: studentA.id });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: caseA.id, groupId: groupA.id, ruleKey: "absence.consecutive" });
+      // A case in workspace B must never appear for a workspace-A caller.
+      const studentB = repo.seedStudent({ workspaceId: WORKSPACE_B, name: "B student" });
+      const groupB = repo.seedGroup({ workspaceId: WORKSPACE_B, name: "Group B" });
+      const caseB = repo.seedCase({ workspaceId: WORKSPACE_B, studentId: studentB.id });
+      repo.seedReason({ workspaceId: WORKSPACE_B, attentionCaseId: caseB.id, groupId: groupB.id, ruleKey: "absence.consecutive" });
+
+      const ctxWithGrant = await withGuardGrant(ownerContext, owner.id, "followup.read");
+      const list = await service.listAttentionCases(owner, ctxWithGrant, {});
+      expect(list.items).toHaveLength(1);
+      expect(list.items[0]!.studentId).toBe(studentA.id);
+    });
+  });
 });

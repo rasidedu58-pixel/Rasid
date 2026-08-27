@@ -30,7 +30,7 @@ import {
 } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
-import { PermissionResolverService } from "../../team/application/permission-resolver.service";
+import { PermissionResolverService, type EffectiveGrant } from "../../team/application/permission-resolver.service";
 import { ATTENTION_REPOSITORY, type AttentionRepositoryPort } from "./ports/attention-repository.port";
 
 const DEFAULT_LIST_LIMIT = 50;
@@ -84,10 +84,23 @@ export class AttentionService {
     workspaceContext: WorkspaceContext,
     query: { status?: string; cursor?: string; limit?: number },
   ): Promise<ListAttentionCasesResponse> {
-    const restrictToGroupIds = await this.resolveGroupScopeFilter(workspaceContext.workspaceId, authUser.id, "followup.read");
+    // Phase 15C — reuse the "followup.read" grant PermissionGuard already
+    // resolved for this exact route (from the SAME team repository the
+    // resolver would query — safe, unlike /context's identity-side hint), so
+    // the group-scope filter is derived without re-resolving permissions
+    // (which re-queried membership + grants). If the stashed grant is for a
+    // different permission (defensive — it never is on this route) we fall
+    // back to a real resolution. Byte-identical scope, one fewer resolution.
+    const restrictToGroupIds =
+      workspaceContext.grant?.permission === "followup.read"
+        ? this.scopeFilterFromGrant(workspaceContext.grant)
+        : await this.resolveGroupScopeFilter(workspaceContext.workspaceId, authUser.id, "followup.read");
     const limit = Math.min(query.limit ?? DEFAULT_LIST_LIMIT, 200);
 
-    const rows = await this.repository.listAttentionCasesForWorkspace({
+    // Phase 15C — cases, every case's Reasons (was an N+1), and the batched
+    // student names all in ONE transaction. Slicing/scoping/priority logic
+    // below is unchanged.
+    const { cases, reasonsByCaseId, studentsById } = await this.repository.loadAttentionCaseList({
       workspaceId: workspaceContext.workspaceId,
       status: query.status,
       restrictToGroupIds,
@@ -95,22 +108,17 @@ export class AttentionService {
       cursorId: query.cursor ?? undefined,
     });
 
-    const hasNext = rows.length > limit;
-    const items = rows.slice(0, limit);
+    const hasNext = cases.length > limit;
+    const items = cases.slice(0, limit);
     const last = items[items.length - 1];
-
-    // Phase 11 — one batched lookup for every row's studentName/studentCode
-    // (no N+1), so the list-summary DTO is directly usable by the queue UI.
-    const studentNames = await this.repository.listStudentNamesByIds(workspaceContext.workspaceId, items.map((row) => row.studentId));
-    const studentById = new Map(studentNames.map((s) => [s.id, s]));
 
     const summaries: AttentionCaseSummary[] = [];
     for (const row of items) {
-      const reasons = await this.repository.listAttentionReasonsForCase(row.id);
+      const reasons = reasonsByCaseId.get(row.id) ?? [];
       const visibleReasons = this.filterReasonsToScope(reasons, restrictToGroupIds);
       const priority = computeVisiblePriority(visibleReasons.map((r) => ({ severity: r.severity as "MEDIUM" | "HIGH" })));
       if (!priority) continue; // defensive — listAttentionCasesForWorkspace already restricts to in-scope cases
-      const student = studentById.get(row.studentId);
+      const student = studentsById.get(row.studentId);
       summaries.push(this.toCaseSummaryDto(row, priority, student?.name ?? "", student?.studentCode ?? ""));
     }
 
@@ -500,7 +508,18 @@ export class AttentionService {
     permission: ScopedPermission,
   ): Promise<string[] | undefined> {
     const grant = await this.permissionResolver.hasPermission(workspaceId, authUserId, permission);
-    if (!grant) return []; // defensive — PermissionGuard already required this permission workspace-wide
+    return this.scopeFilterFromGrant(grant);
+  }
+
+  /**
+   * Phase 15C — the exact `undefined`/`[]`/`groupIds` mapping
+   * `resolveGroupScopeFilter` produces, but from an already-resolved grant
+   * (the one PermissionGuard stashed on `WorkspaceContext`). `undefined` ⇒
+   * ALL_GROUPS/Owner (no restriction); `[]` ⇒ no grant, matches nothing
+   * (defensive — the guard already required the permission workspace-wide).
+   */
+  private scopeFilterFromGrant(grant: EffectiveGrant | undefined): string[] | undefined {
+    if (!grant) return [];
     if (grant.scope === "ALL_GROUPS") return undefined;
     return grant.groupIds ?? [];
   }

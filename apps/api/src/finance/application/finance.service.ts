@@ -20,6 +20,7 @@ import {
   PAYMENT_NOT_FOUND,
   type CollectionQueueRow,
   type FinancialObligationRow,
+  type MembershipRow,
   type PaymentRow,
 } from "@academic-precision/database";
 import {
@@ -259,10 +260,18 @@ export class FinanceService {
     workspaceContext: WorkspaceContext,
     query: { cursor?: string } = {},
   ): Promise<CollectionQueueResponse> {
-    const restrictToGroupIds = await this.resolveEitherPermissionScope(workspaceContext.workspaceId, authUser.id, [
-      "payments.view_student_status",
-      "finance.overview",
-    ]);
+    // Phase 15C — this OR-permission route carries no @RequirePermission, so
+    // the guard resolved no single grant to reuse; but it DID fetch (and
+    // require ACTIVE) the caller's membership from the SAME team repository
+    // the resolver uses. Handing that row in lets the resolver skip
+    // re-querying it while resolving both permissions. Scope/union semantics
+    // are unchanged (a mismatched/stale hint is ignored by the resolver).
+    const restrictToGroupIds = await this.resolveEitherPermissionScope(
+      workspaceContext.workspaceId,
+      authUser.id,
+      ["payments.view_student_status", "finance.overview"],
+      workspaceContext.membership,
+    );
     if (restrictToGroupIds === "FORBIDDEN") {
       throw new ForbiddenApiException();
     }
@@ -304,7 +313,17 @@ export class FinanceService {
   // ---------------------------------------------------------------------
 
   async getFinanceSummary(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<FinanceSummaryResponse> {
-    const grant = await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "finance.overview");
+    // Phase 15C — reuse the "finance.overview" grant PermissionGuard already
+    // resolved for this route (@RequirePermission("finance.overview")), from
+    // the SAME team repository the resolver uses. `payments.record` STILL
+    // cannot reach here: the guard only ever stashes THIS route's own
+    // required-permission grant, and the `=== "finance.overview"` check
+    // refuses anything else, falling back to a real finance.overview
+    // resolution. So the "record never implies overview" invariant is intact.
+    const grant =
+      workspaceContext.grant?.permission === "finance.overview"
+        ? workspaceContext.grant
+        : await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "finance.overview");
     if (!grant) {
       throw new ForbiddenApiException();
     }
@@ -360,8 +379,11 @@ export class FinanceService {
     workspaceId: string,
     authUserId: string,
     permissions: readonly ("payments.view_student_status" | "finance.overview")[],
+    knownActiveMembership?: MembershipRow,
   ): Promise<string[] | undefined | "FORBIDDEN"> {
-    const grants = await Promise.all(permissions.map((p) => this.permissionResolver.hasPermission(workspaceId, authUserId, p)));
+    const grants = await Promise.all(
+      permissions.map((p) => this.permissionResolver.hasPermission(workspaceId, authUserId, p, knownActiveMembership)),
+    );
     const granted = grants.filter((g): g is NonNullable<typeof g> => !!g);
     if (granted.length === 0) return "FORBIDDEN";
     if (granted.some((g) => g.scope === "ALL_GROUPS")) return undefined;

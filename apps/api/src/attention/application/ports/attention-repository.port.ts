@@ -1,4 +1,5 @@
 import type {
+  AttentionCaseListData,
   AttentionCaseRow,
   AttentionEvidenceRow,
   AttentionReasonRow,
@@ -32,6 +33,19 @@ export interface AttentionRepositoryPort {
     limit: number;
     cursorId?: string;
   }): Promise<AttentionCaseRow[]>;
+  /**
+   * Phase 15C — the full list page (cases + every case's Reasons + student
+   * names) in ONE transaction, replacing a cases query + a names query + an
+   * N+1 per-case Reasons fetch. Same filter/scope semantics as
+   * `listAttentionCasesForWorkspace` (which it runs internally).
+   */
+  loadAttentionCaseList(filter: {
+    workspaceId: string;
+    status?: string;
+    restrictToGroupIds?: string[];
+    limit: number;
+    cursorId?: string;
+  }): Promise<AttentionCaseListData>;
   updateAttentionCaseStatusWithVersion(input: {
     id: string;
     expectedVersion: number;

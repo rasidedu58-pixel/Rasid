@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  AttentionCaseListData,
   AttentionCaseRow,
   AttentionEvidenceRow,
   AttentionReasonRow,
@@ -274,6 +275,34 @@ export class InMemoryAttentionRepository implements AttentionRepositoryPort {
     rows.sort((a, b) => a.id.localeCompare(b.id));
     if (filter.cursorId) rows = rows.filter((c) => c.id > filter.cursorId!);
     return rows.slice(0, filter.limit);
+  }
+
+  /** Phase 15C — mirrors the real `loadAttentionCaseList`: same cases/reasons/student-name results as the individual methods, assembled together (the production version does it in one transaction). */
+  loadAttentionCaseListCalls = 0;
+  async loadAttentionCaseList(filter: {
+    workspaceId: string;
+    status?: string;
+    restrictToGroupIds?: string[];
+    limit: number;
+    cursorId?: string;
+  }): Promise<AttentionCaseListData> {
+    this.loadAttentionCaseListCalls += 1;
+    const cases = await this.listAttentionCasesForWorkspace(filter);
+    const caseIds = new Set(cases.map((c) => c.id));
+    const studentIds = [...new Set(cases.map((c) => c.studentId))];
+
+    const reasonsByCaseId = new Map<string, AttentionReasonRow[]>();
+    for (const reason of this.reasonsById.values()) {
+      if (!caseIds.has(reason.attentionCaseId)) continue;
+      const list = reasonsByCaseId.get(reason.attentionCaseId) ?? [];
+      list.push(reason);
+      reasonsByCaseId.set(reason.attentionCaseId, list);
+    }
+
+    const studentNames = await this.listStudentNamesByIds(filter.workspaceId, studentIds);
+    const studentsById = new Map(studentNames.map((s) => [s.id, s]));
+
+    return { cases, reasonsByCaseId, studentsById };
   }
 
   async listStudentNamesByIds(workspaceId: string, studentIds: string[]): Promise<Array<{ id: string; name: string; studentCode: string }>> {
