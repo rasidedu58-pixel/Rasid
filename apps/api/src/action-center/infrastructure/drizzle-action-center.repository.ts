@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { getCurrentMonth, getNextSession, listSessionsWithMissingRecords, withRuntimeContext, type CurrentMonthRef, type MissingRecordsSessionItem, type NextSessionItem } from "@academic-precision/database";
+import { getCurrentMonth, getNextSession, listSessionsWithMissingRecords, loadActionCenterData, withRuntimeContext, type ActionCenterData, type ActionCenterDataParams, type CurrentMonthRef, type MissingRecordsSessionItem, type NextSessionItem } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
 import type { ActionCenterRepositoryPort } from "../application/ports/action-center-repository.port";
 
@@ -20,5 +20,10 @@ export class DrizzleActionCenterRepository implements ActionCenterRepositoryPort
 
   getNextSession(workspaceId: string, visibleGroupIds: "ALL" | string[], now: Date): Promise<NextSessionItem | undefined> {
     return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => getNextSession(db, workspaceId, visibleGroupIds, now));
+  }
+
+  /** Phase 15C — all requested sections in ONE transaction (BEGIN/set_config/COMMIT once). */
+  loadActionCenterData(params: ActionCenterDataParams): Promise<ActionCenterData> {
+    return withRuntimeContext(this.runtimeCtx(params.workspaceId), (db) => loadActionCenterData(db, params));
   }
 }

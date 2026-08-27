@@ -1,11 +1,16 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { ActionCenterResponse } from "@academic-precision/contracts";
+import type {
+  AttentionCaseRow,
+  CollectionQueueRow,
+  MissingRecordsSessionItem,
+  NextSessionItem,
+  ScheduledFollowupRow,
+  SubscriptionRow,
+} from "@academic-precision/database";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { PermissionResolverService } from "../../team/application/permission-resolver.service";
-import { FINANCE_REPOSITORY, type FinanceRepositoryPort } from "../../finance/application/ports/finance-repository.port";
-import { ATTENTION_REPOSITORY, type AttentionRepositoryPort } from "../../attention/application/ports/attention-repository.port";
-import { BILLING_REPOSITORY, type BillingRepositoryPort } from "../../billing/application/ports/billing-repository.port";
 import { ACTION_CENTER_REPOSITORY, type ActionCenterRepositoryPort } from "./ports/action-center-repository.port";
 
 const OWNER_ROLE_LABEL = "OWNER";
@@ -28,46 +33,72 @@ export class ActionCenterService {
   constructor(
     private readonly permissionResolver: PermissionResolverService,
     @Inject(ACTION_CENTER_REPOSITORY) private readonly repository: ActionCenterRepositoryPort,
-    @Inject(FINANCE_REPOSITORY) private readonly financeRepository: FinanceRepositoryPort,
-    @Inject(ATTENTION_REPOSITORY) private readonly attentionRepository: AttentionRepositoryPort,
-    @Inject(BILLING_REPOSITORY) private readonly billingRepository: BillingRepositoryPort,
   ) {}
 
   async getActionCenter(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<ActionCenterResponse> {
     const workspaceId = workspaceContext.workspaceId;
     const now = new Date();
 
-    const [month, attentionSection, followUpsSection, missingRecordsSection, collectionSection, subscriptionWarning, nextSession] = await Promise.all([
-      this.repository.getCurrentMonth(workspaceId),
-      this.buildAttentionSection(authUser, workspaceContext),
-      this.buildFollowUpsSection(authUser, workspaceContext, now),
-      this.buildMissingRecordsSection(authUser, workspaceContext),
-      this.buildCollectionSection(authUser, workspaceContext),
-      this.buildSubscriptionWarning(workspaceContext),
-      this.buildNextSession(authUser, workspaceContext, now),
-    ]);
+    // Phase 15C — resolve the caller's effective permissions ONCE, reusing
+    // the membership PermissionGuard already fetched (from the SAME team
+    // repository the resolver uses — safe, unlike /context's identity-side
+    // membership). Every section's group-scope filter is derived from this
+    // single resolution, and all still-needed sections are then fetched in
+    // ONE transaction (was 7). Semantics are unchanged: a section the caller
+    // lacks permission for is simply not requested, and the per-section JS
+    // post-filters below are preserved exactly.
+    const effective = await this.permissionResolver.resolveEffectivePermissions(
+      workspaceId,
+      authUser.id,
+      workspaceContext.membership,
+    );
+    const grantFor = (permission: string) => effective.find((g) => g.permission === permission);
+    const restrict = (grant: { scope: string; groupIds?: string[] } | undefined) =>
+      !grant ? [] : grant.scope === "ALL_GROUPS" ? undefined : (grant.groupIds ?? []);
+
+    const followupGrant = grantFor("followup.read");
+    const attendanceGrant = grantFor("attendance.read");
+    const paymentsGrant = grantFor("payments.view_student_status");
+    const financeGrant = grantFor("finance.overview");
+    const groupsGrant = grantFor("groups.view");
+    const isOwner = workspaceContext.membership.roleLabel === OWNER_ROLE_LABEL;
+
+    const data = await this.repository.loadActionCenterData({
+      workspaceId,
+      now,
+      limit: SECTION_ITEM_LIMIT,
+      attention: followupGrant ? { restrictToGroupIds: restrict(followupGrant) } : undefined,
+      followups: followupGrant ? { restrictToGroupIds: restrict(followupGrant) } : undefined,
+      missing: attendanceGrant
+        ? { visibleGroupIds: attendanceGrant.scope === "ALL_GROUPS" ? "ALL" : (attendanceGrant.groupIds ?? []) }
+        : undefined,
+      collection: paymentsGrant || financeGrant ? { restrictToGroupIds: this.unionGroupScope([paymentsGrant, financeGrant]) } : undefined,
+      subscription: isOwner,
+      nextSession: {
+        visibleGroupIds: !groupsGrant || groupsGrant.scope === "ALL_GROUPS" ? "ALL" : (groupsGrant.groupIds ?? []),
+      },
+    });
 
     return {
-      month: month ?? null,
-      nextSession: nextSession ?? undefined,
-      attention: attentionSection,
-      followUpsDue: followUpsSection,
-      missingRecords: missingRecordsSection,
-      collection: collectionSection,
-      subscriptionWarning: subscriptionWarning ?? undefined,
+      month: data.month ?? null,
+      nextSession: this.toNextSection(data.nextSession),
+      attention: followupGrant ? this.toAttentionSection(data.attentionCases ?? []) : undefined,
+      followUpsDue: followupGrant ? this.toFollowUpsSection(data.followups ?? [], now) : undefined,
+      missingRecords: attendanceGrant ? this.toMissingRecordsSection(data.missingRecords ?? []) : undefined,
+      collection: paymentsGrant || financeGrant ? this.toCollectionSection(data.collection ?? []) : undefined,
+      subscriptionWarning: isOwner ? this.toSubscriptionWarning(data.subscription) : undefined,
       asOf: now.toISOString(),
     };
   }
 
   // ---------------------------------------------------------------------
-  // Attention → followup.read
+  // Phase 15C — the section builders are now PURE mappers over rows fetched
+  // by the single `loadActionCenterData` transaction. Permission gating and
+  // group-scope derivation moved to `getActionCenter` (one resolution); the
+  // reason strings, urgency logic, and JS post-filters are unchanged.
   // ---------------------------------------------------------------------
 
-  private async buildAttentionSection(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext) {
-    const grant = await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "followup.read");
-    if (!grant) return undefined;
-    const restrictToGroupIds = grant.scope === "ALL_GROUPS" ? undefined : (grant.groupIds ?? []);
-    const cases = await this.attentionRepository.listAttentionCasesForWorkspace({ workspaceId: workspaceContext.workspaceId, restrictToGroupIds, limit: SECTION_ITEM_LIMIT });
+  private toAttentionSection(cases: AttentionCaseRow[]) {
     const open = cases.filter((c) => c.status !== "CLOSED");
     return {
       count: open.length,
@@ -81,15 +112,7 @@ export class ActionCenterService {
     };
   }
 
-  // ---------------------------------------------------------------------
-  // Follow-ups → followup.read
-  // ---------------------------------------------------------------------
-
-  private async buildFollowUpsSection(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, now: Date) {
-    const grant = await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "followup.read");
-    if (!grant) return undefined;
-    const restrictToGroupIds = grant.scope === "ALL_GROUPS" ? undefined : (grant.groupIds ?? []);
-    const followups = await this.attentionRepository.listScheduledFollowups({ workspaceId: workspaceContext.workspaceId, status: "PENDING", restrictToGroupIds, limit: SECTION_ITEM_LIMIT });
+  private toFollowUpsSection(followups: ScheduledFollowupRow[], now: Date) {
     const due = followups.filter((f) => f.dueAt <= now);
     return {
       count: due.length,
@@ -103,15 +126,7 @@ export class ActionCenterService {
     };
   }
 
-  // ---------------------------------------------------------------------
-  // Missing Records → attendance.read (mirrors §11.8's own permission choice)
-  // ---------------------------------------------------------------------
-
-  private async buildMissingRecordsSection(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext) {
-    const grant = await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "attendance.read");
-    if (!grant) return undefined;
-    const visibleGroupIds = grant.scope === "ALL_GROUPS" ? ("ALL" as const) : (grant.groupIds ?? []);
-    const sessionsWithGaps = await this.repository.listSessionsWithMissingRecords(workspaceContext.workspaceId, visibleGroupIds, SECTION_ITEM_LIMIT);
+  private toMissingRecordsSection(sessionsWithGaps: MissingRecordsSessionItem[]) {
     return {
       count: sessionsWithGaps.length,
       items: sessionsWithGaps.map((s) => ({
@@ -124,19 +139,7 @@ export class ActionCenterService {
     };
   }
 
-  // ---------------------------------------------------------------------
-  // Collection → payments.view_student_status OR finance.overview — never
-  // shown to a caller with neither (not even a zeroed count).
-  // ---------------------------------------------------------------------
-
-  private async buildCollectionSection(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext) {
-    const [viewGrant, overviewGrant] = await Promise.all([
-      this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "payments.view_student_status"),
-      this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "finance.overview"),
-    ]);
-    if (!viewGrant && !overviewGrant) return undefined;
-    const restrictToGroupIds = this.unionGroupScope([viewGrant, overviewGrant]);
-    const rows = await this.financeRepository.listCollectionQueue({ workspaceId: workspaceContext.workspaceId, restrictToGroupIds, limit: SECTION_ITEM_LIMIT });
+  private toCollectionSection(rows: CollectionQueueRow[]) {
     return {
       count: rows.length,
       items: rows.map((r) => ({
@@ -157,35 +160,17 @@ export class ActionCenterService {
     return [...union];
   }
 
-  // ---------------------------------------------------------------------
-  // Subscription warning → Owner only (billing is Owner-only in V1, per
-  // Phase 8's own `BillingService.assertOwner` convention).
-  // ---------------------------------------------------------------------
-
-  private async buildSubscriptionWarning(workspaceContext: WorkspaceContext) {
-    if (workspaceContext.membership.roleLabel !== OWNER_ROLE_LABEL) return undefined;
-    const subscription = await this.billingRepository.findSubscriptionByWorkspaceId(workspaceContext.workspaceId);
+  private toSubscriptionWarning(subscription: SubscriptionRow | undefined) {
     if (!subscription || !SUBSCRIPTION_WARNING_STATES.has(subscription.state)) return undefined;
-
     const daysRemaining = subscription.periodEnd ? Math.ceil((subscription.periodEnd.getTime() - Date.now()) / MS_PER_DAY) : null;
     const message =
       subscription.state === "EXPIRED" || subscription.state === "PAYMENT_FAILED"
         ? "الاشتراك منتهٍ — القراءة التاريخية متاحة، العمليات التشغيلية متوقفة حتى التجديد."
         : `اشتراكك ${daysRemaining !== null ? `سينتهي خلال ${daysRemaining} يوم` : "على وشك الانتهاء"}.`;
-
     return { state: subscription.state, daysRemaining, message };
   }
 
-  // ---------------------------------------------------------------------
-  // Next session — any active member, scoped to their own visible groups
-  // (groups.view — not one of the 5 explicitly-gated sections, but still
-  // never leaks a hidden group's session).
-  // ---------------------------------------------------------------------
-
-  private async buildNextSession(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, now: Date) {
-    const grant = await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "groups.view");
-    const visibleGroupIds = !grant || grant.scope === "ALL_GROUPS" ? ("ALL" as const) : (grant.groupIds ?? []);
-    const next = await this.repository.getNextSession(workspaceContext.workspaceId, visibleGroupIds, now);
+  private toNextSection(next: NextSessionItem | undefined) {
     if (!next) return undefined;
     return { id: next.sessionId, groupName: next.groupName, scheduledAt: next.scheduledAt.toISOString() };
   }

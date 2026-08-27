@@ -18,6 +18,9 @@ import { workspaces } from "../schema/workspaces";
 import { deriveEligibleEnrollmentIds } from "../session-mode/roster";
 import { deriveMissingRecords } from "../session-mode/missing-records";
 import type { Db } from "../repositories/identity.repository";
+import { listAttentionCasesForWorkspace, listScheduledFollowups, type AttentionCaseRow, type ScheduledFollowupRow } from "../repositories/attention.repository";
+import { listCollectionQueue, type CollectionQueueRow } from "../repositories/finance.repository";
+import { findSubscriptionByWorkspaceId, type SubscriptionRow } from "../repositories/subscriptions.repository";
 
 export interface CurrentMonthRef {
   id: string;
@@ -41,10 +44,22 @@ export interface MissingRecordsSessionItem {
   missingCount: number;
 }
 
-/** IN_PROGRESS sessions in the CURRENT operating month, restricted to `visibleGroupIds` ("ALL" or an explicit set), that genuinely have a missing-records gap. */
-export async function listSessionsWithMissingRecords(db: Db, workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number): Promise<MissingRecordsSessionItem[]> {
-  const [currentMonth] = await db.select().from(operatingMonths).where(and(eq(operatingMonths.workspaceId, workspaceId), eq(operatingMonths.status, "CURRENT"))).limit(1);
-  if (!currentMonth) return [];
+/**
+ * IN_PROGRESS sessions in the CURRENT operating month, restricted to
+ * `visibleGroupIds` ("ALL" or an explicit set), that genuinely have a
+ * missing-records gap.
+ *
+ * `currentMonthId` (Phase 15C) lets a caller that already resolved the
+ * CURRENT month (the Action Center does) thread it in, avoiding a duplicate
+ * `operating_months` lookup. When omitted, behaviour is unchanged.
+ */
+export async function listSessionsWithMissingRecords(db: Db, workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, currentMonthId?: string): Promise<MissingRecordsSessionItem[]> {
+  let resolvedMonthId = currentMonthId;
+  if (resolvedMonthId === undefined) {
+    const [currentMonth] = await db.select({ id: operatingMonths.id }).from(operatingMonths).where(and(eq(operatingMonths.workspaceId, workspaceId), eq(operatingMonths.status, "CURRENT"))).limit(1);
+    if (!currentMonth) return [];
+    resolvedMonthId = currentMonth.id;
+  }
 
   const [workspace] = await db.select({ timezone: workspaces.timezone }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
   const workspaceTimezone = workspace?.timezone ?? "Africa/Cairo";
@@ -53,7 +68,7 @@ export async function listSessionsWithMissingRecords(db: Db, workspaceId: string
     .select({ id: groupMonths.id, groupId: groupMonths.groupId, groupName: groups.name })
     .from(groupMonths)
     .innerJoin(groups, eq(groups.id, groupMonths.groupId))
-    .where(and(eq(groupMonths.workspaceId, workspaceId), eq(groupMonths.operatingMonthId, currentMonth.id)));
+    .where(and(eq(groupMonths.workspaceId, workspaceId), eq(groupMonths.operatingMonthId, resolvedMonthId)));
   if (visibleGroupIds !== "ALL") {
     const visibleSet = new Set(visibleGroupIds);
     groupMonthRows = groupMonthRows.filter((gm) => visibleSet.has(gm.groupId));
@@ -141,4 +156,61 @@ export async function getNextSession(db: Db, workspaceId: string, visibleGroupId
     .limit(1);
   if (!row) return undefined;
   return { sessionId: row.id, groupName: row.groupName, scheduledAt: row.scheduledAt };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 15C — combined Action Center loader.
+//
+// The dashboard's `GET /action-center` used to open SEVEN separate
+// `withRuntimeContext` transactions (one per section) to return a tiny
+// response — measured ~9.5 DB transactions/request. This runs every
+// still-needed section's SAME query, in dependency order, inside ONE
+// transaction (one BEGIN/set_config/COMMIT on one connection). No query
+// logic or filtering changes — the service still gates each section by
+// permission (a section it omits is simply not requested here) and applies
+// its own JS post-filters. `month` is fetched once and threaded into the
+// missing-records query so it is not re-looked-up.
+// ---------------------------------------------------------------------------
+
+export interface ActionCenterDataParams {
+  workspaceId: string;
+  now: Date;
+  limit: number;
+  /** Each optional section: present ⇒ fetch it with this scope; absent ⇒ the caller lacks permission, skip it entirely. */
+  attention?: { restrictToGroupIds: string[] | undefined };
+  followups?: { restrictToGroupIds: string[] | undefined };
+  missing?: { visibleGroupIds: "ALL" | string[] };
+  collection?: { restrictToGroupIds: string[] | undefined };
+  subscription?: boolean;
+  /** next-session is shown to any active member (scoped to their visible groups); always requested. */
+  nextSession: { visibleGroupIds: "ALL" | string[] };
+}
+
+export interface ActionCenterData {
+  month: CurrentMonthRef | undefined;
+  attentionCases: AttentionCaseRow[] | undefined;
+  followups: ScheduledFollowupRow[] | undefined;
+  missingRecords: MissingRecordsSessionItem[] | undefined;
+  collection: CollectionQueueRow[] | undefined;
+  subscription: SubscriptionRow | undefined;
+  nextSession: NextSessionItem | undefined;
+}
+
+export async function loadActionCenterData(db: Db, p: ActionCenterDataParams): Promise<ActionCenterData> {
+  const month = await getCurrentMonth(db, p.workspaceId);
+  const attentionCases = p.attention
+    ? await listAttentionCasesForWorkspace(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.attention.restrictToGroupIds, limit: p.limit })
+    : undefined;
+  const followups = p.followups
+    ? await listScheduledFollowups(db, { workspaceId: p.workspaceId, status: "PENDING", restrictToGroupIds: p.followups.restrictToGroupIds, limit: p.limit })
+    : undefined;
+  const missingRecords = p.missing
+    ? await listSessionsWithMissingRecords(db, p.workspaceId, p.missing.visibleGroupIds, p.limit, month?.id)
+    : undefined;
+  const collection = p.collection
+    ? await listCollectionQueue(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.collection.restrictToGroupIds, limit: p.limit })
+    : undefined;
+  const subscription = p.subscription ? await findSubscriptionByWorkspaceId(db, p.workspaceId) : undefined;
+  const nextSession = await getNextSession(db, p.workspaceId, p.nextSession.visibleGroupIds, p.now);
+  return { month, attentionCases, followups, missingRecords, collection, subscription, nextSession };
 }
