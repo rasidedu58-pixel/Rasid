@@ -22,7 +22,12 @@
     "scale:seed": "tsx src/scripts/seed-scale-dataset.ts",
     "scale:cleanup": "tsx src/scripts/cleanup-scale-dataset.ts",
     "scale:load-test": "tsx src/scripts/load-test-db-layer.ts",
-    "scale:bench-reports": "tsx src/scripts/bench-reports.ts"
+    "scale:bench-reports": "tsx src/scripts/bench-reports.ts",
+    "recovery:seed": "tsx src/scripts/recovery-seed-fixture.ts",
+    "recovery:cleanup": "tsx src/scripts/recovery-cleanup-fixture.ts",
+    "recovery:manifest": "tsx src/scripts/recovery-capture-manifest.ts",
+    "recovery:dump": "tsx src/scripts/recovery-dump-data.ts",
+    "recovery:verify": "tsx src/scripts/recovery-verify-manifest.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",
