@@ -155,28 +155,46 @@ export async function initErrorTracking(serviceName: string): Promise<ErrorRepor
 }
 
 /**
+ * Whether a REAL Sentry client is currently wired (DSN present AND
+ * `@sentry/node` actually loaded). This is the honest signal a verification
+ * step needs: it is `false` for every no-op path, so a test harness can
+ * distinguish "SDK active, event genuinely sent" from "silently did nothing".
+ */
+export function isErrorTrackingActive(): boolean {
+  return sentry !== null;
+}
+
+/**
  * Capture an exception with correlation context + PII scrubbing. A silent
  * no-op until `initErrorTracking()` has successfully wired a real client.
- * Safe to import and call from anywhere.
+ * Safe to import and call from anywhere. Returns Sentry's event id when a
+ * real client actually accepted the event, or `undefined` on any no-op path.
  */
-export function captureException(error: unknown, extra?: Record<string, unknown>): void {
+export function captureException(error: unknown, extra?: Record<string, unknown>): string | undefined {
   const client = sentry;
-  if (!client) return;
+  if (!client) return undefined;
 
+  let eventId: string | undefined;
   client.withScope((scope) => {
     const fields = correlationFields();
     for (const [key, value] of Object.entries(fields)) scope.setTag(key, value);
     if (Object.keys(fields).length > 0) scope.setContext("correlation", fields);
     if (extra) scope.setExtras(redactLogObject(extra) as Record<string, unknown>);
-    client.captureException(error);
+    eventId = client.captureException(error);
   });
+  return eventId;
 }
 
-/** Flush buffered events (call before a graceful shutdown). No-op if unset. */
-export async function flushErrorTracking(timeoutMs = 2000): Promise<void> {
+/**
+ * Flush buffered events (call before a graceful shutdown). Returns `true`
+ * only when a real client flushed successfully within the timeout — `false`
+ * on timeout or when error tracking is not active.
+ */
+export async function flushErrorTracking(timeoutMs = 2000): Promise<boolean> {
   if (sentry?.flush) {
-    await sentry.flush(timeoutMs).catch(() => undefined);
+    return sentry.flush(timeoutMs).catch(() => false);
   }
+  return false;
 }
 
 /**
