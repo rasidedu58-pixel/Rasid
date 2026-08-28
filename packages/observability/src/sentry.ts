@@ -78,7 +78,7 @@ function correlationFields(): Record<string, string> {
  * own global handlers capture automatically) through `redactLogObject`, and
  * drops request bodies wholesale.
  */
-function scrubEvent(event: Record<string, unknown>): Record<string, unknown> {
+export function scrubEvent(event: Record<string, unknown>): Record<string, unknown> {
   // Redact known-sensitive keys anywhere in the structured payload.
   for (const section of ["extra", "contexts", "tags", "user"] as const) {
     const value = event[section];

@@ -1,9 +1,24 @@
 import { ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpStatus } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { createLogger } from "@academic-precision/observability";
+import { captureException, createLogger } from "@academic-precision/observability";
 import { REQUEST_ID_HEADER } from "../middleware/request-id.middleware";
 
 const logger = createLogger("api:unhandled-exceptions");
+
+/**
+ * Phase 15G — decides whether an exception is a genuine server fault worth a
+ * Sentry alert, or expected product behaviour that must NOT create noise.
+ *
+ * - A non-`HttpException` is always an unexpected server fault → report.
+ * - An `HttpException` is reported ONLY when its status is 5xx. Every 4xx —
+ *   400 validation, 401, 403, 404, the expected 409 optimistic-version
+ *   conflict, 429 rate limiting — is normal, caller-driven behaviour and is
+ *   deliberately never sent to Sentry.
+ */
+export function shouldReportToSentry(status: number, isHttpException: boolean): boolean {
+  if (!isHttpException) return true;
+  return status >= 500;
+}
 
 /**
  * Global exception filter mapping every thrown error to the approved API
@@ -31,9 +46,24 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const requestId = String(request.headers[REQUEST_ID_HEADER] ?? "req_unknown");
 
     const { status, code, message, details } = this.mapException(exception);
+    const isHttp = exception instanceof HttpException;
 
-    if (!(exception instanceof HttpException)) {
+    if (!isHttp) {
       logger.error({ err: exception, requestId, path: request.url }, "Unhandled exception");
+    }
+
+    // §4 — forward only genuine server faults (unexpected errors + explicit
+    // 5xx) to Sentry; expected 4xx product behaviour is never reported. The
+    // attached context is safe by construction: requestId, route (query
+    // stripped), method, status — no headers, cookies, tokens, or body. The
+    // observability `beforeSend` scrubs it again as defence in depth.
+    if (shouldReportToSentry(status, isHttp)) {
+      captureException(exception, {
+        requestId,
+        route: typeof request.url === "string" ? request.url.split("?")[0] : undefined,
+        method: request.method,
+        status,
+      });
     }
 
     response.status(status).send({

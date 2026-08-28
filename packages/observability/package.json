@@ -15,6 +15,7 @@
     "lint": "eslint . --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:event": "node scripts/send-test-event.mjs",
     "clean": "rimraf dist"
   },
   "dependencies": {

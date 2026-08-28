@@ -1,4 +1,4 @@
-import { createLogger, runWithContext, initErrorTracking, flushErrorTracking } from "@academic-precision/observability";
+import { createLogger, runWithContext, initErrorTracking, flushErrorTracking, captureException } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
 import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
@@ -104,6 +104,7 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
           // Deliberately scoped to THIS check only — a failure here must
           // never take down outbox dispatch, which already succeeded above.
           logger.error({ error }, "Subscription expiry scan failed unexpectedly — will retry next interval.");
+          captureException(error, { job: "subscription-expiry-scan", jobId: bootId });
         }
       }
 
@@ -117,6 +118,7 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
         } catch (error) {
           // Same isolation rationale as the subscription-expiry check above.
           logger.error({ error }, "Notifications scan failed unexpectedly — will retry next interval.");
+          captureException(error, { job: "notifications-scan", jobId: bootId });
         }
       }
 
@@ -126,6 +128,14 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
         // `SELECT * FROM outbox_events WHERE status = 'DEAD'` and, once the
         // root cause is understood, replay it via `replayDeadOutboxEvent`.
         logger.error({ ...result }, "Outbox event(s) exhausted retries and are now DEAD — operator investigation required.");
+        // §5 — a permanently-failed job is exactly the kind of background
+        // failure that must page an operator, not just sit in a log. Safe
+        // metadata only (counts + jobId) — never the event payload.
+        captureException(new Error("Outbox event(s) exhausted retries and are now DEAD"), {
+          job: "outbox-dispatch",
+          jobId: bootId,
+          dead: result.dead,
+        });
       }
 
       if (result.claimed === 0) {
@@ -138,6 +148,7 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
       }
     } catch (error) {
       logger.error({ error }, "Outbox dispatch cycle failed unexpectedly — backing off.");
+      captureException(error, { job: "outbox-dispatch", jobId: bootId });
       await sleep(ERROR_POLL_DELAY_MS, state);
     }
   }

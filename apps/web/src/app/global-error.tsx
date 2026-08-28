@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { captureException } from "../lib/error-tracking";
 
 /**
  * Deployment Closure Delta — defense-in-depth. Next.js's App Router only
@@ -22,6 +23,10 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
   useEffect(() => {
     // eslint-disable-next-line no-console
     console.error("Unhandled root-level error:", error);
+    // §3 — forward the one boundary that also covers the root layout to
+    // Sentry (no-op unless NEXT_PUBLIC_SENTRY_DSN is configured). The digest
+    // correlates this client event with the matching server-side error.
+    captureException(error, { digest: error.digest, boundary: "global-error" });
   }, [error]);
 
   return (
