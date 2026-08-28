@@ -351,6 +351,13 @@
       "when": 1787442200000,
       "tag": "0051_app_runtime_query_timeouts",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787442300000,
+      "tag": "0052_users_rls_self_scope",
+      "breakpoints": true
     }
   ]
 }
