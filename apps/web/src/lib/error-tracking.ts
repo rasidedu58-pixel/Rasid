@@ -30,9 +30,6 @@ interface SentryClientLike {
 
 let sentry: SentryClientLike | null = null;
 
-/** Non-literal specifier: keeps `tsc`/bundler from resolving the module. */
-const SENTRY_NEXTJS_MODULE = "@sentry/nextjs";
-
 // Kept in sync with packages/observability/src/redact.ts.
 const SENSITIVE_KEY_PATTERN =
   /(password|passwd|secret|token|authorization|auth_token|api[_-]?key|apikey|service_role|private[_-]?key|qr(_)?raw|qr(_)?token|signature|dsn|credit[_-]?card|card[_-]?number|cvv)/i;
@@ -104,7 +101,14 @@ export async function initErrorTracking(): Promise<void> {
   }
   if (sentry) return;
 
-  const loaded = (await import(SENTRY_NEXTJS_MODULE).catch(() => null)) as SentryClientLike | null;
+  // LITERAL specifier so the bundler code-splits `@sentry/nextjs` into a real
+  // client chunk. A non-literal (variable) specifier makes webpack emit
+  // "Critical dependency: the request of a dependency is an expression" and
+  // NOT bundle the SDK — in the browser that import then rejects and the
+  // `.catch` below silently no-ops, so the SDK never initialises (Phase 15G
+  // production-delivery bug). The package is a hard dependency now, so the
+  // `.catch` is just defence in depth.
+  const loaded = (await import("@sentry/nextjs").catch(() => null)) as SentryClientLike | null;
   if (!loaded || typeof loaded.init !== "function") {
     debug("NEXT_PUBLIC_SENTRY_DSN is set but '@sentry/nextjs' is not installed — staying no-op");
     return;
