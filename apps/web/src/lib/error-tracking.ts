@@ -20,13 +20,12 @@
  */
 
 /** Loose local shape of the parts of `@sentry/nextjs` we call. */
-interface SentryScopeLike {
-  setExtras(extras: Record<string, unknown>): void;
-}
 interface SentryClientLike {
   init(options: Record<string, unknown>): void;
-  captureException(error: unknown): string;
-  withScope(callback: (scope: SentryScopeLike) => void): void;
+  // v8+ / v10: `captureException(error, captureContext)` where captureContext
+  // carries `{ extra, tags, ... }` — the stable, typed API. (The older
+  // `withScope` helper is not a top-level export in v10.)
+  captureException(error: unknown, captureContext?: Record<string, unknown>): string;
 }
 
 let sentry: SentryClientLike | null = null;
@@ -131,8 +130,7 @@ export async function initErrorTracking(): Promise<void> {
 export function captureException(error: unknown, extra?: Record<string, unknown>): void {
   const client = sentry;
   if (!client) return;
-  client.withScope((scope) => {
-    if (extra) scope.setExtras(redactDeep(extra, 0) as Record<string, unknown>);
-    client.captureException(error);
-  });
+  // Pass scrubbed extras via the capture-context arg (stable across v10);
+  // `beforeSend` re-scrubs every field as defence in depth.
+  client.captureException(error, extra ? { extra: redactDeep(extra, 0) as Record<string, unknown> } : undefined);
 }
