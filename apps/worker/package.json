@@ -12,18 +12,19 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "ioredis": "^5.4.2",
-    "bullmq": "^5.34.5",
-    "zod": "^3.24.1",
     "@academic-precision/config": "workspace:*",
+    "@academic-precision/database": "workspace:*",
     "@academic-precision/observability": "workspace:*",
-    "@academic-precision/database": "workspace:*"
+    "@sentry/node": "^10.71.0",
+    "bullmq": "^5.34.5",
+    "ioredis": "^5.4.2",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "tsx": "^4.19.2",
-    "vitest": "^2.1.8",
+    "@types/node": "^22.10.2",
     "rimraf": "^6.0.1",
-    "@types/node": "^22.10.2"
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }
