@@ -51,16 +51,16 @@ require_pg17() {
   log "PostgreSQL 17 client confirmed (pg_dump=${dver}, pg_restore=${rver}) at $(pg17_bindir)"
 }
 
-# --- Single Backblaze B2 transport (boto3) -----------------------------------
-# EVERY B2 operation — upload / head / list / delete / get — goes through the
-# one Python client (scripts/backup/b2.py). We do NOT use the AWS CLI for B2:
-# AWS CLI v2 (>= 2.23) sends PutObject with aws-chunked / checksum-trailer
-# encoding that Backblaze B2 rejects ("IncompleteBody: request body too small"),
-# and AWS_REQUEST_CHECKSUM_CALCULATION=when_required does not reliably disable
-# it. The boto3 client is configured explicitly for B2 (SigV4, the B2 endpoint
-# + region, path-style, no default checksums) and uploads an in-memory bytes
-# body => a single plain PutObject B2 accepts. Centralising here guarantees
-# upload, retention and weekly restore cannot use different B2 behaviour.
+# --- Single Backblaze B2 transport (native API) ------------------------------
+# EVERY B2 operation — upload / head / list / get / delete — goes through the
+# one Python client (scripts/backup/b2.py), which uses the Backblaze B2 NATIVE
+# API over stdlib urllib. We do NOT use the S3 layer (AWS CLI or boto3): its
+# default integrity checksums send PutObject with aws-chunked / trailing-
+# checksum framing that B2 rejects with "IncompleteBody: request body too
+# small", and request_checksum_calculation=when_required is not honoured
+# reliably across versions. The native upload is a plain POST of the raw bytes
+# with an X-Bz-Content-Sha1 the server verifies — immune to that failure class.
+# Centralising here guarantees upload, retention and weekly restore share it.
 
 # Directory of THIS library file (so callers can source from anywhere).
 B2_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,8 +73,9 @@ b2_python() {
 }
 
 # Run one B2 operation. Credentials are read from the environment by b2.py and
-# are never passed as arguments or printed.
+# are never passed as arguments or printed. The native API does not use
+# B2_ENDPOINT (kept only for backwards compatibility as an optional secret).
 b2py() {
-  require_env B2_KEY_ID B2_APPLICATION_KEY B2_BUCKET_NAME B2_ENDPOINT
+  require_env B2_KEY_ID B2_APPLICATION_KEY B2_BUCKET_NAME
   "$(b2_python)" "$B2_LIB_DIR/b2.py" "$@"
 }

@@ -15,7 +15,7 @@ PREFIX="production/"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 CUTOFF="$(date -u -d "${RETENTION_DAYS} days ago" +%s)"
 
-# Object inventory via the single boto3 B2 client. TSV: <key>\t<epoch>\t<size>.
+# Object inventory via the single B2 client. TSV: <key>\t<epoch>\t<size>\t<fileId>.
 OBJS="$(mktemp)"
 trap 'rm -f "$OBJS"' EXIT
 b2py list --prefix "$PREFIX" > "$OBJS"
@@ -30,7 +30,7 @@ PROT_BASE="${NEWEST_DUMP_KEY%.dump}"
 log "protected newest backup group: ${PROT_BASE}.{dump,dump.sha256,metadata.json}"
 
 deleted=0
-while IFS=$'\t' read -r KEY EPOCH SIZE; do
+while IFS=$'\t' read -r KEY EPOCH SIZE FILEID; do
   [ -n "$KEY" ] || continue
   # Defence in depth: only ever touch keys under production/.
   case "$KEY" in "$PREFIX"*) ;; *) warn "skipping out-of-scope key: $KEY"; continue;; esac
@@ -40,7 +40,7 @@ while IFS=$'\t' read -r KEY EPOCH SIZE; do
   esac
   case "$EPOCH" in ''|*[!0-9]*) continue;; esac
   if [ "$EPOCH" -gt 0 ] && [ "$EPOCH" -lt "$CUTOFF" ]; then
-    b2py delete --key "$KEY" >/dev/null
+    b2py delete --key "$KEY" --file-id "$FILEID" >/dev/null
     log "deleted (older than ${RETENTION_DAYS}d): $KEY"
     deleted=$((deleted + 1))
   fi

@@ -27,7 +27,7 @@ PSQL="$(pgbin psql)"
 require_env B2_KEY_ID B2_APPLICATION_KEY B2_BUCKET_NAME B2_ENDPOINT
 WORKDIR="${WORKDIR:-./_verify}"; mkdir -p "$WORKDIR"
 
-# Object inventory via the single boto3 B2 client. TSV: <key>\t<epoch>\t<size>.
+# Object inventory via the single native B2 client. TSV: <key>\t<epoch>\t<size>\t<fileId>.
 OBJS="$(mktemp)"; trap 'rm -f "$OBJS"' EXIT
 b2py list --prefix "production/" > "$OBJS"
 NEWEST="$(awk -F'\t' '$1 ~ /\.dump$/ {print $2"\t"$1}' "$OBJS" | sort -rn | head -1 | cut -f2)"

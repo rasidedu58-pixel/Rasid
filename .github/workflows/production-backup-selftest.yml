@@ -1,0 +1,34 @@
+name: B2 Transport Self-Test
+
+# Real transport-level integration test against Backblaze B2 (native API).
+# Uploads a tiny throwaway object under production/_selftest/, verifies it by
+# head + list, downloads it and compares bytes, then deletes it. This proves
+# the exact upload path used by the backup works on real B2 — WITHOUT touching
+# the Production database or any real backup object. Manual only.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: production-db-backup-selftest
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: B2 native-API round-trip (real bucket, throwaway object)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (scripts only)
+        uses: actions/checkout@v4
+
+      - name: Real B2 upload/head/list/download/delete round-trip
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
+          # B2_ENDPOINT is not required by the native API; harmless if present.
+        run: python3 scripts/backup/b2.py selftest

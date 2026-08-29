@@ -18,15 +18,22 @@ validate + metadata), `upload.sh` (B2 upload), `retention.sh` (30-day prune),
 `verify-restore.sh` (weekly restore proof), and `b2.py` (the single B2
 transport).
 
-**B2 transport:** all Backblaze operations (upload / head / list / delete /
-download) go through one boto3 client (`b2.py`), never the AWS CLI. AWS CLI v2
-(>= 2.23) sends PutObject with `aws-chunked` / checksum-trailer encoding that
-B2 rejects with `IncompleteBody: request body too small`, and the
-`AWS_REQUEST_CHECKSUM_CALCULATION=when_required` env var does not reliably
-disable it. `b2.py` is configured explicitly for B2 (SigV4, the B2 endpoint +
-region, path-style, no default checksums) and uploads an in-memory bytes body,
-so every request is a single plain PutObject/GetObject B2 accepts. Both
-workflows `pip install boto3` before running the scripts.
+**B2 transport:** all Backblaze operations (upload / head / list / download /
+delete) go through one client, `b2.py`, which uses the **Backblaze B2 Native
+API** over the Python standard library — never the S3-compatibility layer.
+The AWS S3 SDKs (AWS CLI v2 >= 2.23 and boto3/botocore >= 1.36) attach default
+integrity checksums to PutObject and send the body with `aws-chunked` /
+trailing-checksum framing that B2 rejects with `IncompleteBody: The request
+body was too small`; `request_checksum_calculation=when_required` did not
+reliably disable it (it failed on real B2 with both `aws s3 cp` and
+`boto3.put_object`). The native upload is a single plain HTTPS POST of the raw
+bytes with an `X-Bz-Content-Sha1` the server verifies — no chunking, no SDK
+checksum middleware, `Content-Length` always equal to the object size — so it
+is immune to that failure class. No third-party Python packages are required
+(stdlib only). A manual **B2 Transport Self-Test** workflow
+(`production-backup-selftest.yml`) exercises upload/head/list/download/delete
+against the real bucket with a throwaway object under `production/_selftest/`
+(no Production DB access) so the transport can be proven before a full run.
 
 **Backup method:** `pg_dump --format=custom --no-owner --no-privileges
 --schema=public --schema=drizzle`. The custom (`-Fc`) archive is portable and

@@ -12,8 +12,8 @@ source "$HERE/lib.sh"
 
 require_env DUMP SHA META KEY_PREFIX
 
-# Upload one artifact via the boto3 B2 client (single plain PutObject from the
-# real local file), then independently re-verify the remote byte size here.
+# Upload one artifact via the native B2 client (single plain POST of the real
+# local file), then independently re-verify the remote byte size here.
 upload_and_verify() {
   local f="$1" key size remote
   # Pre-upload assertions: file exists and has a real, non-zero size.
