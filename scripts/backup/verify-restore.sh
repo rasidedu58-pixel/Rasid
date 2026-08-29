@@ -77,10 +77,36 @@ DROP SCHEMA IF EXISTS drizzle CASCADE;
 DROP SCHEMA IF EXISTS public CASCADE;
 SQL
 
-log "restoring into disposable PostgreSQL…"
-# Keep --exit-on-error: any genuine restore error still fails verification.
-"$PG_RESTORE" --no-owner --no-privileges --exit-on-error --dbname "$VERIFY_DB_URL" "$DUMP" \
-  || die "pg_restore failed"
+# Restore in sections so the app's ONE documented platform prerequisite —
+# the pg_trgm extension — can be provisioned AFTER the schemas/tables exist but
+# BEFORE the trigram index is built.
+#
+# Why this is needed: a schema-restricted pg_dump (`--schema=public
+# --schema=drizzle`) is, by PostgreSQL's own definition, NOT guaranteed to be
+# self-contained — it does not emit `CREATE EXTENSION`. Rasid migration 0015
+# runs `CREATE EXTENSION IF NOT EXISTS pg_trgm;` (into public) and then builds
+# `students_search_name_trgm_idx ... USING gin (... public.gin_trgm_ops)`.
+# Recreating pg_trgm here reproduces the canonical Production prerequisite —
+# exactly like the app-role pre-creation above. It provisions a documented
+# prerequisite; it does NOT suppress any restore error. --exit-on-error is kept
+# on every section, so a genuinely corrupt/incomplete backup still fails.
+RESTORE_COMMON=(--no-owner --no-privileges --exit-on-error --dbname "$VERIFY_DB_URL")
+
+log "restoring into disposable PostgreSQL (pre-data: schemas, tables, types, functions)…"
+"$PG_RESTORE" "${RESTORE_COMMON[@]}" --section=pre-data "$DUMP" \
+  || die "pg_restore (pre-data) failed"
+
+log "provisioning documented platform prerequisite: pg_trgm (into public)…"
+"$PSQL" "$VERIFY_DB_URL" -v ON_ERROR_STOP=1 -q -c "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;" \
+  || die "could not provision pg_trgm prerequisite"
+
+log "restoring data…"
+"$PG_RESTORE" "${RESTORE_COMMON[@]}" --section=data "$DUMP" \
+  || die "pg_restore (data) failed"
+
+log "restoring post-data (indexes incl. GIN trigram, constraints, triggers, RLS)…"
+"$PG_RESTORE" "${RESTORE_COMMON[@]}" --section=post-data "$DUMP" \
+  || die "pg_restore (post-data) failed"
 
 # ---- Assertions on the restored disposable database ----
 q() { "$PSQL" "$VERIFY_DB_URL" -tAX -c "$1" | tr -d '[:space:]'; }
@@ -100,4 +126,19 @@ RLS_TABLES="$(q "select count(*) from pg_class where relnamespace='public'::regn
 MIGRATIONS="$(q "select count(*) from drizzle.__drizzle_migrations")"
 [ "${MIGRATIONS:-0}" -ge 1 ] || die "no Drizzle migration state restored"
 
-log "RESTORE VERIFICATION PASSED — key_tables=${KEY_TABLES} users_rls=1 rls_tables=${RLS_TABLES} migrations=${MIGRATIONS}"
+# Required extension / dependency: pg_trgm must be present in the restored DB.
+[ "$(q "select count(*) from pg_extension where extname='pg_trgm'")" = "1" ] \
+  || die "pg_trgm extension missing after restore"
+
+# The GIN trigram index must exist AND actually be a gin_trgm_ops index — this
+# proves the extension dependency and the index both restored correctly.
+[ "$(q "select count(*) from pg_indexes where schemaname='public' and indexname='students_search_name_trgm_idx'")" = "1" ] \
+  || die "trigram index students_search_name_trgm_idx missing after restore"
+[ "$(q "select count(*) from pg_indexes where schemaname='public' and indexname='students_search_name_trgm_idx' and indexdef ilike '%using gin%gin_trgm_ops%'")" = "1" ] \
+  || die "students_search_name_trgm_idx is not a GIN gin_trgm_ops index after restore"
+
+# Queryability: a real SELECT against a key table must succeed (pipefail on).
+STUDENTS_ROWS="$(q "select count(*) from public.students")"
+case "$STUDENTS_ROWS" in ''|*[!0-9]*) die "restored DB is not queryable (select on public.students failed)";; esac
+
+log "RESTORE VERIFICATION PASSED — key_tables=${KEY_TABLES} users_rls=1 rls_tables=${RLS_TABLES} migrations=${MIGRATIONS} pg_trgm=1 trigram_index=1 students_rows=${STUDENTS_ROWS}"

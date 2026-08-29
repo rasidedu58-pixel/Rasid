@@ -46,6 +46,32 @@ by the app's own migrations/role provisioning on any real restore).
 System schemas (`auth`, `storage`, …) are intentionally excluded — they are
 Supabase-managed and not part of the Rasid application database.
 
+**Why schema-restricted (not a whole-database dump):** Production is
+Supabase-managed. A whole-database `pg_dump` would pull in Supabase-internal
+schemas (`auth`, `storage`, `graphql`, `vault`, `extensions`, `realtime`, …)
+and **Supabase-only extensions** (`pg_graphql`, `supabase_vault`, `pgsodium`,
+…) that (a) the `postgres` role cannot always fully dump and (b) **cannot be
+restored into a clean vanilla PostgreSQL 17** — so a whole-DB dump is *less*
+recoverable, not more. The Rasid application database is `public` + `drizzle`,
+and that is exactly what we capture.
+
+**Disaster-recovery platform prerequisites.** By PostgreSQL's own definition a
+schema-restricted dump is not guaranteed self-contained: it does **not** emit
+`CREATE EXTENSION` or the cluster-global roles the RLS policies reference. Those
+are **documented platform prerequisites** provisioned on the target *before*
+`pg_restore` (the weekly verification does exactly this):
+- **Roles** (as `NOLOGIN`): `app_runtime, app_worker, app_platform_admin, anon,
+  authenticated, service_role, authenticator`.
+- **Extension**: `pg_trgm` **in `public`** — Rasid migration `0015` runs
+  `CREATE EXTENSION IF NOT EXISTS pg_trgm;` and builds the GIN trigram index
+  `students_search_name_trgm_idx` (`… USING gin (… public.gin_trgm_ops)`).
+  `pg_trgm` is the **only** extension the application requires.
+Each backup's `metadata.json` records `installedExtensions`,
+`appRequiredExtensions` (`pg_trgm`), and `platformPrerequisites`. With these
+prerequisites in place the artifact restores completely into a clean
+PostgreSQL 17. gen_random_uuid() is core in PostgreSQL 13+, so no `pgcrypto`
+prerequisite is needed.
+
 **Connection:** only via the `SUPABASE_PROD_DB_URL` secret — the Production
 `postgres` admin role over the **Session Pooler (port 5432)**. The admin role
 is required so the dump reads *all* rows (it bypasses RLS); the Session Pooler
@@ -109,12 +135,17 @@ depth.)
 `production-backup-verify.yml` proves the backups are actually restorable:
 it downloads the newest `.dump`, verifies its SHA-256, pre-creates the app
 roles the RLS policies reference (they are cluster-global and not in the dump),
-`pg_restore`s into a throwaway `postgres:17` **service container** (localhost
-only — never Production/Staging), then asserts: `public` and `drizzle` schemas
-exist; the six key tables (`users`, `workspaces`, `students`, `sessions`,
+and restores into a throwaway `postgres:17` **service container** (localhost
+only — never Production/Staging). The restore is done **in sections** so the
+`pg_trgm` prerequisite is provisioned (into `public`) between `pre-data`
+(schemas/tables) and `post-data` (the GIN trigram index), with `--exit-on-error`
+on every section. It then asserts: `public` and `drizzle` schemas exist; the six
+key tables (`users`, `workspaces`, `students`, `sessions`,
 `financial_obligations`, `memberships`) exist; **RLS is enabled on
-`public.users`** and on ≥30 tables; and `drizzle.__drizzle_migrations` is
-populated. The container is destroyed automatically at job end.
+`public.users`** and on ≥30 tables; `drizzle.__drizzle_migrations` is populated;
+**`pg_trgm` is installed** and **`students_search_name_trgm_idx` exists as a GIN
+`gin_trgm_ops` index**; and the DB is queryable (`select … from public.students`).
+The container is destroyed automatically at job end.
 
 ## Emergency restore procedure (Production recovery)
 
@@ -134,13 +165,20 @@ populated. The container is destroyed automatically at job end.
    `app_runtime, app_worker, app_platform_admin, anon, authenticated,
    service_role, authenticator` (as `NOLOGIN`), then set their real passwords
    out-of-band where applicable.
-4. **Restore:**
+4. **Restore in sections**, provisioning the `pg_trgm` prerequisite between
+   schema/table creation and index creation (the dump is schema-restricted, so
+   it does not create the extension the trigram index needs):
    ```bash
-   pg_restore --no-owner --no-privileges --exit-on-error --dbname "<TARGET_ADMIN_URL>" <name>.dump
+   pg_restore --no-owner --no-privileges --exit-on-error --section=pre-data  --dbname "<TARGET_ADMIN_URL>" <name>.dump
+   psql "<TARGET_ADMIN_URL>" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;"
+   pg_restore --no-owner --no-privileges --exit-on-error --section=data      --dbname "<TARGET_ADMIN_URL>" <name>.dump
+   pg_restore --no-owner --no-privileges --exit-on-error --section=post-data --dbname "<TARGET_ADMIN_URL>" <name>.dump
    ```
+   (`--exit-on-error` is kept on every section — nothing is suppressed.)
 5. **Verify** on the target: schemas (`public`, `drizzle`), key tables, RLS on
-   `users`, migration count in `drizzle.__drizzle_migrations`, and finance
-   integrity — as the weekly job and the 15F verifier do.
+   `users`, the **`pg_trgm` extension and `students_search_name_trgm_idx`**,
+   migration count in `drizzle.__drizzle_migrations`, and finance integrity —
+   as the weekly job and the 15F verifier do.
 6. **Promote** only after verification passes: repoint the application's
    database env to the restored target (or use Supabase's own restore-over-
    project flow), monitor, and keep the pre-restore snapshot until closed.

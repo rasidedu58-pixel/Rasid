@@ -44,6 +44,16 @@ log "pg_dump client: $("$PG_DUMP" --version)"
 SERVER_VERSION="$("$PSQL" "$SUPABASE_PROD_DB_URL" -tAX -c 'show server_version' 2>/dev/null | tr -d '[:space:]' || true)"
 [ -n "$SERVER_VERSION" ] && log "source PostgreSQL server_version: $SERVER_VERSION" || warn "could not read server_version (continuing)"
 
+# Read-only inventory of installed extensions (name@schema). A schema-restricted
+# pg_dump does NOT emit CREATE EXTENSION, so recording the extension list here
+# documents the DR platform prerequisites the restore must provision. Rasid's
+# only app-required extension is pg_trgm (migration 0015, used by the students
+# trigram index); the restore verification provisions it explicitly.
+INSTALLED_EXTENSIONS="$("$PSQL" "$SUPABASE_PROD_DB_URL" -tAX -c \
+  "select coalesce(string_agg(e.extname||'@'||n.nspname, ',' order by e.extname), '') from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname <> 'plpgsql'" \
+  2>/dev/null | tr -d '[:space:]' || true)"
+[ -n "$INSTALLED_EXTENSIONS" ] && log "installed extensions: ${INSTALLED_EXTENSIONS}" || warn "could not read extension list (continuing)"
+
 # Custom-format dump of ONLY the app schemas — `public` (schema, data, indexes,
 # constraints, sequences, functions, triggers, RLS policies) and `drizzle`
 # (migration state). Restricting schemas avoids Supabase-managed system schemas
@@ -89,6 +99,9 @@ cat > "$META" <<JSON
   "artifactSizeBytes": ${SIZE},
   "sha256": "${SHA256}",
   "backupMethod": "pg_dump --format=custom --no-owner --no-privileges --schema=public --schema=drizzle",
+  "installedExtensions": "${INSTALLED_EXTENSIONS}",
+  "appRequiredExtensions": "pg_trgm",
+  "platformPrerequisites": "roles(app_runtime,app_worker,app_platform_admin,anon,authenticated,service_role,authenticator)+extension(pg_trgm in public)",
   "keyPrefix": "${KEY_PREFIX}",
   "verification": "toc-readable+sanity-passed"
 }
