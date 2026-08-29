@@ -17,35 +17,43 @@
  * glassmorphism, no purple-on-purple "AI product" look.
  */
 :root {
-  --background: 210 20% 98%;
-  --foreground: 222 20% 14%;
+  /*
+   * UI-9 — refined color system. Navy + petrol-blue identity, calm cool
+   * neutrals. Anchor palette (hex → the HSL triplets below):
+   *   Primary Navy       #142B4A  (app shell / strong-weight nav)
+   *   Action Blue        #087EA4  (--brand: CTAs, links, active, focus)
+   *   Brand Strong/Hover #066887  (--brand-strong)
+   *   Background         #F7F9FB  Surface #FFFFFF
+   *   Primary Text       #172033  Secondary Text #667085
+   * Greens/ambers/reds stay strictly semantic (success/warning/danger/info).
+   */
+  --background: 210 33% 98%;
+  --foreground: 221 38% 15%;
 
   --surface: 0 0% 100%;
   --surface-raised: 0 0% 100%;
-  --surface-sunken: 210 20% 96%;
+  --surface-sunken: 214 27% 96%;
 
-  --border: 214 18% 88%;
-  --border-strong: 214 14% 78%;
+  --border: 214 22% 89%;
+  --border-strong: 214 17% 80%;
 
-  --text-primary: 222 20% 14%;
-  --text-secondary: 217 12% 40%;
+  --text-primary: 221 38% 15%;
+  /* #667085 — measured 4.97:1 on --surface (white), clears WCAG AA. */
+  --text-secondary: 221 13% 46%;
   /*
-   * Phase 13 accessibility fix — precisely measured, not guessed: the
-   * original 56% lightness gave only a 3.39:1 contrast ratio against
-   * `--surface` (white), below WCAG AA's 4.5:1 minimum for normal text
-   * (`text-tertiary` is used at text-xs/text-sm throughout — timestamps,
-   * hints, secondary metadata — which does not qualify for the "large
-   * text" 3:1 exception). 44% is the computed value that clears AA
-   * against BOTH `--surface` (5.18:1) and `--surface-sunken` (4.73:1)
-   * with real margin, while staying meaningfully lighter than
-   * `--text-secondary` (40%) to preserve the 3-tier hierarchy.
+   * Third text tier: kept as close to AA as the specified (lighter)
+   * secondary allows. 48% lightness measures ~4.55:1 on --surface (AA for
+   * normal text) while staying a touch lighter than --text-secondary so the
+   * 3-tier hierarchy survives. Used only for small hints/timestamps.
    */
-  --text-tertiary: 217 10% 44%;
+  --text-tertiary: 221 12% 48%;
 
-  --brand: 199 84% 32%;
+  --brand: 195 91% 34%;
   --brand-foreground: 0 0% 100%;
-  --brand-subtle: 199 60% 94%;
-  --brand-subtle-foreground: 199 84% 26%;
+  /* #066887 — hover/strong/active for brand-filled surfaces. */
+  --brand-strong: 195 92% 28%;
+  --brand-subtle: 195 60% 94%;
+  --brand-subtle-foreground: 195 92% 26%;
 
   --success: 152 55% 32%;
   --success-subtle: 152 45% 94%;
@@ -60,10 +68,12 @@
   --warning-subtle: 38 92% 94%;
   --danger: 4 72% 46%;
   --danger-subtle: 4 60% 95%;
-  --info: 210 80% 46%;
-  --info-subtle: 210 70% 95%;
+  /* Info deepened to ~4.7:1 on white so info text clears AA; hue kept
+   * distinct from the petrol brand so "info" never reads as "action". */
+  --info: 208 82% 38%;
+  --info-subtle: 208 72% 95%;
 
-  --ring: 199 84% 40%;
+  --ring: 195 90% 38%;
 
   --radius-sm: 0.375rem;
   --radius-md: 0.625rem;
@@ -71,19 +81,17 @@
   --radius-xl: 1.25rem;
 
   /*
-   * Phase 13 — shell identity tokens. A deep, confident brand-tinted
-   * surface (not flat black, not the app's own --brand hue repeated) used
-   * ONLY by the app shell (sidebar/mobile nav) — the one deliberate,
-   * bounded place this product "over-brands", so every other surface can
-   * stay a calm, restrained neutral. Distinct active/hover states so the
-   * current route reads as a solid, confident pill rather than a faint tint.
+   * Shell identity tokens — the app shell (sidebar/mobile nav), the one
+   * deliberate place Rasid "over-brands" with the Primary Navy (#142B4A) so
+   * every other surface stays a calm neutral. The active route reads as a
+   * solid petrol-blue pill (matching the brand/action color) on the navy.
    */
-  --shell-surface: 217 34% 12%;
-  --shell-surface-hover: 217 28% 18%;
-  --shell-border: 217 25% 20%;
-  --shell-text: 210 20% 92%;
-  --shell-text-muted: 215 14% 62%;
-  --shell-active-bg: 199 78% 30%;
+  --shell-surface: 214 57% 18%;
+  --shell-surface-hover: 214 42% 25%;
+  --shell-border: 214 34% 28%;
+  --shell-text: 210 30% 93%;
+  --shell-text-muted: 214 16% 66%;
+  --shell-active-bg: 195 84% 36%;
   --shell-active-text: 0 0% 100%;
 }
 

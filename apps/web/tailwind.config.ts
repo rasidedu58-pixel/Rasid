@@ -34,6 +34,7 @@ const config: Config = {
         brand: {
           DEFAULT: withOpacity("--brand"),
           foreground: withOpacity("--brand-foreground"),
+          strong: withOpacity("--brand-strong"),
           subtle: withOpacity("--brand-subtle"),
           "subtle-foreground": withOpacity("--brand-subtle-foreground"),
         },

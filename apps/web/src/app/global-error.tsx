@@ -34,12 +34,12 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       <body>
         <div style={{ display: "flex", minHeight: "100vh", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1rem", padding: "1.5rem", textAlign: "center", fontFamily: "system-ui, sans-serif" }}>
           <h1 style={{ fontSize: "1.125rem", fontWeight: 600 }}>حدث خطأ غير متوقع</h1>
-          <p style={{ maxWidth: "28rem", color: "#475569", fontSize: "0.875rem" }}>
+          <p style={{ maxWidth: "28rem", color: "#667085", fontSize: "0.875rem" }}>
             تعذّر تحميل التطبيق. حاول إعادة المحاولة، وإذا تكرر الخطأ تواصل مع الدعم الفني.
           </p>
           <button
             onClick={reset}
-            style={{ borderRadius: "0.375rem", backgroundColor: "#0f172a", color: "#fff", padding: "0.5rem 1.25rem", fontSize: "0.875rem", border: "none", cursor: "pointer" }}
+            style={{ borderRadius: "0.375rem", backgroundColor: "#142B4A", color: "#fff", padding: "0.5rem 1.25rem", fontSize: "0.875rem", border: "none", cursor: "pointer" }}
           >
             إعادة المحاولة
           </button>
