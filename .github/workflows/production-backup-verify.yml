@@ -48,8 +48,20 @@ jobs:
           sudo apt-get install -y -qq postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y -qq postgresql-client-17
-          pg_dump --version
-          pg_restore --version
+          # The runner ships a PG16 client at /usr/bin; PG17 lands in a versioned
+          # dir. Pin it explicitly for all later steps — never trust PATH order.
+          PG17_BINDIR=/usr/lib/postgresql/17/bin
+          test -x "$PG17_BINDIR/pg_dump"    || { echo "::error::PG17 pg_dump not found at $PG17_BINDIR"; exit 1; }
+          test -x "$PG17_BINDIR/pg_restore" || { echo "::error::PG17 pg_restore not found at $PG17_BINDIR"; exit 1; }
+          echo "$PG17_BINDIR" >> "$GITHUB_PATH"
+          echo "PG17_BINDIR=$PG17_BINDIR" >> "$GITHUB_ENV"
+          # Prove the PG17 binaries by absolute path (GITHUB_PATH applies to later steps).
+          "$PG17_BINDIR/pg_dump" --version
+          "$PG17_BINDIR/pg_restore" --version
+          case "$("$PG17_BINDIR/pg_restore" --version)" in
+            *"PostgreSQL) 17."*) echo "PG17 client confirmed" ;;
+            *) echo "::error::pg_restore is not PostgreSQL 17"; exit 1 ;;
+          esac
 
       - name: Download newest backup, verify checksum, restore + assert
         env:

@@ -32,10 +32,16 @@ META="${WORKDIR}/${BASENAME}.metadata.json"
 KEY_PREFIX="production/${DATE_PATH}"
 TOC="${WORKDIR}/toc.txt"
 
-log "pg_dump client: $(pg_dump --version)"
+# HARD GATE before any Production access: the client MUST be PostgreSQL 17,
+# otherwise pg_dump aborts on server (17.6) vs client (16.x) version mismatch.
+require_pg17
+PG_DUMP="$(pgbin pg_dump)"
+PG_RESTORE="$(pgbin pg_restore)"
+PSQL="$(pgbin psql)"
+log "pg_dump client: $("$PG_DUMP" --version)"
 
 # Read-only server version (single SELECT; the URL is never echoed).
-SERVER_VERSION="$(psql "$SUPABASE_PROD_DB_URL" -tAX -c 'show server_version' 2>/dev/null | tr -d '[:space:]' || true)"
+SERVER_VERSION="$("$PSQL" "$SUPABASE_PROD_DB_URL" -tAX -c 'show server_version' 2>/dev/null | tr -d '[:space:]' || true)"
 [ -n "$SERVER_VERSION" ] && log "source PostgreSQL server_version: $SERVER_VERSION" || warn "could not read server_version (continuing)"
 
 # Custom-format dump of ONLY the app schemas — `public` (schema, data, indexes,
@@ -43,7 +49,7 @@ SERVER_VERSION="$(psql "$SUPABASE_PROD_DB_URL" -tAX -c 'show server_version' 2>/
 # (migration state). Restricting schemas avoids Supabase-managed system schemas
 # the postgres role cannot fully dump, while keeping everything Rasid needs.
 log "running pg_dump (custom format, public + drizzle)…"
-pg_dump "$SUPABASE_PROD_DB_URL" \
+"$PG_DUMP" "$SUPABASE_PROD_DB_URL" \
   --format=custom \
   --no-owner --no-privileges \
   --schema=public --schema=drizzle \
@@ -58,7 +64,7 @@ SIZE="$(stat -c%s "$DUMP")"
 log "dump size: ${SIZE} bytes, sha256: ${SHA256}"
 
 # Validate the artifact is a readable pg_restore archive.
-pg_restore --list "$DUMP" > "$TOC" || die "pg_restore --list failed — dump is not readable"
+"$PG_RESTORE" --list "$DUMP" > "$TOC" || die "pg_restore --list failed — dump is not readable"
 [ -s "$TOC" ] || die "pg_restore --list produced an empty table of contents"
 
 # Lightweight sanity: required objects MUST be present; others are warnings.

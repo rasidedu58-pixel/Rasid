@@ -20,6 +20,10 @@ case "$VERIFY_DB_URL" in
   *@localhost:*|*@127.0.0.1:*) ;;
   *) die "refusing to run: VERIFY_DB_URL must target a local disposable instance (got a non-localhost host)";;
 esac
+# Enforce PG17 client (dump was produced by PG17; restore/psql must match).
+require_pg17
+PG_RESTORE="$(pgbin pg_restore)"
+PSQL="$(pgbin psql)"
 b2_aws_env
 EP="$(b2_endpoint)"
 WORKDIR="${WORKDIR:-./_verify}"; mkdir -p "$WORKDIR"
@@ -43,12 +47,12 @@ ACTUAL="$(sha256sum "$DUMP" | awk '{print $1}')"
 log "SHA-256 verified: ${ACTUAL}"
 
 # Confirm the archive is readable before attempting a restore.
-pg_restore --list "$DUMP" >/dev/null || die "pg_restore --list failed — archive unreadable"
+"$PG_RESTORE" --list "$DUMP" >/dev/null || die "pg_restore --list failed — archive unreadable"
 
 # The dump (--no-owner --no-privileges) still contains CREATE POLICY ... TO <role>
 # statements; those roles are cluster-global and NOT in the dump, so pre-create
 # them as harmless NOLOGIN roles in the disposable target before restore.
-psql "$VERIFY_DB_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
+"$PSQL" "$VERIFY_DB_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
 DO $$
 DECLARE r text;
 BEGIN
@@ -61,11 +65,11 @@ END $$;
 SQL
 
 log "restoring into disposable PostgreSQL…"
-pg_restore --no-owner --no-privileges --exit-on-error --dbname "$VERIFY_DB_URL" "$DUMP" \
+"$PG_RESTORE" --no-owner --no-privileges --exit-on-error --dbname "$VERIFY_DB_URL" "$DUMP" \
   || die "pg_restore failed"
 
 # ---- Assertions on the restored disposable database ----
-q() { psql "$VERIFY_DB_URL" -tAX -c "$1" | tr -d '[:space:]'; }
+q() { "$PSQL" "$VERIFY_DB_URL" -tAX -c "$1" | tr -d '[:space:]'; }
 
 [ "$(q "select count(*) from information_schema.schemata where schema_name='public'")"  = "1" ] || die "public schema missing after restore"
 [ "$(q "select count(*) from information_schema.schemata where schema_name='drizzle'")" = "1" ] || die "drizzle schema missing after restore"
