@@ -113,10 +113,15 @@ class B2:
     """Authenticated Backblaze B2 native-API session."""
 
     def __init__(self):
-        key_id = _env("B2_KEY_ID")
-        app_key = _env("B2_APPLICATION_KEY")
+        # applicationKeyId + applicationKey (the SAME values S3 SigV4 uses).
+        # .strip() guards against an accidental trailing newline in a secret.
+        key_id = _env("B2_KEY_ID").strip()
+        app_key = _env("B2_APPLICATION_KEY").strip()
         basic = base64.b64encode(f"{key_id}:{app_key}".encode()).decode()
-        status, raw = _http("POST", AUTH_URL, {"Authorization": f"Basic {basic}"}, b"{}")
+        # b2_authorize_account is a GET with NO body and only the Basic header
+        # (per the official B2 Native API docs). Sending a POST/body makes B2
+        # reject it with 401 bad_auth_token.
+        status, raw = _http("GET", AUTH_URL, {"Authorization": f"Basic {basic}"})
         if status != 200:
             _fail(status, raw, "b2_authorize_account")
         a = json.loads(raw)
