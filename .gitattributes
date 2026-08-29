@@ -1,0 +1,4 @@
+# Ensure shell scripts and CI workflows always use LF so they run correctly
+# on Linux GitHub Actions runners regardless of a contributor's git settings.
+*.sh text eol=lf
+.github/workflows/*.yml text eol=lf
