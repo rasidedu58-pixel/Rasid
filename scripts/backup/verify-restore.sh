@@ -65,7 +65,20 @@ BEGIN
 END $$;
 SQL
 
+# Present a genuinely CLEAN target. The dump was taken with
+# --schema=public --schema=drizzle, so its TOC contains `CREATE SCHEMA public;`
+# (and `CREATE SCHEMA drizzle;`). A fresh PostgreSQL database already ships an
+# empty `public` schema, so that statement would fail with
+# `schema "public" already exists` and abort the (correctly strict) restore.
+# Drop the pre-existing schemas first so the dump recreates them itself; this
+# ONLY ever touches the disposable localhost instance (guarded at the top).
+"$PSQL" "$VERIFY_DB_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
+DROP SCHEMA IF EXISTS drizzle CASCADE;
+DROP SCHEMA IF EXISTS public CASCADE;
+SQL
+
 log "restoring into disposable PostgreSQL…"
+# Keep --exit-on-error: any genuine restore error still fails verification.
 "$PG_RESTORE" --no-owner --no-privileges --exit-on-error --dbname "$VERIFY_DB_URL" "$DUMP" \
   || die "pg_restore failed"
 
