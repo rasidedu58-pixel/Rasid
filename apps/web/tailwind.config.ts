@@ -35,8 +35,13 @@ const config: Config = {
           DEFAULT: withOpacity("--brand"),
           foreground: withOpacity("--brand-foreground"),
           strong: withOpacity("--brand-strong"),
+          secondary: withOpacity("--brand-secondary"),
           subtle: withOpacity("--brand-subtle"),
           "subtle-foreground": withOpacity("--brand-subtle-foreground"),
+        },
+        accent: {
+          DEFAULT: withOpacity("--accent"),
+          foreground: withOpacity("--accent-foreground"),
         },
         success: { DEFAULT: withOpacity("--success"), subtle: withOpacity("--success-subtle") },
         warning: { DEFAULT: withOpacity("--warning"), subtle: withOpacity("--warning-subtle") },
@@ -60,14 +65,23 @@ const config: Config = {
         xl: "var(--radius-xl)",
       },
       fontFamily: {
-        sans: ["var(--font-plex-arabic)", "var(--font-inter)", "system-ui", "sans-serif"],
+        sans: ["var(--font-plex-arabic)", "var(--font-geist-sans)", "system-ui", "sans-serif"],
+      },
+      backgroundImage: {
+        "gradient-hero": "linear-gradient(135deg, #0D9488 0%, #6366F1 50%, #0EA5E9 100%)",
+        "gradient-cta": "linear-gradient(90deg, #0D9488, #14B8A6)",
+        "gradient-text": "linear-gradient(90deg, #0D9488, #6366F1)",
       },
       boxShadow: {
-        xs: "0 1px 2px 0 rgb(15 23 42 / 0.04)",
-        sm: "0 1px 3px 0 rgb(15 23 42 / 0.06), 0 1px 2px -1px rgb(15 23 42 / 0.06)",
-        md: "0 4px 10px -2px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.06)",
-        lg: "0 12px 24px -6px rgb(15 23 42 / 0.10), 0 4px 8px -4px rgb(15 23 42 / 0.06)",
-        floating: "0 16px 32px -8px rgb(15 23 42 / 0.14), 0 6px 12px -4px rgb(15 23 42 / 0.08)",
+        xs: "0 1px 2px 0 rgb(0 0 0 / 0.20)",
+        sm: "0 1px 3px 0 rgb(0 0 0 / 0.30), 0 1px 2px -1px rgb(0 0 0 / 0.20)",
+        md: "0 4px 12px -2px rgb(0 0 0 / 0.35), 0 2px 6px -2px rgb(0 0 0 / 0.25)",
+        lg: "0 12px 28px -6px rgb(0 0 0 / 0.45), 0 4px 10px -4px rgb(0 0 0 / 0.30)",
+        floating: "0 18px 40px -10px rgb(0 0 0 / 0.55), 0 8px 16px -6px rgb(0 0 0 / 0.35)",
+        // Design System v2 depth/glow
+        glow: "0 0 40px rgb(13 148 136 / 0.30), 0 0 80px rgb(13 148 136 / 0.10)",
+        "card-hover": "0 8px 30px rgb(13 148 136 / 0.12), 0 4px 12px rgb(0 0 0 / 0.40)",
+        elevated: "0 20px 60px rgb(0 0 0 / 0.50)",
       },
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },

@@ -57,7 +57,7 @@ export function PricingTable() {
               href={plan.isCustom ? "/support" : "/signup"}
               className={`focus-ring mt-6 flex h-11 items-center justify-center rounded-md text-sm font-medium transition-[background-color,box-shadow,transform] duration-150 active:scale-[0.98] ${
                 highlighted
-                  ? "bg-brand text-brand-foreground shadow-sm hover:bg-brand-strong hover:shadow-md"
+                  ? "bg-gradient-cta text-brand-foreground shadow-sm hover:shadow-glow hover:brightness-[1.08]"
                   : "border border-border-strong bg-surface text-text-primary hover:bg-surface-sunken"
               }`}
             >

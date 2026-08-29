@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { Button } from "@academic-precision/ui";
 import { BrandMark } from "../brand-mark";
+import { ThemeToggle } from "../theme-toggle";
 
 const NAV_LINKS = [
   { href: "/#features", label: "المزايا", section: "features" },
@@ -79,6 +80,7 @@ export function MarketingHeader() {
         </nav>
 
         <div className="hidden items-center gap-2 md:flex">
+          <ThemeToggle />
           <Button asChild variant="ghost" size="sm">
             <Link href="/login">تسجيل الدخول</Link>
           </Button>
@@ -87,15 +89,18 @@ export function MarketingHeader() {
           </Button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="focus-ring flex h-9 w-9 items-center justify-center rounded-md text-text-secondary transition-colors hover:text-text-primary md:hidden"
-          aria-label={open ? "إغلاق القائمة" : "فتح القائمة"}
-          aria-expanded={open}
-        >
-          {open ? <X className="h-5 w-5" aria-hidden /> : <Menu className="h-5 w-5" aria-hidden />}
-        </button>
+        <div className="flex items-center gap-1 md:hidden">
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="focus-ring flex h-9 w-9 items-center justify-center rounded-md text-text-secondary transition-colors hover:text-text-primary"
+            aria-label={open ? "إغلاق القائمة" : "فتح القائمة"}
+            aria-expanded={open}
+          >
+            {open ? <X className="h-5 w-5" aria-hidden /> : <Menu className="h-5 w-5" aria-hidden />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile menu — animated open/close via the grid-rows technique. */}

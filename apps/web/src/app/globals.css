@@ -16,83 +16,113 @@
  * cold slate-only), and restrained semantic accents. No gradients, no
  * glassmorphism, no purple-on-purple "AI product" look.
  */
+/*
+ * Design System v2.0 — DARK-FIRST. The default `:root` is the dark theme;
+ * `:root[data-theme="light"]` overrides for the optional light mode (the
+ * ThemeProvider sets the attribute on <html>, defaulting to dark). Token
+ * NAMES are unchanged from v1 so every existing component adopts the new
+ * system with no markup change.
+ *
+ * Anchor palette:
+ *   Brand (Teal)      #0D9488   --brand         (CTAs, links, active, focus)
+ *   Secondary (Indigo)#6366F1   --brand-secondary
+ *   Accent (Amber)    #F59E0B   --accent
+ *   BG Primary        #0A0A0F   BG card #12121A   BG raised #1A1A25
+ *   Text              #F8FAFC / #94A3B8 / #64748B
+ * Greens/ambers/reds stay strictly semantic (success/warning/danger/info).
+ */
 :root {
+  --background: 240 20% 5%; /* #0A0A0F */
+  --foreground: 210 40% 98%;
+
+  --surface: 240 18% 9%; /* #12121A — cards/panels/inputs */
+  --surface-raised: 240 17% 12%; /* #1A1A25 — elevated cards */
+  --surface-sunken: 240 16% 7%; /* recessed / alt sections */
+
+  --border: 240 10% 16%; /* ≈ rgba(255,255,255,0.06) over the dark bg */
+  --border-strong: 240 10% 26%;
+
+  --text-primary: 210 40% 98%; /* #F8FAFC */
+  --text-secondary: 215 20% 65%; /* #94A3B8 */
+  --text-tertiary: 215 16% 47%; /* #64748B */
+
+  --brand: 174 84% 32%; /* #0D9488 teal */
+  --brand-foreground: 0 0% 100%;
+  --brand-strong: 174 80% 28%; /* solid hover/active */
+  --brand-subtle: 174 45% 13%; /* dark teal tint (badge bg) */
+  --brand-subtle-foreground: 172 66% 55%;
+
+  --brand-secondary: 239 84% 67%; /* #6366F1 indigo */
+  --accent: 38 92% 50%; /* #F59E0B amber */
+  --accent-foreground: 240 20% 8%;
+
+  --success: 160 84% 39%;
+  --success-subtle: 160 45% 13%;
+  --warning: 38 92% 50%;
+  --warning-subtle: 38 55% 14%;
+  --danger: 0 84% 60%;
+  --danger-subtle: 0 50% 16%;
+  --info: 217 91% 60%;
+  --info-subtle: 217 55% 16%;
+
+  --ring: 174 84% 42%;
+
+  --radius-sm: 0.375rem; /* 6px */
+  --radius-md: 0.75rem; /* 12px */
+  --radius-lg: 1.25rem; /* 20px */
+  --radius-xl: 1.75rem; /* 28px */
+
   /*
-   * UI-9 — refined color system. Navy + petrol-blue identity, calm cool
-   * neutrals. Anchor palette (hex → the HSL triplets below):
-   *   Primary Navy       #142B4A  (app shell / strong-weight nav)
-   *   Action Blue        #087EA4  (--brand: CTAs, links, active, focus)
-   *   Brand Strong/Hover #066887  (--brand-strong)
-   *   Background         #F7F9FB  Surface #FFFFFF
-   *   Primary Text       #172033  Secondary Text #667085
-   * Greens/ambers/reds stay strictly semantic (success/warning/danger/info).
+   * Shell identity tokens — the app shell (sidebar/mobile nav). Deliberately
+   * the deepest surface in BOTH themes (a dark sidebar next to lighter
+   * content is a deliberate, consistent identity choice), so these are NOT
+   * overridden in light mode. Active route = subtle teal wash + teal marker.
    */
-  --background: 210 33% 98%;
-  --foreground: 221 38% 15%;
+  --shell-surface: 240 22% 4%;
+  --shell-surface-hover: 240 12% 12%;
+  --shell-border: 240 10% 15%;
+  --shell-text: 210 40% 96%;
+  --shell-text-muted: 215 20% 65%;
+  --shell-active-bg: 174 45% 14%;
+  --shell-active-text: 0 0% 100%;
+}
+
+:root[data-theme="light"] {
+  --background: 210 20% 99%; /* #FAFBFC */
+  --foreground: 222 47% 11%;
 
   --surface: 0 0% 100%;
   --surface-raised: 0 0% 100%;
-  --surface-sunken: 214 27% 96%;
+  --surface-sunken: 210 40% 96%; /* #F1F5F9 */
 
-  --border: 214 22% 89%;
-  --border-strong: 214 17% 80%;
+  --border: 214 20% 90%; /* ≈ rgba(0,0,0,0.08) */
+  --border-strong: 214 16% 82%;
 
-  --text-primary: 221 38% 15%;
-  /* #667085 — measured 4.97:1 on --surface (white), clears WCAG AA. */
-  --text-secondary: 221 13% 46%;
-  /*
-   * Third text tier: kept as close to AA as the specified (lighter)
-   * secondary allows. 48% lightness measures ~4.55:1 on --surface (AA for
-   * normal text) while staying a touch lighter than --text-secondary so the
-   * 3-tier hierarchy survives. Used only for small hints/timestamps.
-   */
-  --text-tertiary: 221 12% 48%;
+  --text-primary: 222 47% 11%; /* #0F172A */
+  --text-secondary: 215 19% 35%; /* #475569 */
+  --text-tertiary: 215 16% 47%; /* #64748B */
 
-  --brand: 195 91% 34%;
+  --brand: 174 84% 30%; /* teal, deepened slightly for AA on white */
   --brand-foreground: 0 0% 100%;
-  /* #066887 — hover/strong/active for brand-filled surfaces. */
-  --brand-strong: 195 92% 28%;
-  --brand-subtle: 195 60% 94%;
-  --brand-subtle-foreground: 195 92% 26%;
+  --brand-strong: 174 84% 24%;
+  --brand-subtle: 174 55% 94%;
+  --brand-subtle-foreground: 174 84% 26%;
 
-  --success: 152 55% 32%;
+  --brand-secondary: 239 66% 58%;
+  --accent: 38 92% 44%;
+  --accent-foreground: 0 0% 100%;
+
+  --success: 160 84% 28%;
   --success-subtle: 152 45% 94%;
-  /*
-   * Phase 13 accessibility fix — precisely measured: 42% lightness gave
-   * only 3.26:1 against `--warning-subtle` (the Badge tone="warning"
-   * background), below WCAG AA. 32% clears it with real margin (5.17:1
-   * vs warning-subtle, 5.66:1 vs plain `--surface`), same hue/saturation
-   * (still reads as amber/warning, just deep enough to read reliably).
-   */
-  --warning: 32 88% 32%;
+  --warning: 38 92% 36%;
   --warning-subtle: 38 92% 94%;
-  --danger: 4 72% 46%;
-  --danger-subtle: 4 60% 95%;
-  /* Info deepened to ~4.7:1 on white so info text clears AA; hue kept
-   * distinct from the petrol brand so "info" never reads as "action". */
-  --info: 208 82% 38%;
-  --info-subtle: 208 72% 95%;
+  --danger: 0 72% 46%;
+  --danger-subtle: 0 60% 96%;
+  --info: 217 80% 44%;
+  --info-subtle: 210 70% 95%;
 
-  --ring: 195 90% 38%;
-
-  --radius-sm: 0.375rem;
-  --radius-md: 0.625rem;
-  --radius-lg: 0.875rem;
-  --radius-xl: 1.25rem;
-
-  /*
-   * Shell identity tokens — the app shell (sidebar/mobile nav), the one
-   * deliberate place Rasid "over-brands" with the Primary Navy (#142B4A) so
-   * every other surface stays a calm neutral. The active route reads as a
-   * solid petrol-blue pill (matching the brand/action color) on the navy.
-   */
-  --shell-surface: 214 57% 18%;
-  --shell-surface-hover: 214 42% 25%;
-  --shell-border: 214 34% 28%;
-  --shell-text: 210 30% 93%;
-  --shell-text-muted: 214 16% 66%;
-  --shell-active-bg: 195 84% 36%;
-  --shell-active-text: 0 0% 100%;
+  --ring: 174 84% 36%;
+  /* shell tokens intentionally inherit the dark values above (dark sidebar). */
 }
 
 * {
@@ -101,6 +131,10 @@
 
 html {
   height: 100%;
+  color-scheme: dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
 }
 
 body {
@@ -110,6 +144,57 @@ body {
   font-feature-settings: "ss01" 1;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Smooth (but quick) cross-fade when toggling the theme. */
+body,
+body * {
+  transition-property: background-color, border-color;
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  body,
+  body * {
+    transition: none;
+  }
+}
+
+/* ---- Design System v2 gradient / glow utilities ---- */
+.text-gradient {
+  background-image: linear-gradient(90deg, #0d9488, #6366f1);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.bg-gradient-cta {
+  background-image: linear-gradient(90deg, #0d9488, #14b8a6);
+}
+.bg-gradient-hero {
+  background-image: linear-gradient(135deg, #0d9488 0%, #6366f1 50%, #0ea5e9 100%);
+}
+/* Faint teal top-glow for feature/pricing cards (dark theme depth). */
+.card-glow {
+  position: relative;
+}
+.card-glow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at 50% 0%, rgba(13, 148, 136, 0.1), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.card-glow:hover::before {
+  opacity: 1;
+}
+/* Hairline gradient section divider. */
+.divider-gradient {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, hsl(var(--brand) / 0.35), transparent);
 }
 
 /* Financial/tabular figures should never jitter in width as digits change. */
