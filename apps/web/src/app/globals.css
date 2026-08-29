@@ -83,8 +83,9 @@
   --shell-border: 240 10% 15%;
   --shell-text: 210 40% 96%;
   --shell-text-muted: 215 20% 65%;
-  --shell-active-bg: 174 45% 14%;
+  --shell-active-bg: 174 45% 14%; /* subtle teal wash behind the active item */
   --shell-active-text: 0 0% 100%;
+  --shell-accent: 172 76% 45%; /* bright teal — active marker + icon */
 }
 
 :root[data-theme="light"] {

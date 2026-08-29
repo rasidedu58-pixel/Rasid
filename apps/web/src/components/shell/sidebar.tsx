@@ -31,7 +31,7 @@ export function Sidebar() {
       <div className="flex flex-col gap-3 px-4 pb-4 pt-5">
         <div className="flex items-center gap-2.5">
           <span
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-shell-active text-[15px] font-bold text-shell-active-text"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-cta text-[15px] font-bold text-white shadow-glow"
             aria-hidden
           >
             ر
@@ -84,13 +84,13 @@ function SidebarLink({ item, pathname }: { item: NavItem; pathname: string }) {
       className={cn(
         // Same ring language as `.focus-ring` but with dark-shell-appropriate
         // offset color (measured contrasts documented in the Phase 13 fix).
-        "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-shell-text focus-visible:ring-offset-2 focus-visible:ring-offset-shell",
-        active ? "bg-shell-hover font-medium text-shell-text" : "font-normal text-shell-text-muted hover:bg-shell-hover/60 hover:text-shell-text",
+        "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-shell-accent focus-visible:ring-offset-2 focus-visible:ring-offset-shell",
+        active ? "bg-shell-active font-medium text-shell-text" : "font-normal text-shell-text-muted hover:bg-shell-hover/60 hover:text-shell-text",
       )}
     >
-      {/* Calm selected marker: a teal edge-accent on the inner (content-facing) edge — end-0 is the left edge in this RTL shell. */}
-      {active ? <span className="absolute end-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-shell-active" aria-hidden /> : null}
-      <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "text-shell-text" : "text-shell-text-muted group-hover:text-shell-text")} aria-hidden />
+      {/* Selected marker: a bright teal edge-accent on the inner (content-facing) edge — end-0 is the left edge in this RTL shell. */}
+      {active ? <span className="absolute end-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-shell-accent" aria-hidden /> : null}
+      <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "text-shell-accent" : "text-shell-text-muted group-hover:text-shell-text")} aria-hidden />
       {item.label}
     </Link>
   );

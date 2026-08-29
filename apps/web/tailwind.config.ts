@@ -56,6 +56,7 @@ const config: Config = {
           "text-muted": withOpacity("--shell-text-muted"),
           active: withOpacity("--shell-active-bg"),
           "active-text": withOpacity("--shell-active-text"),
+          accent: withOpacity("--shell-accent"),
         },
       },
       borderRadius: {

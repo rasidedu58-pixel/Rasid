@@ -20,6 +20,7 @@ import { qk } from "../../lib/query-keys";
 import { fetchNotifications } from "../../lib/api/reports";
 import { getSupabaseClient } from "../../lib/supabase-client";
 import { SubscriptionStatusBadge } from "../billing/subscription-status-badge";
+import { ThemeToggle } from "../theme-toggle";
 
 export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const { workspaceId, workspaceName, subscriptionState } = useWorkspace();
@@ -37,7 +38,7 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4 md:px-6">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface/80 px-4 backdrop-blur md:px-6">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" className="md:hidden" onClick={onOpenMobileNav} aria-label="فتح القائمة">
           <Menu className="h-5 w-5" aria-hidden />
@@ -49,6 +50,8 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
 
       <div className="flex items-center gap-3">
         {subscriptionState ? <SubscriptionStatusBadge state={subscriptionState} className="hidden sm:inline-flex" /> : null}
+
+        <ThemeToggle />
 
         <Link href="/notifications" className="relative">
           <Button variant="ghost" size="icon" aria-label="الإشعارات">
