@@ -40,3 +40,7 @@ _verify/
 backup-artifacts/
 rasid-backups/
 recovery-dump.jsonl
+
+# Python bytecode (e.g. from scripts/backup/b2.py)
+__pycache__/
+*.pyc
