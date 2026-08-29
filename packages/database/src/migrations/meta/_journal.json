@@ -365,6 +365,13 @@
       "when": 1788100000000,
       "tag": "0053_users_workspace_comember_read",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0054_workspace_invitations",
+      "breakpoints": true
     }
   ]
 }

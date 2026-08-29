@@ -14,7 +14,6 @@ import {
   SkeletonRows,
   StatusDot,
   initialsFromName,
-  toast,
 } from "@academic-precision/ui";
 import type { TeamMember } from "@academic-precision/contracts";
 import { PageHeader } from "../../../components/shell/page-header";
@@ -23,6 +22,8 @@ import { qk } from "../../../lib/query-keys";
 import { fetchTeam } from "../../../lib/api/team";
 import { fetchGroups } from "../../../lib/api/scheduling";
 import { MemberDrawer, deriveRoleLabel } from "./member-drawer";
+import { InviteSheet } from "./invite-sheet";
+import { InvitationsList } from "./invitations-list";
 
 const STATUS_TONE: Record<string, "success" | "neutral" | "danger"> = { ACTIVE: "success", INVITED: "neutral", DISABLED: "danger" };
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "نشط", INVITED: "دعوة معلقة", DISABLED: "موقوف" };
@@ -36,6 +37,7 @@ export default function TeamPage() {
 
   const [selected, setSelected] = useState<TeamMember | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INVITED" | "DISABLED">("ALL");
 
@@ -84,7 +86,7 @@ export default function TeamPage() {
         description="أدر أعضاء مساحة العمل وحدد ما يمكن لكل شخص الوصول إليه."
         actions={
           canManage ? (
-            <Button onClick={() => toast.info("دعوة الأعضاء بالبريد الإلكتروني ستتوفر في التحديث القادم.")}>
+            <Button onClick={() => setInviteOpen(true)}>
               <UserPlus className="h-4 w-4" aria-hidden />
               إضافة عضو
             </Button>
@@ -105,7 +107,7 @@ export default function TeamPage() {
           description="يمكنك إضافة مساعد أو عضو فريق وتحديد ما يستطيع الوصول إليه بدقة."
           action={
             canManage ? (
-              <Button onClick={() => toast.info("دعوة الأعضاء بالبريد الإلكتروني ستتوفر في التحديث القادم.")}>
+              <Button onClick={() => setInviteOpen(true)}>
                 <UserPlus className="h-4 w-4" aria-hidden />
                 إضافة عضو
               </Button>
@@ -181,6 +183,8 @@ export default function TeamPage() {
         </div>
       )}
 
+      {canManage && !query.isLoading && !query.isError ? <InvitationsList workspaceId={ws} /> : null}
+
       <MemberDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
@@ -189,6 +193,8 @@ export default function TeamPage() {
         workspaceId={ws}
         canManage={canManage}
       />
+
+      <InviteSheet open={inviteOpen} onOpenChange={setInviteOpen} workspaceId={ws} groups={groups} />
     </>
   );
 }

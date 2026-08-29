@@ -2,12 +2,16 @@ import { Module } from "@nestjs/common";
 import { SupabaseAuthGuard } from "../identity/api/guards/supabase-auth.guard";
 import { JwtTokenVerifier, TOKEN_VERIFIER } from "../identity/infrastructure/jwt-token-verifier";
 import { TeamController } from "./api/team.controller";
+import { InvitationsController, InvitationAcceptController } from "./api/invitations.controller";
 import { PermissionGuard } from "./api/guards/permission.guard";
 import { PermissionResolverService } from "./application/permission-resolver.service";
 import { TeamService } from "./application/team.service";
+import { InvitationsService } from "./application/invitations.service";
 import { GROUP_OWNERSHIP_PORT } from "./application/ports/group-ownership.port";
 import { TEAM_REPOSITORY } from "./application/ports/team-repository.port";
+import { INVITATION_REPOSITORY } from "./application/ports/invitation-repository.port";
 import { DrizzleTeamRepository } from "./infrastructure/drizzle-team.repository";
+import { DrizzleInvitationRepository } from "./infrastructure/drizzle-invitation.repository";
 import { DrizzleGroupOwnershipAdapter } from "./infrastructure/group-ownership.adapter";
 import { EntitlementGuard } from "../billing/api/guards/entitlement.guard";
 import { ENTITLEMENT_REPOSITORY } from "../billing/application/ports/entitlement-repository.port";
@@ -27,15 +31,17 @@ import { DrizzleEntitlementRepository } from "../billing/infrastructure/drizzle-
  * routes can carry `@RequireEntitlement("TEAM_MANAGEMENT")`.
  */
 @Module({
-  controllers: [TeamController],
+  controllers: [TeamController, InvitationsController, InvitationAcceptController],
   providers: [
     TeamService,
+    InvitationsService,
     PermissionResolverService,
     PermissionGuard,
     EntitlementGuard,
     SupabaseAuthGuard,
     { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier },
     { provide: TEAM_REPOSITORY, useClass: DrizzleTeamRepository },
+    { provide: INVITATION_REPOSITORY, useClass: DrizzleInvitationRepository },
     { provide: GROUP_OWNERSHIP_PORT, useClass: DrizzleGroupOwnershipAdapter },
     { provide: ENTITLEMENT_REPOSITORY, useClass: DrizzleEntitlementRepository },
   ],

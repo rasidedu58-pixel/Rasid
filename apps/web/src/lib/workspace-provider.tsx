@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { PermissionKey, CapabilityDto } from "@academic-precision/contracts";
 import { fetchMe, fetchWorkspaceContext } from "./api/identity";
@@ -28,6 +28,14 @@ function readCachedWorkspaceId(): string | null {
   }
 }
 
+function writeCachedWorkspaceId(id: string) {
+  try {
+    localStorage.setItem(LAST_WORKSPACE_KEY, id);
+  } catch {
+    /* storage unavailable — selection simply won't persist across reloads */
+  }
+}
+
 /**
  * `/me` + `/context` describe slowly-changing identity/permission state —
  * a longer staleTime keeps SPA navigations from re-running the auth
@@ -51,6 +59,13 @@ interface WorkspaceContextValue {
   hasPermission: (key: PermissionKey) => boolean;
   canWrite: (capability?: CapabilityDto) => boolean;
   refetch: () => void;
+  /**
+   * Selects which of the caller's workspaces is the active/current one, and
+   * persists that choice. Used both by the (future) workspace switcher and by
+   * the invitation-accept flow — accepting an invite makes the invited
+   * workspace current so the user lands directly in it, not their own.
+   */
+  setCurrentWorkspace: (workspaceId: string) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -67,8 +82,12 @@ const WRITE_BLOCKING_STATES = new Set(["EXPIRED", "PAYMENT_FAILED"]);
  */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { status: sessionStatus } = useSession();
-  // Read once on mount (useState initializer — no SSR window access).
-  const [cachedWorkspaceId] = useState<string | null>(() => (typeof window === "undefined" ? null : readCachedWorkspaceId()));
+  // The caller's explicitly-selected / last-active workspace. Seeded once on
+  // mount from persisted storage (useState initializer — no SSR window access),
+  // then updated by `setCurrentWorkspace` (workspace switch / invite accept).
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : readCachedWorkspaceId(),
+  );
 
   const meQuery = useQuery({
     queryKey: qk.me(),
@@ -77,12 +96,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     staleTime: BOOTSTRAP_STALE_MS,
   });
 
-  const activeWorkspace = meQuery.data?.workspaces.find((w) => w.status === "ACTIVE") ?? null;
+  // Prefer the caller's selected workspace WHEN it is still one of their
+  // ACTIVE memberships; otherwise fall back to the first ACTIVE one. `/me`
+  // (membership status) remains authoritative — a stale/left selection can
+  // never resurrect a workspace the user is no longer an active member of.
+  // This is exactly what makes an accepted invitation's workspace become the
+  // current one (the accept flow calls `setCurrentWorkspace` first).
+  const activeMemberships = (meQuery.data?.workspaces ?? []).filter((w) => w.status === "ACTIVE");
+  const activeWorkspace =
+    (selectedWorkspaceId ? activeMemberships.find((w) => w.id === selectedWorkspaceId) : undefined) ??
+    activeMemberships[0] ??
+    null;
 
-  // `/me` is authoritative once resolved; before that, the persisted id is
-  // only a parallelization hint. When `/me` has resolved and found NO
-  // active workspace, the hint must NOT keep a context fetch alive.
-  const contextWorkspaceId = activeWorkspace?.id ?? (meQuery.data ? null : cachedWorkspaceId);
+  // Before `/me` resolves, the persisted selection is only a parallelization
+  // hint for `/context`. Once `/me` has resolved with NO active workspace, the
+  // hint must NOT keep a context fetch alive.
+  const contextWorkspaceId = activeWorkspace?.id ?? (meQuery.data ? null : selectedWorkspaceId);
 
   const contextQuery = useQuery({
     queryKey: contextWorkspaceId ? qk.workspaceContext(contextWorkspaceId) : ["workspace-context", "none"],
@@ -91,15 +120,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     staleTime: BOOTSTRAP_STALE_MS,
   });
 
+  // Keep the persisted "last active" in sync with whatever active workspace is
+  // actually resolved, so the next cold load restores the same one.
   useEffect(() => {
-    if (activeWorkspace) {
-      try {
-        localStorage.setItem(LAST_WORKSPACE_KEY, activeWorkspace.id);
-      } catch {
-        /* storage unavailable — hint simply won't help next load */
-      }
-    }
+    if (activeWorkspace) writeCachedWorkspaceId(activeWorkspace.id);
   }, [activeWorkspace]);
+
+  const setCurrentWorkspace = useCallback((workspaceId: string) => {
+    writeCachedWorkspaceId(workspaceId);
+    setSelectedWorkspaceId(workspaceId);
+  }, []);
 
   const value = useMemo<WorkspaceContextValue>(() => {
     if (sessionStatus === "loading" || meQuery.isLoading || (activeWorkspace && contextQuery.isLoading)) {
@@ -119,6 +149,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           void meQuery.refetch();
           void contextQuery.refetch();
         },
+        setCurrentWorkspace,
       };
     }
 
@@ -136,6 +167,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         hasPermission: () => false,
         canWrite: () => false,
         refetch: () => void meQuery.refetch(),
+        setCurrentWorkspace,
       };
     }
 
@@ -165,8 +197,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return entitlements.has(capability);
       },
       refetch: () => void contextQuery.refetch(),
+      setCurrentWorkspace,
     };
-  }, [sessionStatus, meQuery, contextQuery, activeWorkspace]);
+  }, [sessionStatus, meQuery, contextQuery, activeWorkspace, setCurrentWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

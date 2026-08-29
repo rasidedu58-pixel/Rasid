@@ -11,6 +11,16 @@ import { PasswordInput } from "../../components/auth/password-input";
 type LoginState = "idle" | "loading" | "locked" | "error";
 
 /**
+ * Only ever follow an in-app, single-slash path (open-redirect guard): a
+ * `returnTo` must start with "/" and NOT "//" (protocol-relative) so it can
+ * never point off-site. Anything else falls back to the dashboard.
+ */
+function safeReturnTo(raw: string | null): string {
+  if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  return "/dashboard";
+}
+
+/**
  * Login (PRD §29.2). Generic error messaging — never confirms whether an
  * identifier exists. Session expiry is surfaced via `?expired=1` (set by
  * `apiRequest` when the server returns SESSION_EXPIRED/401), without
@@ -31,6 +41,8 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [state, setState] = useState<LoginState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const returnToParam = searchParams.get("returnTo");
+  const signupHref = returnToParam ? `/signup?returnTo=${encodeURIComponent(returnToParam)}` : "/signup";
 
   useEffect(() => {
     if (searchParams.get("expired") === "1") {
@@ -60,8 +72,9 @@ function LoginForm() {
 
       // The (app) route group's own AuthGuard resolves whether the caller
       // already has a completed workspace (-> /dashboard) or still needs
-      // onboarding (-> redirected there itself) — login never guesses.
-      router.push("/dashboard");
+      // onboarding (-> redirected there itself) — login never guesses. A
+      // `returnTo` (e.g. an invitation link) takes precedence when present.
+      router.push(safeReturnTo(searchParams.get("returnTo")));
     } catch {
       setState("error");
       setErrorMessage("تعذّر الاتصال بالخادم. حاول مرة أخرى.");
@@ -75,7 +88,7 @@ function LoginForm() {
       footer={
         <span>
           ليس لديك حساب؟{" "}
-          <Link href="/signup" className="font-medium text-brand hover:underline">
+          <Link href={signupHref} className="font-medium text-brand hover:underline">
             إنشاء حساب جديد
           </Link>
         </span>

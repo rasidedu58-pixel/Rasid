@@ -116,6 +116,26 @@ export class IdempotencyConflictException extends ApiException {
   }
 }
 
+/**
+ * 404 — Team & Permissions Phase 2: an invitation token is unknown, revoked,
+ * already accepted, or expired. Deliberately ONE opaque response shape for all
+ * of those (safe no-leak, mirroring `QrInvalidException`): the accept/preview
+ * path must never distinguish "never existed" from "already used" from
+ * "expired", which would leak invitation state to a token guesser.
+ */
+export class InvitationInvalidException extends ApiException {
+  constructor(message = "رابط الدعوة غير صالح أو انتهت صلاحيته.", details?: Record<string, unknown>) {
+    super(404, "INVITATION_INVALID", message, details);
+  }
+}
+
+/** 409 — the invitee is already a member of the target workspace; nothing to accept. */
+export class AlreadyMemberException extends ApiException {
+  constructor(message = "أنت عضو بالفعل في مساحة العمل هذه.", details?: Record<string, unknown>) {
+    super(409, "ALREADY_MEMBER", message, details);
+  }
+}
+
 /** 422 — API Contract §12 error catalog: student not eligible for the requested session/date/enrollment action. */
 export class EnrollmentNotEligibleException extends ApiException {
   constructor(message = "طالب غير مؤهل للحصة/التاريخ.", details?: Record<string, unknown>) {

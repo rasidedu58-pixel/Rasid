@@ -3,6 +3,7 @@ export * from "./pagination";
 export * from "./identity";
 export * from "./permission-catalog";
 export * from "./team";
+export * from "./invitations";
 export * from "./scheduling";
 export * from "./finance";
 export * from "./students";

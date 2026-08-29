@@ -41,6 +41,7 @@ export const qk = {
   },
   team: {
     list: (ws: string) => ["team", ws, "list"] as const,
+    invitations: (ws: string) => ["team", ws, "invitations"] as const,
   },
   billing: {
     subscription: (ws: string) => ["billing", ws, "subscription"] as const,

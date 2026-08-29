@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Field, Input } from "@academic-precision/ui";
 import { getSupabaseClient } from "../../lib/supabase-client";
 import { AuthCard } from "../../components/auth/auth-card";
@@ -16,9 +16,22 @@ type SignupState = "idle" | "loading" | "error";
  * page only triggers signUp and hands off to `/verify-email`.
  * User/Workspace/Owner Membership creation happens server-side on the
  * first authenticated request from the verified identity, not here.
+ *
+ * A `returnTo` (e.g. an invitation link) is preserved through the whole
+ * verify-then-continue chain: signup → verify-email → returnTo.
  */
 export default function SignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignupForm />
+    </Suspense>
+  );
+}
+
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnToParam = searchParams.get("returnTo");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -61,7 +74,10 @@ export default function SignupPage() {
         return;
       }
 
-      router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+      const verifyQuery = returnToParam
+        ? `?email=${encodeURIComponent(email)}&returnTo=${encodeURIComponent(returnToParam)}`
+        : `?email=${encodeURIComponent(email)}`;
+      router.push(`/verify-email${verifyQuery}`);
     } catch {
       setState("error");
       setErrorMessage("تعذّر الاتصال بالخادم. حاول مرة أخرى.");
@@ -75,7 +91,7 @@ export default function SignupPage() {
       footer={
         <span>
           لديك حساب بالفعل؟{" "}
-          <Link href="/login" className="font-medium text-brand hover:underline">
+          <Link href={returnToParam ? `/login?returnTo=${encodeURIComponent(returnToParam)}` : "/login"} className="font-medium text-brand hover:underline">
             تسجيل الدخول
           </Link>
         </span>

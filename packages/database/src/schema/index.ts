@@ -26,6 +26,7 @@ export * as groups from "./groups";
 export * as students from "./students";
 export * as guardians from "./guardians";
 export * as qrCredentials from "./qr-credentials";
+export * as workspaceInvitations from "./workspace-invitations";
 export * as enrollments from "./enrollments";
 export * as sessions from "./sessions";
 export * as sessionExams from "./session-exams";

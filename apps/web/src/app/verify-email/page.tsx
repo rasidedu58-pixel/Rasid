@@ -12,6 +12,12 @@ import { AuthCard } from "../../components/auth/auth-card";
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN_SECONDS = 30;
 
+/** Open-redirect guard — only follow an in-app, single-slash path. */
+function safeReturnTo(raw: string | null): string | null {
+  if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  return null;
+}
+
 type VerifyState = "idle" | "verifying" | "success";
 
 /**
@@ -38,6 +44,7 @@ function VerifyEmailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get("email");
+  const returnTo = safeReturnTo(searchParams.get("returnTo"));
   const workspace = useWorkspace();
 
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
@@ -57,9 +64,16 @@ function VerifyEmailContent() {
   // like it does for every other authenticated route.
   useEffect(() => {
     if (verifyState !== "success") return;
+    // A pending `returnTo` (e.g. an invitation link) wins once the account is
+    // provisioned — either resolved status means `/me` completed, so the new
+    // user row exists and the destination page can act on it.
+    if (returnTo) {
+      if (workspace.status === "ready" || workspace.status === "no-workspace") router.replace(returnTo);
+      return;
+    }
     if (workspace.status === "no-workspace") router.replace("/onboarding");
     else if (workspace.status === "ready") router.replace("/dashboard");
-  }, [verifyState, workspace.status, router]);
+  }, [verifyState, workspace.status, router, returnTo]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
