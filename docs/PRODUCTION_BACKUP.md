@@ -15,7 +15,18 @@ Two GitHub Actions workflows:
 
 Scripts (`scripts/backup/`): `lib.sh` (shared helpers), `backup.sh` (dump +
 validate + metadata), `upload.sh` (B2 upload), `retention.sh` (30-day prune),
-`verify-restore.sh` (weekly restore proof).
+`verify-restore.sh` (weekly restore proof), and `b2.py` (the single B2
+transport).
+
+**B2 transport:** all Backblaze operations (upload / head / list / delete /
+download) go through one boto3 client (`b2.py`), never the AWS CLI. AWS CLI v2
+(>= 2.23) sends PutObject with `aws-chunked` / checksum-trailer encoding that
+B2 rejects with `IncompleteBody: request body too small`, and the
+`AWS_REQUEST_CHECKSUM_CALCULATION=when_required` env var does not reliably
+disable it. `b2.py` is configured explicitly for B2 (SigV4, the B2 endpoint +
+region, path-style, no default checksums) and uploads an in-memory bytes body,
+so every request is a single plain PutObject/GetObject B2 accepts. Both
+workflows `pip install boto3` before running the scripts.
 
 **Backup method:** `pg_dump --format=custom --no-owner --no-privileges
 --schema=public --schema=drizzle`. The custom (`-Fc`) archive is portable and

@@ -51,62 +51,30 @@ require_pg17() {
   log "PostgreSQL 17 client confirmed (pg_dump=${dver}, pg_restore=${rver}) at $(pg17_bindir)"
 }
 
-# Normalise the Backblaze S3 endpoint to always include a scheme.
-b2_endpoint() {
-  local ep="${B2_ENDPOINT:?B2_ENDPOINT is required}"
-  case "$ep" in http://*|https://*) printf '%s' "$ep";; *) printf 'https://%s' "$ep";; esac
+# --- Single Backblaze B2 transport (boto3) -----------------------------------
+# EVERY B2 operation — upload / head / list / delete / get — goes through the
+# one Python client (scripts/backup/b2.py). We do NOT use the AWS CLI for B2:
+# AWS CLI v2 (>= 2.23) sends PutObject with aws-chunked / checksum-trailer
+# encoding that Backblaze B2 rejects ("IncompleteBody: request body too small"),
+# and AWS_REQUEST_CHECKSUM_CALCULATION=when_required does not reliably disable
+# it. The boto3 client is configured explicitly for B2 (SigV4, the B2 endpoint
+# + region, path-style, no default checksums) and uploads an in-memory bytes
+# body => a single plain PutObject B2 accepts. Centralising here guarantees
+# upload, retention and weekly restore cannot use different B2 behaviour.
+
+# Directory of THIS library file (so callers can source from anywhere).
+B2_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve a Python 3 interpreter.
+b2_python() {
+  if command -v python3 >/dev/null 2>&1; then printf 'python3';
+  elif command -v python >/dev/null 2>&1; then printf 'python';
+  else die "python3 is required for the B2 client but was not found"; fi
 }
 
-# Derive the S3 signing region from a Backblaze endpoint. B2's SigV4 region is
-# the middle token of the host, e.g.
-#   https://s3.eu-central-003.backblazeb2.com -> eu-central-003
-#   https://s3.us-west-004.backblazeb2.com    -> us-west-004
-b2_region() {
-  b2_endpoint | sed -E 's#^https?://##; s#^s3\.##; s#\.backblazeb2\.com/?$##'
-}
-
-# --- Centralised B2 (S3-compatible) client -----------------------------------
-# EVERY B2 call — upload, head/list verification, retention, weekly restore —
-# MUST go through b2_aws() so they can never diverge on endpoint, region or
-# signing behaviour. b2_configure() must be called once before b2_aws().
-#
-# Notes on the SignatureDoesNotMatch class of failures on B2:
-#  * The signing region MUST equal the endpoint's region token (b2_region);
-#    high-level `aws s3 cp` auto-discovers and re-signs, but `aws s3api …`
-#    does not, so a wrong/implicit region only surfaces on s3api verify/list.
-#    We therefore pin --region explicitly on every call.
-#  * AWS CLI v2 (>= 2.23) turns ON request/response integrity checksums by
-#    default (aws-chunked / trailing checksums) which B2's S3 API rejects with
-#    SignatureDoesNotMatch. We restore the pre-2.23 "when_required" behaviour.
-b2_configure() {
+# Run one B2 operation. Credentials are read from the environment by b2.py and
+# are never passed as arguments or printed.
+b2py() {
   require_env B2_KEY_ID B2_APPLICATION_KEY B2_BUCKET_NAME B2_ENDPOINT
-  export AWS_ACCESS_KEY_ID="$B2_KEY_ID"
-  export AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY"
-  export B2_EP B2_REGION
-  B2_EP="$(b2_endpoint)"
-  B2_REGION="$(b2_region)"
-  # Pin region for both the SDK and any implicit resolution.
-  export AWS_DEFAULT_REGION="$B2_REGION"
-  export AWS_REGION="$B2_REGION"
-  export AWS_EC2_METADATA_DISABLED=true
-  # B2-compatibility: do not add SDK integrity checksums unless the operation
-  # requires them (avoids SignatureDoesNotMatch on AWS CLI v2 >= 2.23).
-  export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
-  export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-}
-
-# Backwards-compatible name kept for existing callers.
-b2_aws_env() { b2_configure; }
-
-# Run an aws command against B2 with the shared endpoint + region. Credentials
-# live in the environment only and are never passed as arguments or printed.
-b2_aws() {
-  [ -n "${B2_EP:-}" ] && [ -n "${B2_REGION:-}" ] || b2_configure
-  aws --endpoint-url "$B2_EP" --region "$B2_REGION" "$@"
-}
-
-# Assert one exact object exists (exact-key HeadObject, not a bucket listing).
-b2_head_object() {
-  local key="$1"
-  b2_aws s3api head-object --bucket "$B2_BUCKET_NAME" --key "$key" >/dev/null 2>&1
+  "$(b2_python)" "$B2_LIB_DIR/b2.py" "$@"
 }

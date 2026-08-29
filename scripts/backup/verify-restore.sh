@@ -24,20 +24,21 @@ esac
 require_pg17
 PG_RESTORE="$(pgbin pg_restore)"
 PSQL="$(pgbin psql)"
-b2_configure
+require_env B2_KEY_ID B2_APPLICATION_KEY B2_BUCKET_NAME B2_ENDPOINT
 WORKDIR="${WORKDIR:-./_verify}"; mkdir -p "$WORKDIR"
 
+# Object inventory via the single boto3 B2 client. TSV: <key>\t<epoch>\t<size>.
 OBJS="$(mktemp)"; trap 'rm -f "$OBJS"' EXIT
-b2_aws s3api list-objects-v2 --bucket "$B2_BUCKET_NAME" --prefix "production/" --output json > "$OBJS"
-NEWEST="$(jq -r '[.Contents[]? | select(.Key|endswith(".dump"))] | max_by(.LastModified) | .Key // empty' "$OBJS")"
+b2py list --prefix "production/" > "$OBJS"
+NEWEST="$(awk -F'\t' '$1 ~ /\.dump$/ {print $2"\t"$1}' "$OBJS" | sort -rn | head -1 | cut -f2)"
 [ -n "$NEWEST" ] || die "no Production backup (.dump) found under production/"
 BASE="${NEWEST%.dump}"
 log "newest backup: $NEWEST"
 
 DUMP="${WORKDIR}/restore.dump"
-# Deterministic single-request GetObject (same B2 client) — no streaming cp.
-b2_aws s3api get-object --bucket "$B2_BUCKET_NAME" --key "$NEWEST"            "$DUMP"          >/dev/null
-b2_aws s3api get-object --bucket "$B2_BUCKET_NAME" --key "${BASE}.dump.sha256" "${DUMP}.sha256" >/dev/null
+# Single-request GetObject via the same B2 client (no managed multipart).
+b2py get --key "$NEWEST"            --file "$DUMP"
+b2py get --key "${BASE}.dump.sha256" --file "${DUMP}.sha256"
 [ -s "$DUMP" ] || die "downloaded dump is empty"
 
 # Verify checksum.
