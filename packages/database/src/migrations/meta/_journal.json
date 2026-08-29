@@ -358,6 +358,13 @@
       "when": 1787442300000,
       "tag": "0052_users_rls_self_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1788100000000,
+      "tag": "0053_users_workspace_comember_read",
+      "breakpoints": true
     }
   ]
 }

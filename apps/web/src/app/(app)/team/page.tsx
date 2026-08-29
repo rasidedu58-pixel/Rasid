@@ -1,119 +1,193 @@
 "use client";
 
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, ShieldCheck, User } from "lucide-react";
-import { Button, ConfirmDialog, EmptyState, ErrorState, SkeletonRows, StatusDot, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, toast, useConfirmDialog } from "@academic-precision/ui";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Crown, UserPlus, ShieldCheck, ChevronLeft, Users } from "lucide-react";
+import {
+  Avatar,
+  AvatarFallback,
+  Button,
+  EmptyState,
+  ErrorState,
+  MetricStrip,
+  MetricCell,
+  SkeletonRows,
+  StatusDot,
+  initialsFromName,
+  toast,
+} from "@academic-precision/ui";
+import type { TeamMember } from "@academic-precision/contracts";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
-import { disableMembership, fetchTeam } from "../../../lib/api/team";
+import { fetchTeam } from "../../../lib/api/team";
+import { fetchGroups } from "../../../lib/api/scheduling";
+import { MemberDrawer, deriveRoleLabel } from "./member-drawer";
 
 const STATUS_TONE: Record<string, "success" | "neutral" | "danger"> = { ACTIVE: "success", INVITED: "neutral", DISABLED: "danger" };
-const STATUS_LABEL: Record<string, string> = { ACTIVE: "نشط", INVITED: "مدعو", DISABLED: "معطّل" };
+const STATUS_LABEL: Record<string, string> = { ACTIVE: "نشط", INVITED: "دعوة معلقة", DISABLED: "موقوف" };
+const arNum = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
 
-/**
- * Team & Permissions (§27) — read-only member list + disable action.
- * Granular per-permission grant EDITING is intentionally not built here:
- * `GET /team` (Phase 2) never returns a member's current effective grants,
- * only `PATCH /memberships/:id/permissions`'s own response does — so a
- * pre-filled editor cannot be built safely without guessing prior state.
- * Documented as a known Phase 11 limitation, not silently faked.
- */
 export default function TeamPage() {
-  const { workspaceId, isOwner } = useWorkspace();
-  const queryClient = useQueryClient();
-  const [disabling, setDisabling] = useState<string | null>(null);
-  const confirm = useConfirmDialog();
+  const { workspaceId, hasPermission } = useWorkspace();
+  const ws = workspaceId ?? "";
+  const canManage = hasPermission("team.manage");
+  const canGroups = hasPermission("groups.view");
+
+  const [selected, setSelected] = useState<TeamMember | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INVITED" | "DISABLED">("ALL");
 
   const query = useQuery({
-    queryKey: workspaceId ? qk.team.list(workspaceId) : ["team", "none"],
-    queryFn: () => fetchTeam(workspaceId!),
+    queryKey: workspaceId ? qk.team.list(ws) : ["team", "none"],
+    queryFn: () => fetchTeam(ws),
     enabled: !!workspaceId,
   });
 
-  const disableMutation = useMutation({
-    mutationFn: (membershipId: string) => disableMembership(workspaceId!, membershipId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: qk.team.list(workspaceId!) });
-      toast.success("تم تعطيل العضوية");
-      confirm.closeDialog();
-    },
-    onError: () => toast.error("تعذّر تعطيل العضوية"),
+  const groupsQuery = useQuery({
+    queryKey: qk.groups.list(ws),
+    queryFn: () => fetchGroups(ws),
+    enabled: !!workspaceId && canGroups && canManage,
   });
+  const groups = groupsQuery.data?.groups ?? [];
+
+  const members = query.data?.members ?? [];
+  const summary = useMemo(() => {
+    const active = members.filter((m) => m.status === "ACTIVE").length;
+    const invited = members.filter((m) => m.status === "INVITED").length;
+    const disabled = members.filter((m) => m.status === "DISABLED").length;
+    const roles = new Set(members.map((m) => deriveRoleLabel(m)));
+    return { active, invited, disabled, roles: roles.size };
+  }, [members]);
+
+  const filtered = useMemo(() => {
+    const term = q.trim();
+    return members.filter((m) => {
+      if (statusFilter !== "ALL" && m.status !== statusFilter) return false;
+      if (!term) return true;
+      return `${m.fullName ?? ""} ${m.email ?? ""} ${deriveRoleLabel(m)}`.includes(term);
+    });
+  }, [members, q, statusFilter]);
+
+  const onlySelf = members.length <= 1;
+
+  function openMember(m: TeamMember) {
+    setSelected(m);
+    setDrawerOpen(true);
+  }
 
   return (
     <>
-      <PageHeader title="الفريق والصلاحيات" description="أعضاء مساحة العمل وأدوارهم. مالك المساحة محميّ ولا يمكن تعطيله." />
+      <PageHeader
+        title="الفريق"
+        description="أدر أعضاء مساحة العمل وحدد ما يمكن لكل شخص الوصول إليه."
+        actions={
+          canManage ? (
+            <Button onClick={() => toast.info("دعوة الأعضاء بالبريد الإلكتروني ستتوفر في التحديث القادم.")}>
+              <UserPlus className="h-4 w-4" aria-hidden />
+              إضافة عضو
+            </Button>
+          ) : undefined
+        }
+      />
 
       {query.isLoading ? (
-        <SkeletonRows rows={4} />
+        <div className="flex flex-col gap-4">
+          <SkeletonRows rows={4} />
+        </div>
       ) : query.isError ? (
         <ErrorState onRetry={() => query.refetch()} />
-      ) : query.data!.members.length === 0 ? (
-        <EmptyState icon={<ShieldCheck className="h-8 w-8 text-text-tertiary" aria-hidden />} title="لا يوجد أعضاء فريق بعد" />
+      ) : onlySelf ? (
+        <EmptyState
+          icon={<ShieldCheck className="h-8 w-8 text-brand" aria-hidden />}
+          title="تعمل وحدك حاليًا"
+          description="يمكنك إضافة مساعد أو عضو فريق وتحديد ما يستطيع الوصول إليه بدقة."
+          action={
+            canManage ? (
+              <Button onClick={() => toast.info("دعوة الأعضاء بالبريد الإلكتروني ستتوفر في التحديث القادم.")}>
+                <UserPlus className="h-4 w-4" aria-hidden />
+                إضافة عضو
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
-        <TableScroll>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>العضو</TableHead>
-                <TableHead>الحالة</TableHead>
-                <TableHead className="text-end" aria-label="إجراء" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {query.data!.members.map((m) => {
-                const owner = m.roleLabel === "OWNER";
-                return (
-                  <TableRow key={m.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", owner ? "bg-brand-subtle text-brand" : "bg-surface-sunken text-text-secondary")} aria-hidden>
-                          {owner ? <Crown className="h-4 w-4" /> : <User className="h-4 w-4" />}
-                        </span>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium text-text-primary">{owner ? "مالك مساحة العمل" : m.roleLabel === "ASSISTANT" ? "مساعد" : m.roleLabel}</span>
-                          {owner ? <span className="text-xs text-text-tertiary">صلاحيات كاملة · محميّ</span> : null}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
+        <div className="flex flex-col gap-6">
+          {/* Compact summary — not giant KPI cards */}
+          <MetricStrip columns={4}>
+            <MetricCell label="أعضاء نشطون" value={arNum(summary.active)} />
+            <MetricCell label="دعوات معلقة" value={arNum(summary.invited)} />
+            <MetricCell label="موقوفون" value={arNum(summary.disabled)} tone={summary.disabled > 0 ? "warning" : "default"} />
+            <MetricCell label="الأدوار المستخدمة" value={arNum(summary.roles)} />
+          </MetricStrip>
+
+          {/* Search + status filter */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Users className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="ابحث بالاسم أو البريد…"
+                aria-label="ابحث في الفريق"
+                className="focus-ring h-10 w-full rounded-lg border border-border bg-surface pe-10 ps-3 text-sm text-text-primary placeholder:text-text-tertiary"
+              />
+            </div>
+            <div className="flex gap-1.5">
+              {(["ALL", "ACTIVE", "INVITED", "DISABLED"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStatusFilter(s)}
+                  className={`focus-ring rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    statusFilter === s ? "border-brand bg-brand-subtle/50 text-brand-subtle-foreground" : "border-border text-text-secondary hover:bg-surface-sunken"
+                  }`}
+                >
+                  {s === "ALL" ? "الكل" : STATUS_LABEL[s]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Member rows — responsive (cards on mobile, aligned rows on desktop) */}
+          {filtered.length === 0 ? (
+            <p className="rounded-xl border border-border bg-surface px-4 py-8 text-center text-sm text-text-secondary">لا يوجد أعضاء مطابقون.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {filtered.map((m) => (
+                <li key={m.id}>
+                  <button
+                    type="button"
+                    onClick={() => openMember(m)}
+                    className="focus-ring flex w-full items-center gap-3 rounded-xl border border-border bg-surface p-4 text-start transition-all hover:-translate-y-0.5 hover:border-border-strong hover:shadow-sm"
+                  >
+                    <Avatar className="h-10 w-10 shrink-0">
+                      <AvatarFallback>{m.isOwner ? <Crown className="h-4 w-4 text-brand" aria-hidden /> : initialsFromName(m.fullName ?? "؟")}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-medium text-text-primary">{m.fullName ?? "عضو"}</span>
+                      <span className="truncate text-xs text-text-secondary">{deriveRoleLabel(m)}{m.email ? ` · ${m.email}` : ""}</span>
+                    </div>
+                    <div className="hidden shrink-0 sm:block">
                       <StatusDot tone={STATUS_TONE[m.status] ?? "neutral"} label={STATUS_LABEL[m.status] ?? m.status} />
-                    </TableCell>
-                    <TableCell className="text-end">
-                      {isOwner && !owner && m.status !== "DISABLED" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-danger hover:bg-danger-subtle hover:text-danger"
-                          onClick={() => {
-                            setDisabling(m.id);
-                            confirm.openDialog();
-                          }}
-                        >
-                          تعطيل
-                        </Button>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableScroll>
+                    </div>
+                    <ChevronLeft className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
-      <ConfirmDialog
-        open={confirm.open}
-        onOpenChange={confirm.setOpen}
-        title="تعطيل عضوية الفريق"
-        description="لن يتمكن هذا العضو من الوصول إلى مساحة العمل بعد التعطيل."
-        destructive
-        loading={disableMutation.isPending}
-        onConfirm={() => {
-          if (disabling) disableMutation.mutate(disabling);
-        }}
+      <MemberDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        member={selected}
+        groups={groups}
+        workspaceId={ws}
+        canManage={canManage}
       />
     </>
   );

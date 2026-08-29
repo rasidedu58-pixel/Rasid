@@ -4,6 +4,7 @@ import {
   OWNER_ONLY_PERMISSION_KEYS,
   updateMembershipPermissionsRequestSchema,
   type DisableMembershipResponse,
+  type EnableMembershipResponse,
   type ListTeamResponse,
   type PermissionKey,
   type UpdateMembershipPermissionsResponse,
@@ -37,15 +38,62 @@ export class TeamService {
   ) {}
 
   async listTeam(workspaceContext: WorkspaceContext): Promise<ListTeamResponse> {
-    const rows = await this.repository.listMembershipsForWorkspace(workspaceContext.workspaceId);
-    return {
-      members: rows.map((m) => ({
-        id: m.id,
-        userId: m.userId,
-        roleLabel: m.roleLabel,
-        status: m.status as "INVITED" | "ACTIVE" | "DISABLED",
-      })),
-    };
+    const rows = await this.repository.listTeamMembersWithIdentity(workspaceContext.workspaceId);
+    const members = await Promise.all(
+      rows.map(async (row) => {
+        const m = row.membership;
+        const isOwner = m.roleLabel === OWNER_ROLE_LABEL;
+        // The owner holds every permission implicitly (never stored as grants),
+        // so we don't query grants for them. Everyone else exposes their real
+        // stored grant summary — the exact shape the permission editor pre-fills from.
+        const grants = isOwner
+          ? []
+          : (await this.repository.listActiveGrants(m.id, workspaceContext.workspaceId)).map((g) => ({
+              permission: g.grant.permissionKey as PermissionKey,
+              scope: g.grant.scopeType as "ALL_GROUPS" | "SELECTED_GROUPS",
+              groupIds: g.grant.scopeType === "SELECTED_GROUPS" ? g.groupIds : undefined,
+            }));
+        return {
+          id: m.id,
+          userId: m.userId,
+          roleLabel: m.roleLabel,
+          status: m.status as "INVITED" | "ACTIVE" | "DISABLED",
+          isOwner,
+          fullName: row.fullName,
+          email: row.emailDisplay,
+          phone: row.phone,
+          joinedAt: (m.joinedAt ?? m.createdAt).toISOString(),
+          disabledAt: m.disabledAt ? m.disabledAt.toISOString() : null,
+          grants,
+        };
+      }),
+    );
+    return { members };
+  }
+
+  async enableMembership(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    membershipId: string,
+    correlationId: string | null,
+  ): Promise<EnableMembershipResponse> {
+    const target = await this.loadTargetMembership(workspaceContext, membershipId);
+    const before = { status: target.status };
+    const updated = await this.repository.enableMembership(target.id);
+
+    await this.repository.insertAuditEvent({
+      workspaceId: workspaceContext.workspaceId,
+      actorUserId: authUser.id,
+      actorMembershipId: workspaceContext.membership.id,
+      action: "membership.enabled",
+      entityType: "membership",
+      entityId: target.id,
+      beforeJson: before,
+      afterJson: { status: updated.status },
+      correlationId,
+    });
+
+    return { membershipId: updated.id, status: "ACTIVE" };
   }
 
   /**

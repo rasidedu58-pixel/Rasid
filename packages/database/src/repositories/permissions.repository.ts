@@ -8,6 +8,7 @@
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { memberships, permissionGrants, permissionGroupScopes } from "../schema/permissions";
+import { users } from "../schema/identity";
 import { auditEvents } from "../schema/audit";
 import type { Db, MembershipRow } from "./identity.repository";
 
@@ -173,6 +174,55 @@ export async function disableMembership(db: Db, membershipId: string): Promise<M
     throw new Error(`Membership ${membershipId} not found while disabling.`);
   }
   return updated;
+}
+
+/** Re-activates a previously disabled membership (inverse of {@link disableMembership}). */
+export async function enableMembership(db: Db, membershipId: string): Promise<MembershipRow> {
+  const now = new Date();
+  const [updated] = await db
+    .update(memberships)
+    .set({ status: ACTIVE_MEMBERSHIP_STATUS, disabledAt: null, updatedAt: now })
+    .where(eq(memberships.id, membershipId))
+    .returning();
+
+  if (!updated) {
+    throw new Error(`Membership ${membershipId} not found while enabling.`);
+  }
+  return updated;
+}
+
+export interface TeamMemberIdentityRow {
+  membership: MembershipRow;
+  fullName: string | null;
+  emailDisplay: string | null;
+  phone: string | null;
+}
+
+/**
+ * Team listing joined to member identity (full_name / email_display / phone).
+ * Cross-member identity is readable only because of migration 0053's
+ * workspace-co-member SELECT policy on `users`; if a member's `users` row is
+ * not visible for any reason, the identity fields come back null (the caller
+ * still sees the membership row, which is workspace-isolated by RLS).
+ */
+export async function listTeamMembersWithIdentity(db: Db, workspaceId: string): Promise<TeamMemberIdentityRow[]> {
+  const rows = await db
+    .select({
+      membership: memberships,
+      fullName: users.fullName,
+      emailDisplay: users.emailDisplay,
+      phone: users.phone,
+    })
+    .from(memberships)
+    .leftJoin(users, eq(users.id, memberships.userId))
+    .where(eq(memberships.workspaceId, workspaceId));
+
+  return rows.map((r) => ({
+    membership: r.membership,
+    fullName: r.fullName ?? null,
+    emailDisplay: r.emailDisplay ?? null,
+    phone: r.phone ?? null,
+  }));
 }
 
 export interface AuditEventInput {

@@ -55,12 +55,26 @@ export type UpdateMembershipPermissionsResponse = z.infer<
   typeof updateMembershipPermissionsResponseSchema
 >;
 
-/** GET /team — safe view: no raw grant internals beyond a minimal summary. */
+/**
+ * GET /team — the workspace's members with basic identity and their current
+ * effective grant summary. Identity (`fullName`/`email`/`phone`) is readable
+ * cross-member only via migration 0053's workspace-co-member RLS policy on
+ * `users`; any field the caller cannot see comes back null. `grants` is the
+ * member's own stored grant summary (empty for the owner, who is `isOwner`
+ * and holds everything implicitly).
+ */
 export const teamMemberSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
   roleLabel: z.string(),
   status: z.enum(["INVITED", "ACTIVE", "DISABLED"]),
+  isOwner: z.boolean(),
+  fullName: z.string().nullable(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  joinedAt: z.string(),
+  disabledAt: z.string().nullable(),
+  grants: z.array(membershipPermissionSummarySchema),
 });
 export type TeamMember = z.infer<typeof teamMemberSchema>;
 
@@ -75,3 +89,9 @@ export const disableMembershipResponseSchema = z.object({
   disabledAt: z.string(),
 });
 export type DisableMembershipResponse = z.infer<typeof disableMembershipResponseSchema>;
+
+export const enableMembershipResponseSchema = z.object({
+  membershipId: z.string().uuid(),
+  status: z.literal("ACTIVE"),
+});
+export type EnableMembershipResponse = z.infer<typeof enableMembershipResponseSchema>;

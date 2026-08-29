@@ -6,6 +6,7 @@ import type {
   GrantWithScopes,
   MembershipRow,
   PermissionGrantRow,
+  TeamMemberIdentityRow,
 } from "@academic-precision/database";
 import type { TeamRepositoryPort } from "../ports/team-repository.port";
 
@@ -65,6 +66,31 @@ export class InMemoryTeamRepository implements TeamRepositoryPort {
 
   async listMembershipsForWorkspace(workspaceId: string): Promise<MembershipRow[]> {
     return [...this.membershipsById.values()].filter((m) => m.workspaceId === workspaceId);
+  }
+
+  /** Optional identity for tests to seed; defaults to nulls (mirrors an RLS-hidden users row). */
+  readonly identityByUserId = new Map<string, { fullName: string | null; emailDisplay: string | null; phone: string | null }>();
+
+  async listTeamMembersWithIdentity(workspaceId: string): Promise<TeamMemberIdentityRow[]> {
+    return [...this.membershipsById.values()]
+      .filter((m) => m.workspaceId === workspaceId)
+      .map((m) => {
+        const identity = this.identityByUserId.get(m.userId);
+        return {
+          membership: m,
+          fullName: identity?.fullName ?? null,
+          emailDisplay: identity?.emailDisplay ?? null,
+          phone: identity?.phone ?? null,
+        };
+      });
+  }
+
+  async enableMembership(membershipId: string): Promise<MembershipRow> {
+    const existing = this.membershipsById.get(membershipId);
+    if (!existing) throw new Error(`Membership ${membershipId} not found in fixture.`);
+    const updated: MembershipRow = { ...existing, status: "ACTIVE", disabledAt: null, updatedAt: this.now() };
+    this.membershipsById.set(membershipId, updated);
+    return updated;
   }
 
   private grantWithScopes(grant: PermissionGrantRow): GrantWithScopes {

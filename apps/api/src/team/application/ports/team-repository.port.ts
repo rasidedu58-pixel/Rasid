@@ -4,6 +4,7 @@ import type {
   DesiredGrantInput,
   GrantWithScopes,
   MembershipRow,
+  TeamMemberIdentityRow,
 } from "@academic-precision/database";
 
 /**
@@ -19,6 +20,10 @@ export interface TeamRepositoryPort {
     workspaceId: string,
   ): Promise<MembershipRow | undefined>;
   listMembershipsForWorkspace(workspaceId: string): Promise<MembershipRow[]>;
+  /** Backs the rich `GET /team` — memberships joined to member identity (0053 RLS). */
+  listTeamMembersWithIdentity(workspaceId: string): Promise<TeamMemberIdentityRow[]>;
+  /** Re-activates a disabled membership (inverse of {@link disableMembership}). */
+  enableMembership(membershipId: string): Promise<MembershipRow>;
   /**
    * `workspaceId` is optional at the port level (kept backward-compatible
    * for test doubles) but the real `DrizzleTeamRepository` always receives

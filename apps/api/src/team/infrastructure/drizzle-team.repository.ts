@@ -2,12 +2,14 @@ import { Injectable } from "@nestjs/common";
 import {
   createMembershipForTesting,
   disableMembership,
+  enableMembership,
   findActiveOrAnyMembership,
   findMembershipById,
   getDb,
   insertAuditEvent,
   listActiveGrantsForMembership,
   listMembershipsForWorkspace,
+  listTeamMembersWithIdentity,
   replaceMembershipGrants,
   withRuntimeContext,
   type AuditEventInput,
@@ -15,6 +17,7 @@ import {
   type DesiredGrantInput,
   type GrantWithScopes,
   type MembershipRow,
+  type TeamMemberIdentityRow,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
 import type { TeamRepositoryPort } from "../application/ports/team-repository.port";
@@ -66,6 +69,24 @@ export class DrizzleTeamRepository implements TeamRepositoryPort {
   listMembershipsForWorkspace(workspaceId: string): Promise<MembershipRow[]> {
     const ctx = getContext();
     return withRuntimeContext({ userId: ctx?.userId, workspaceId }, (db) => listMembershipsForWorkspace(db, workspaceId));
+  }
+
+  /** Backs the rich `GET /team`; identity join is admitted by 0053's co-member RLS policy. */
+  listTeamMembersWithIdentity(workspaceId: string): Promise<TeamMemberIdentityRow[]> {
+    const ctx = getContext();
+    return withRuntimeContext({ userId: ctx?.userId, workspaceId }, (db) => listTeamMembersWithIdentity(db, workspaceId));
+  }
+
+  /**
+   * Called only from `TeamService.enableMembership`, after `loadTargetMembership`
+   * verified the target belongs to the caller's own (ambient-context) workspace.
+   */
+  enableMembership(membershipId: string): Promise<MembershipRow> {
+    const ctx = getContext();
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId: ctx?.workspaceId as string | undefined },
+      (db) => enableMembership(db, membershipId),
+    );
   }
 
   /**

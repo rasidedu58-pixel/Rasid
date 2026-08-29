@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { FastifyRequest } from "fastify";
 import type {
   DisableMembershipResponse,
+  EnableMembershipResponse,
   ListTeamResponse,
   UpdateMembershipPermissionsResponse,
 } from "@academic-precision/contracts";
@@ -66,6 +67,22 @@ export class TeamController {
   ): Promise<DisableMembershipResponse> {
     const correlationId = this.extractCorrelationId(request);
     return this.teamService.disableMembership(user, workspaceContext, membershipId, correlationId);
+  }
+
+  @Post("memberships/:id/enable")
+  @RequirePermission("team.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("TEAM_MANAGEMENT")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Re-activate a disabled membership (owner-only)" })
+  enableMembership(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Param("id") membershipId: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<EnableMembershipResponse> {
+    const correlationId = this.extractCorrelationId(request);
+    return this.teamService.enableMembership(user, workspaceContext, membershipId, correlationId);
   }
 
   private extractCorrelationId(request: FastifyRequest): string | null {
