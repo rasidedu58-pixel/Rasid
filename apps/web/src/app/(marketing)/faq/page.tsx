@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { FAQ_ITEMS } from "../../../lib/marketing/faq-config";
+import { FaqAccordion } from "../../../components/marketing/faq-accordion";
 
 export const metadata: Metadata = {
   title: "الأسئلة الشائعة — راصد",
@@ -9,15 +10,13 @@ export const metadata: Metadata = {
 
 export default function FaqPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-      <h1 className="text-center text-3xl font-bold text-text-primary sm:text-4xl">الأسئلة الشائعة</h1>
-      <div className="mt-10 flex flex-col divide-y divide-border rounded-lg border border-border">
-        {FAQ_ITEMS.map((item) => (
-          <div key={item.question} className="p-5">
-            <h2 className="font-medium text-text-primary">{item.question}</h2>
-            <p className="mt-2 text-sm text-text-secondary">{item.answer}</p>
-          </div>
-        ))}
+    <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:py-20">
+      <p className="text-center text-sm font-semibold tracking-wide text-brand">الأسئلة الشائعة</p>
+      <h1 className="mt-3 text-center text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">
+        كل ما تريد معرفته عن راصد
+      </h1>
+      <div className="mt-10">
+        <FaqAccordion items={FAQ_ITEMS} defaultOpen={0} />
       </div>
     </div>
   );

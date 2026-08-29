@@ -124,3 +124,152 @@ body {
     @apply outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))];
   }
 }
+
+/* ===========================================================================
+ * UI-8 — Marketing motion system (CSS-only; no JS animation library).
+ *
+ * All motion is opt-in and progressive: content is fully server-rendered and
+ * visible with NO JavaScript. The reveal "hidden" state applies ONLY once the
+ * client marks the document with `.js-motion` (see MotionRoot) — so crawlers
+ * and no-JS visitors always see the content, and `prefers-reduced-motion`
+ * short-circuits every animation to its final, static state.
+ * ========================================================================= */
+
+/* Scroll reveal — hidden only when JS is active; revealed on intersect.
+ * `will-change` is applied ONLY in the pre-reveal state and dropped once
+ * revealed, so we never keep dozens of permanent compositor layers around
+ * (that wastes memory and can break paint/capture on some engines). */
+.js-motion [data-reveal] {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.js-motion [data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+  will-change: auto;
+}
+
+/* Gentle idle float for the floating product-preview chips. */
+@keyframes rasid-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+.rasid-float {
+  animation: rasid-float 6.5s ease-in-out infinite;
+}
+
+/* Soft brand-tinted radial washes — deliberately faint (glow خفيف جدًا). */
+.rasid-hero-glow {
+  background: radial-gradient(58% 48% at 72% 4%, hsl(var(--brand) / 0.1), transparent 72%);
+}
+.rasid-cta-glow {
+  background: radial-gradient(52% 90% at 50% 0%, hsl(var(--brand) / 0.14), transparent 72%);
+}
+
+/* Smooth accordion via the grid-rows 0fr→1fr technique (no JS height math). */
+.rasid-accordion-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.rasid-accordion-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.rasid-accordion-panel > .rasid-accordion-inner {
+  overflow: hidden;
+}
+
+/* ---- Splash screen ---- */
+.rasid-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: hsl(var(--background));
+  transition: opacity 0.5s ease;
+}
+.rasid-splash[data-leaving="true"] {
+  opacity: 0;
+}
+@keyframes rasid-splash-glyph {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+@keyframes rasid-splash-word {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rasid-radar {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+.rasid-splash-glyph {
+  animation: rasid-splash-glyph 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.rasid-splash-word {
+  animation: rasid-splash-word 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.35s both;
+}
+.rasid-splash-radar::before,
+.rasid-splash-radar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid hsl(var(--brand) / 0.5);
+  animation: rasid-radar 2s ease-out infinite;
+}
+.rasid-splash-radar::after {
+  animation-delay: 1s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .js-motion [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .rasid-float,
+  .rasid-splash-glyph,
+  .rasid-splash-word,
+  .rasid-splash-radar::before,
+  .rasid-splash-radar::after {
+    animation: none !important;
+  }
+  .rasid-accordion-panel {
+    transition: none !important;
+  }
+}

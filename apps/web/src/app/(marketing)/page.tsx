@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   Users,
@@ -16,173 +17,288 @@ import {
   ShieldCheck,
   KeyRound,
   History,
+  DatabaseBackup,
+  Activity,
   Smartphone,
   ArrowLeft,
+  Check,
+  X,
+  UserRound,
+  UsersRound,
 } from "lucide-react";
 import { Badge, Button, Card, CardContent } from "@academic-precision/ui";
 import { AuthenticatedRedirect } from "../../components/marketing/authenticated-redirect";
 import { PricingTable } from "../../components/marketing/pricing-table";
+import { SplashScreen } from "../../components/marketing/splash-screen";
+import { MotionRoot, Reveal } from "../../components/marketing/motion";
+import { FaqAccordion } from "../../components/marketing/faq-accordion";
 import { FAQ_ITEMS } from "../../lib/marketing/faq-config";
 import { TRIAL_DAYS } from "../../lib/marketing/pricing-config";
 
 export const metadata: Metadata = {
   title: "راصد — نظام تشغيل ومتابعة للمدرسين وأصحاب المجموعات التعليمية",
-  description: "راصد يجمع تسجيل الحضور والواجبات والمتابعة والتحصيل المالي لمجموعاتك التعليمية في مكان واحد. جرّبه مجانًا 14 يومًا بدون بطاقة.",
+  description:
+    "راصد يجمع تسجيل الحضور والواجبات والمتابعة والتحصيل المالي لمجموعاتك التعليمية في مكان واحد. جرّبه مجانًا 14 يومًا بدون بطاقة.",
   alternates: { canonical: "/" },
 };
 
-const FEATURES = [
-  { icon: Users, label: "الطلاب", description: "ملف كامل لكل طالب: بياناته، أولياء أموره، وسجله الدراسي والمالي." },
-  { icon: Layers, label: "المجموعات", description: "مجموعاتك الدائمة بجدولها ورسومها، منظمة في مكان واحد." },
-  { icon: CalendarRange, label: "الأشهر التشغيلية", description: "جهّز كل شهر تشغيلي بسرعة: الرسوم، الجدول، والطلاب المستمرون تلقائيًا." },
-  { icon: CalendarClock, label: "الحصص", description: "جدول حصص يتولّد تلقائيًا من مواعيدك الأسبوعية." },
-  { icon: ClipboardCheck, label: "الحضور", description: "تسجيل حضور سريع من الهاتف أثناء الحصة نفسها." },
-  { icon: NotebookPen, label: "الواجبات", description: "تابع من أنجز الواجب ومن لم يُسجَّل له شيء بعد." },
-  { icon: GraduationCap, label: "الاختبارات", description: "رصد درجات الاختبارات وربطها بملف كل طالب." },
-  { icon: HeartHandshake, label: "المتابعة", description: "حالات تحتاج انتباهك تظهر تلقائيًا بسببها ودليلها." },
-  { icon: Wallet, label: "المالية", description: "المستحقات والمدفوعات والمتأخرات لكل طالب ومجموعة." },
-  { icon: FileBarChart, label: "التقارير", description: "تقارير جاهزة لكل طالب ومجموعة وللشهر كله." },
-  { icon: Sparkles, label: "مركز الإجراءات", description: "كل ما يحتاج قرارك الآن، في شاشة واحدة عند فتح راصد." },
-  { icon: Bell, label: "الإشعارات", description: "تنبيهات بما يحتاج متابعة قبل أن يفوتك." },
-];
+/* ── Content models (unchanged copy; only the presentation is redesigned) ── */
 
 const HOW_IT_WORKS = [
-  { step: "١", title: "أنشئ حسابك", description: "تسجيل مباشر بالبريد الإلكتروني، مع تحقق سريع برمز من 6 أرقام." },
-  { step: "٢", title: "جهّز شهرك ومجموعاتك", description: "حدّد المجموعات النشطة هذا الشهر، رسومها، وجدولها الأسبوعي." },
-  { step: "٣", title: "سجّل الحصص بسرعة", description: "حضور وواجبات ودرجات، كلها من الهاتف أثناء الحصة." },
-  { step: "٤", title: "راصد يجمع ما يحتاج متابعة", description: "مركز الإجراءات يعرض لك كل ما يستحق قرارًا الآن، بلا بحث." },
-  { step: "٥", title: "تابع الطلاب والتحصيل والتقارير", description: "صورة كاملة عن كل طالب ومجموعة وشهر، وقتما احتجتها." },
+  {
+    step: "١",
+    title: "أنشئ حسابك وجهّز مجموعاتك",
+    description: "تسجيل مباشر بالبريد مع تحقق سريع، ثم حدّد مجموعاتك النشطة هذا الشهر ورسومها وجدولها.",
+  },
+  {
+    step: "٢",
+    title: "سجّل الحضور والواجبات والنتائج",
+    description: "كل ذلك من هاتفك أثناء الحصة نفسها — بلا دفاتر ولا رسائل متفرقة.",
+  },
+  {
+    step: "٣",
+    title: "راصد يجمع ما يحتاج متابعة",
+    description: "مركز الإجراءات يعرض لك كل ما يستحق قرارًا الآن، بسببه ودليله، دون أن تبحث عنه.",
+  },
+];
+
+const FEATURE_GROUPS = [
+  {
+    title: "التشغيل اليومي",
+    tone: "brand" as const,
+    icon: CalendarClock,
+    items: [
+      { icon: CalendarClock, label: "الحصص", description: "جدول حصص يتولّد تلقائيًا من مواعيدك الأسبوعية." },
+      { icon: ClipboardCheck, label: "الحضور", description: "تسجيل حضور سريع من الهاتف أثناء الحصة." },
+      { icon: NotebookPen, label: "الواجبات", description: "تابع من أنجز ومن لم يُسجَّل له شيء بعد." },
+    ],
+  },
+  {
+    title: "إدارة الطلاب",
+    tone: "neutral" as const,
+    icon: Users,
+    items: [
+      { icon: Users, label: "ملفات الطلاب", description: "بيانات كل طالب وأولياء أموره وسجله." },
+      { icon: Layers, label: "المجموعات", description: "مجموعاتك الدائمة بجدولها ورسومها." },
+      { icon: GraduationCap, label: "الاختبارات", description: "رصد الدرجات وربطها بملف كل طالب." },
+    ],
+  },
+  {
+    title: "القرارات والمتابعة",
+    tone: "brand" as const,
+    icon: Sparkles,
+    items: [
+      { icon: Sparkles, label: "مركز الإجراءات", description: "كل ما يحتاج قرارك الآن في شاشة واحدة." },
+      { icon: Bell, label: "التنبيهات", description: "تنبيهات بما يحتاج متابعة قبل أن يفوتك." },
+      { icon: FileBarChart, label: "التقارير", description: "تقارير جاهزة لكل طالب ومجموعة وشهر." },
+    ],
+  },
+  {
+    title: "المالية",
+    tone: "neutral" as const,
+    icon: Wallet,
+    items: [
+      { icon: Wallet, label: "المستحقات", description: "ما على كل طالب هذا الشهر، بوضوح." },
+      { icon: HeartHandshake, label: "المدفوعات", description: "سجّل الدفعات وهي مرتبطة بسجلها." },
+      { icon: CalendarRange, label: "المتأخرات", description: "من تأخّر، وكم، ومنذ متى — دون بحث." },
+    ],
+  },
+];
+
+const BEFORE = [
+  "دفتر حضور ورقي لكل مجموعة",
+  "رسائل واتساب متفرقة مع أولياء الأمور",
+  "تحصيل يدوي وورقة رسوم منفصلة",
+  "متابعة تعتمد على ذاكرتك وحدها",
+  "تقارير تجمعها يدويًا آخر الشهر",
+];
+
+const AFTER = [
+  "كل التشغيل في مكان واحد",
+  "الحالات المهمة تظهر تلقائيًا بدليلها",
+  "تسجيل حضور وواجبات ودرجات من الهاتف",
+  "متابعة مالية واضحة لكل طالب ومجموعة",
+  "تقارير جاهزة في أي لحظة",
+];
+
+const PERSONAS = [
+  {
+    icon: UserRound,
+    title: "المدرس المستقل",
+    pain: "تدير كل شيء بنفسك، ويصعب أن تتذكر كل غياب ودفعة وواجب.",
+    help: "راصد يجمع التسجيل والتحصيل والمتابعة في مكان واحد تفتحه من الهاتف.",
+  },
+  {
+    icon: Layers,
+    title: "صاحب عدة مجموعات",
+    pain: "عشرات الطلاب عبر مجموعات مختلفة، وأي تفصيل يسهل أن يضيع.",
+    help: "كل مجموعة بجدولها ورسومها وطلابها، ومركز إجراءات يجمع ما يحتاج قرارك.",
+  },
+  {
+    icon: UsersRound,
+    title: "المدرس مع مساعد أو فريق صغير",
+    pain: "تحتاج مساعدة في التسجيل دون أن تفتح كل شيء للجميع.",
+    help: "صلاحيات دقيقة تحدد من يرى ومن يعدّل ماذا، مجموعة بمجموعة.",
+  },
 ];
 
 const TRUST_POINTS = [
   { icon: KeyRound, title: "فصل كامل بين مساحات العمل", description: "بيانات كل مدرس معزولة تمامًا عن غيره على مستوى قاعدة البيانات." },
   { icon: ShieldCheck, title: "صلاحيات دقيقة لكل عضو فريق", description: "تحدد أنت من يرى ماذا ومن يستطيع تعديل ماذا، مجموعة بمجموعة." },
   { icon: History, title: "سجل كامل للعمليات المالية", description: "كل دفعة ومستحق محفوظ ومرتبط بسجله، دون تعديل يمحو التاريخ." },
+  { icon: DatabaseBackup, title: "نسخ احتياطي دوري لبياناتك", description: "بياناتك تُنسخ احتياطيًا بشكل منتظم وخارج الخادم، ويُختبر استرجاعها." },
+  { icon: Activity, title: "مراقبة استقرار مستمرة", description: "نراقب استقرار النظام باستمرار لنعالج أي خلل قبل أن يؤثر على عملك." },
 ];
 
 /**
- * Landing page (`/`) — the public marketing home. Server Component (no
- * "use client") except the two small client islands it composes
- * (`AuthenticatedRedirect`, and `MarketingHeader`'s mobile menu) — real
- * content is server-rendered for SEO/crawlability. Every feature listed
- * here is a real, shipped Teacher V1 capability (Phase 11) — nothing here
- * is aspirational.
+ * Landing page (`/`) — the public marketing home. Server Component (real
+ * content server-rendered for SEO) composing small client islands:
+ * `SplashScreen`, `MotionRoot`, `AuthenticatedRedirect`, `Reveal`,
+ * `FaqAccordion`. Every capability listed is a real, shipped Teacher V1
+ * feature — nothing here is aspirational.
  */
 export default function LandingPage() {
   return (
     <>
+      <SplashScreen />
+      <MotionRoot />
       <AuthenticatedRedirect />
       <StructuredData />
 
-      {/* Hero */}
+      {/* ── Hero ── */}
       <section className="relative overflow-hidden">
-        {/* One soft brand-tinted wash behind the hero — depth without a heavy gradient. */}
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-brand-subtle/40 to-transparent" />
-        <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pt-20">
-          <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
-            <div className="flex flex-col gap-6">
-              <Badge tone="brand" className="w-fit">لأصحاب المجموعات التعليمية والمدرسين المستقلين</Badge>
-              <h1 className="text-3xl font-bold leading-tight text-text-primary sm:text-4xl lg:text-5xl">
-                مركز التشغيل اليومي لمجموعاتك التعليمية
-              </h1>
-              {/* The core product idea (§4), as a distinctive signature line. */}
-              <OperatingRhythm />
-              <p className="text-lg text-text-secondary">
-                سجّل حضور طلابك وواجباتهم، افهم ما يحتاج قرارك الآن، اتخذ الإجراء، ثم تابع كل شيء — كل هذا في مكان واحد، بدلًا من دفاتر ومجموعات واتساب متفرقة.
-              </p>
-              <div className="flex flex-col gap-3 sm:flex-row">
+        <div aria-hidden className="rasid-hero-glow pointer-events-none absolute inset-0" />
+        <div className="relative mx-auto max-w-6xl px-4 pb-20 pt-14 sm:px-6 sm:pt-20 lg:pt-24">
+          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
+            <div className="flex flex-col items-start gap-6">
+              <Reveal as="div" className="w-fit">
+                <Badge tone="brand" className="border border-brand/15 px-3 py-1">
+                  لأصحاب المجموعات التعليمية والمدرسين المستقلين
+                </Badge>
+              </Reveal>
+              <Reveal
+                as="h1"
+                delay={60}
+                className="text-4xl font-bold leading-[1.15] tracking-tight text-text-primary sm:text-5xl lg:text-[3.35rem]"
+              >
+                شغّل مجموعاتك التعليمية
+                <br />
+                <span className="text-brand">من مكان واحد</span>
+              </Reveal>
+              <Reveal as="p" delay={120} className="max-w-xl text-lg leading-relaxed text-text-secondary">
+                الحضور، التحصيل، الواجبات، المتابعة والتقارير — بدون دفاتر متفرقة أو رسائل تضيع منك.
+              </Reveal>
+              <Reveal as="div" delay={180}>
+                <OperatingRhythm />
+              </Reveal>
+              <Reveal as="div" delay={240} className="flex flex-col gap-3 pt-1 sm:flex-row">
                 <Button asChild size="lg">
                   <Link href="/signup">ابدأ تجربتك المجانية</Link>
                 </Button>
                 <Button asChild size="lg" variant="outline">
-                  <Link href="#how-it-works">اكتشف كيف يعمل</Link>
+                  <Link href="#how-it-works">شاهد كيف يعمل</Link>
                 </Button>
-              </div>
-              <p className="text-sm text-text-tertiary">تجربة {TRIAL_DAYS} يومًا كاملة، بدون بطاقة ائتمان.</p>
+              </Reveal>
+              <Reveal as="p" delay={300} className="text-sm text-text-tertiary">
+                {TRIAL_DAYS} يومًا مجانًا — بدون بطاقة ائتمان.
+              </Reveal>
             </div>
 
-            <ProductPreviewPanel />
+            <Reveal as="div" delay={160} className="relative">
+              <HeroProductPreview />
+            </Reveal>
           </div>
         </div>
       </section>
 
-      {/* Problem */}
-      <section className="border-t border-border bg-surface-sunken py-16">
-        <div className="mx-auto max-w-4xl px-4 text-center sm:px-6">
-          <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">قبل راصد، كانت المتابعة تتفكك</h2>
-          <p className="mt-4 text-text-secondary">
-            دفتر حضور ورقي، رسالة واتساب لولي أمر، ورقة رسوم منفصلة، وذاكرة تحاول تجميع كل هذا معًا. كل شهر يبدأ من الصفر، وكل غياب أو دفعة متأخرة يسهل أن يضيع وسط الزحمة — ليس لأنك مقصّر، بل لأن الأدوات مبعثرة.
-          </p>
-          <p className="mt-3 font-medium text-text-primary">راصد يجمع التشغيل كله في مكان واحد، ويعرض لك ما يحتاج قرارك دون أن تبحث عنه.</p>
+      {/* ── Before / After ── */}
+      <section className="border-t border-border bg-surface-sunken py-20">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6">
+          <Reveal as="div" className="mb-12 text-center">
+            <h2 className="text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">من متابعة تتفكك، إلى تشغيل واضح</h2>
+            <p className="mx-auto mt-3 max-w-2xl text-text-secondary">
+              ليس لأنك مقصّر — بل لأن الأدوات مبعثرة. راصد يجمعها ويعرض لك ما يحتاج قرارك دون أن تبحث عنه.
+            </p>
+          </Reveal>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <Reveal as="div">
+              <ComparisonCard variant="before" title="قبل راصد" items={BEFORE} />
+            </Reveal>
+            <Reveal as="div" delay={100}>
+              <ComparisonCard variant="after" title="مع راصد" items={AFTER} />
+            </Reveal>
+          </div>
         </div>
       </section>
 
-      {/* Product principle */}
-      <section id="how-it-works" className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-        <div className="mb-10 text-center">
-          <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">كيف يعمل راصد</h2>
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
-          {HOW_IT_WORKS.map((item) => (
-            <div key={item.step} className="flex flex-col gap-2 rounded-lg border border-border p-4">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-subtle text-sm font-bold text-brand">{item.step}</span>
-              <p className="font-medium text-text-primary">{item.title}</p>
-              <p className="text-sm text-text-secondary">{item.description}</p>
-            </div>
+      {/* ── How it works — 3 steps on a connecting path ── */}
+      <section id="how-it-works" className="mx-auto max-w-5xl px-4 py-20 sm:px-6">
+        <Reveal as="div" className="mb-14 text-center">
+          <SectionEyebrow>كيف يعمل</SectionEyebrow>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">ثلاث خطوات، لا أكثر</h2>
+        </Reveal>
+        <div className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
+          {/* connecting path (desktop only) */}
+          <div aria-hidden className="absolute inset-x-[16%] top-9 hidden h-px bg-gradient-to-l from-transparent via-border-strong to-transparent md:block" />
+          {HOW_IT_WORKS.map((item, i) => (
+            <Reveal as="div" key={item.step} delay={i * 90} className="relative">
+              <StepCard step={item.step} title={item.title} description={item.description} />
+            </Reveal>
           ))}
         </div>
       </section>
 
-      {/* Features — no card borders/shadows at all (the explicit "not
-          every piece of content should be a card" direction, applied
-          concretely): an icon chip + text, differentiated by generous
-          whitespace only, not by 12 repeated boxes. Grid `divide-*`
-          utilities were deliberately avoided here — they don't wrap
-          correctly across a responsive 2-/3-column grid (a spurious
-          border appears at the start of every new row). */}
-      <section id="features" className="border-t border-border bg-surface-sunken py-16">
+      {/* ── Features — grouped bento ── */}
+      <section id="features" className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="mb-10 text-center">
-            <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">كل ما تحتاجه لتشغيل مجموعاتك، جاهز اليوم</h2>
-          </div>
-          <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((feature) => (
-              <div key={feature.label} className="flex flex-col gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-md bg-brand-subtle">
-                  <feature.icon className="h-[18px] w-[18px] text-brand" aria-hidden />
-                </span>
-                <p className="font-medium text-text-primary">{feature.label}</p>
-                <p className="text-sm text-text-secondary">{feature.description}</p>
-              </div>
+          <Reveal as="div" className="mb-12 text-center">
+            <SectionEyebrow>المزايا</SectionEyebrow>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">كل ما تحتاجه لتشغيل مجموعاتك، جاهز اليوم</h2>
+          </Reveal>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            {FEATURE_GROUPS.map((group, i) => (
+              <Reveal as="div" key={group.title} delay={(i % 2) * 90}>
+                <FeatureGroupCard group={group} />
+              </Reveal>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Who is it for */}
-      <section className="mx-auto max-w-4xl px-4 py-16 text-center sm:px-6">
-        <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">راصد مبني اليوم من أجل</h2>
-        <div className="mt-8 grid grid-cols-1 gap-4 text-start sm:grid-cols-3">
-          <WhoCard title="المدرس المستقل" description="تدير كل شيء بنفسك، من التسجيل إلى التحصيل، من مكان واحد." />
-          <WhoCard title="صاحب عدة مجموعات" description="عشرات الطلاب عبر مجموعات مختلفة، دون أن يضيع أي تفصيل." />
-          <WhoCard title="المدرس مع مساعد أو فريق صغير" description="صلاحيات دقيقة تحدد من يرى ومن يعدّل ماذا." />
+      {/* ── Audience personas ── */}
+      <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <Reveal as="div" className="mb-12 text-center">
+          <SectionEyebrow>لمن هو راصد</SectionEyebrow>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">راصد مبني اليوم من أجل</h2>
+        </Reveal>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+          {PERSONAS.map((persona, i) => (
+            <Reveal as="div" key={persona.title} delay={i * 90}>
+              <PersonaCard persona={persona} />
+            </Reveal>
+          ))}
         </div>
-        <p className="mt-8 flex items-center justify-center gap-2 text-sm text-text-tertiary">
+        <Reveal as="p" delay={120} className="mt-10 flex items-center justify-center gap-2 text-sm text-text-tertiary">
           <Smartphone className="h-4 w-4" aria-hidden />
           نسخة المراكز التعليمية بفروع ومشرفين قادمة لاحقًا.
-        </p>
+        </Reveal>
       </section>
 
-      {/* Pricing teaser */}
-      <section className="border-t border-border bg-surface-sunken py-16">
+      {/* ── Pricing ── */}
+      <section id="pricing" className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="mb-10 text-center">
-            <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">باقات حسب سعة طلابك</h2>
-            <p className="mt-2 text-text-secondary">تجربة مجانية {TRIAL_DAYS} يومًا في كل باقة، بدون بطاقة ائتمان.</p>
-          </div>
-          <PricingTable />
-          <div className="mt-8 text-center">
-            <Link href="/pricing" className="inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline">
+          <Reveal as="div" className="mb-12 text-center">
+            <SectionEyebrow>الأسعار</SectionEyebrow>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">باقات حسب سعة طلابك</h2>
+            <p className="mt-3 text-text-secondary">
+              تجربة مجانية {TRIAL_DAYS} يومًا في كل باقة — بدون بطاقة، وإلغاء في أي وقت.
+            </p>
+          </Reveal>
+          <Reveal as="div">
+            <PricingTable />
+          </Reveal>
+          <div className="mt-10 text-center">
+            <Link href="/pricing" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline">
               كل تفاصيل الباقات
               <ArrowLeft className="h-4 w-4" aria-hidden />
             </Link>
@@ -190,38 +306,33 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Trust */}
-      <section className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-        <div className="mb-10 text-center">
-          <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">بياناتك في مكان آمن</h2>
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {TRUST_POINTS.map((point) => (
-            <div key={point.title} className="flex flex-col gap-2 rounded-lg border border-border p-5">
-              <point.icon className="h-6 w-6 text-brand" aria-hidden />
-              <p className="font-medium text-text-primary">{point.title}</p>
-              <p className="text-sm text-text-secondary">{point.description}</p>
-            </div>
+      {/* ── Security / trust ── */}
+      <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <Reveal as="div" className="mb-12 text-center">
+          <SectionEyebrow>الأمان والموثوقية</SectionEyebrow>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">بياناتك في مكان آمن</h2>
+        </Reveal>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {TRUST_POINTS.map((point, i) => (
+            <Reveal as="div" key={point.title} delay={(i % 3) * 80}>
+              <TrustCard icon={point.icon} title={point.title} description={point.description} />
+            </Reveal>
           ))}
         </div>
       </section>
 
-      {/* FAQ preview */}
-      <section className="border-t border-border bg-surface-sunken py-16">
+      {/* ── FAQ ── */}
+      <section className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-3xl px-4 sm:px-6">
-          <div className="mb-8 text-center">
-            <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">أسئلة شائعة</h2>
-          </div>
-          <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-surface">
-            {FAQ_ITEMS.slice(0, 4).map((item) => (
-              <div key={item.question} className="p-5">
-                <p className="font-medium text-text-primary">{item.question}</p>
-                <p className="mt-2 text-sm text-text-secondary">{item.answer}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-6 text-center">
-            <Link href="/faq" className="inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline">
+          <Reveal as="div" className="mb-10 text-center">
+            <SectionEyebrow>الأسئلة الشائعة</SectionEyebrow>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">أسئلة قد تدور في ذهنك</h2>
+          </Reveal>
+          <Reveal as="div">
+            <FaqAccordion items={FAQ_ITEMS.slice(0, 5)} />
+          </Reveal>
+          <div className="mt-8 text-center">
+            <Link href="/faq" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline">
               كل الأسئلة الشائعة
               <ArrowLeft className="h-4 w-4" aria-hidden />
             </Link>
@@ -229,21 +340,36 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Final CTA */}
-      <section className="mx-auto max-w-4xl px-4 py-16 text-center sm:px-6">
-        <h2 className="text-2xl font-bold text-text-primary sm:text-3xl">ابدأ تشغيل مجموعاتك بشكل أوضح اليوم</h2>
-        <p className="mt-3 text-text-secondary">تجربة {TRIAL_DAYS} يومًا كاملة، بدون بطاقة ائتمان.</p>
-        <div className="mt-6">
-          <Button asChild size="lg">
-            <Link href="/signup">ابدأ تجربتك المجانية</Link>
-          </Button>
-        </div>
+      {/* ── Final CTA ── */}
+      <section className="relative overflow-hidden py-24">
+        <div aria-hidden className="rasid-cta-glow pointer-events-none absolute inset-0" />
+        <Reveal as="div" className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
+          <h2 className="text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">خلّي تشغيل مجموعاتك أوضح من أول يوم</h2>
+          <p className="mx-auto mt-4 max-w-xl text-lg text-text-secondary">
+            ابدأ تجربتك المجانية واكتشف كيف يجمع راصد كل ما تحتاجه في مكان واحد.
+          </p>
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Button asChild size="lg">
+              <Link href="/signup">ابدأ تجربتك المجانية</Link>
+            </Button>
+            <Button asChild size="lg" variant="ghost">
+              <Link href="/login">تسجيل الدخول</Link>
+            </Button>
+          </div>
+          <p className="mt-5 text-sm text-text-tertiary">{TRIAL_DAYS} يومًا مجانًا — بدون بطاقة ائتمان.</p>
+        </Reveal>
       </section>
     </>
   );
 }
 
-/** The سجّل → افهم → تصرّف → تابع rhythm as a compact right-to-left flow; arrows point in the reading direction. */
+/* ─────────────────────────── Presentational parts ─────────────────────────── */
+
+function SectionEyebrow({ children }: { children: ReactNode }) {
+  return <p className="text-sm font-semibold tracking-wide text-brand">{children}</p>;
+}
+
+/** The سجّل → افهم → تصرّف → تابع rhythm as a compact right-to-left flow. */
 function OperatingRhythm() {
   const steps = ["سجّل", "افهم", "تصرّف", "تابع"];
   return (
@@ -258,71 +384,189 @@ function OperatingRhythm() {
   );
 }
 
-function WhoCard({ title, description }: { title: string; description: string }) {
+function ComparisonCard({ variant, title, items }: { variant: "before" | "after"; title: string; items: string[] }) {
+  const isAfter = variant === "after";
   return (
-    <div className="rounded-lg border border-border p-5">
-      <p className="font-medium text-text-primary">{title}</p>
-      <p className="mt-2 text-sm text-text-secondary">{description}</p>
+    <div
+      className={`h-full rounded-2xl border p-6 transition-shadow sm:p-7 ${
+        isAfter ? "border-brand/25 bg-surface shadow-sm ring-1 ring-brand/10" : "border-border bg-surface/60"
+      }`}
+    >
+      <div className="mb-5 flex items-center gap-2.5">
+        <span
+          className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+            isAfter ? "bg-brand text-brand-foreground" : "bg-surface-sunken text-text-tertiary"
+          }`}
+        >
+          {isAfter ? <Check className="h-4 w-4" aria-hidden /> : <X className="h-4 w-4" aria-hidden />}
+        </span>
+        <h3 className={`text-lg font-semibold ${isAfter ? "text-text-primary" : "text-text-secondary"}`}>{title}</h3>
+      </div>
+      <ul className="flex flex-col gap-3.5">
+        {items.map((item) => (
+          <li key={item} className="flex items-start gap-2.5 text-sm">
+            <span
+              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+                isAfter ? "text-brand" : "text-text-tertiary"
+              }`}
+            >
+              {isAfter ? <Check className="h-4 w-4" aria-hidden /> : <X className="h-[13px] w-[13px]" aria-hidden />}
+            </span>
+            <span className={isAfter ? "text-text-primary" : "text-text-secondary"}>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function StepCard({ step, title, description }: { step: string; title: string; description: string }) {
+  return (
+    <div className="group relative h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
+      <span className="relative flex h-[68px] w-[68px] items-center justify-center rounded-2xl bg-brand-subtle text-2xl font-bold text-brand ring-4 ring-surface">
+        {step}
+      </span>
+      <p className="mt-5 text-lg font-semibold text-text-primary">{title}</p>
+      <p className="mt-2 text-sm leading-relaxed text-text-secondary">{description}</p>
+    </div>
+  );
+}
+
+type FeatureGroup = (typeof FEATURE_GROUPS)[number];
+
+function FeatureGroupCard({ group }: { group: FeatureGroup }) {
+  const GroupIcon = group.icon;
+  return (
+    <div className="group h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md sm:p-7">
+      <div className="mb-5 flex items-center gap-3">
+        <span
+          className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+            group.tone === "brand" ? "bg-brand text-brand-foreground" : "bg-brand-subtle text-brand"
+          }`}
+        >
+          <GroupIcon className="h-5 w-5" aria-hidden />
+        </span>
+        <h3 className="text-lg font-semibold text-text-primary">{group.title}</h3>
+      </div>
+      <ul className="flex flex-col divide-y divide-border">
+        {group.items.map((item) => (
+          <li key={item.label} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+            <item.icon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand" aria-hidden />
+            <div>
+              <p className="text-sm font-medium text-text-primary">{item.label}</p>
+              <p className="mt-0.5 text-sm text-text-secondary">{item.description}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+type Persona = (typeof PERSONAS)[number];
+
+function PersonaCard({ persona }: { persona: Persona }) {
+  const Icon = persona.icon;
+  return (
+    <div className="flex h-full flex-col rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
+      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-subtle text-brand">
+        <Icon className="h-5 w-5" aria-hidden />
+      </span>
+      <p className="mt-4 text-lg font-semibold text-text-primary">{persona.title}</p>
+      <p className="mt-3 text-sm leading-relaxed text-text-secondary">{persona.pain}</p>
+      <div className="mt-4 flex items-start gap-2 border-t border-border pt-4 text-sm text-text-primary">
+        <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />
+        <span>{persona.help}</span>
+      </div>
+    </div>
+  );
+}
+
+function TrustCard({ icon: Icon, title, description }: { icon: typeof KeyRound; title: string; description: string }) {
+  return (
+    <div className="h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-subtle text-brand">
+        <Icon className="h-5 w-5" aria-hidden />
+      </span>
+      <p className="mt-4 font-semibold text-text-primary">{title}</p>
+      <p className="mt-2 text-sm leading-relaxed text-text-secondary">{description}</p>
     </div>
   );
 }
 
 /**
- * A faithful, honest stand-in for a real product screenshot: built from
- * the SAME design tokens/labels the actual Dashboard uses (§ real feature
- * names, real "مركز الإجراءات" framing), not a generic stock illustration
- * or an invented mock UI. This session has no authenticated test account
- * to capture an actual screenshot with — documented as a known limitation
- * (see the Phase 12 closure report), not hidden.
+ * A faithful, honest stand-in for a real product screenshot: built from the
+ * SAME design tokens/labels the actual Dashboard uses (real feature names,
+ * real "مركز الإجراءات" framing), inside a premium frame with a soft glow and
+ * two slow-floating status chips. Not a generic stock illustration or invented
+ * metrics.
  */
-function ProductPreviewPanel() {
+function HeroProductPreview() {
   return (
-    <Card className="flex overflow-hidden shadow-floating">
-      {/* A thin sliver of the REAL app shell (see components/shell/sidebar.tsx's
-          --shell-* tokens) — not a generic browser-chrome mockup — so this
-          preview reads as the actual product, not a stand-in dashboard. */}
-      <div className="hidden w-14 shrink-0 flex-col items-center gap-3 bg-shell py-4 sm:flex">
-        <span className="text-sm font-bold text-white">ر</span>
-        <span className="h-8 w-8 rounded-md bg-shell-active" />
-        {[Users, Layers, CalendarRange, Wallet].map((Icon, i) => (
-          <Icon key={i} className="h-4 w-4 text-shell-text-muted" aria-hidden />
-        ))}
+    <div className="relative mx-auto max-w-md lg:max-w-none">
+      {/* floating chips */}
+      <div className="rasid-float pointer-events-none absolute -start-4 top-14 z-10 hidden rounded-xl border border-border bg-surface px-3 py-2 shadow-floating sm:block" style={{ animationDelay: "0.4s" }}>
+        <p className="flex items-center gap-2 text-xs font-medium text-text-primary">
+          <ClipboardCheck className="h-4 w-4 text-brand" aria-hidden />
+          حضور حصة اليوم سُجّل
+        </p>
+      </div>
+      <div className="rasid-float pointer-events-none absolute -end-3 bottom-16 z-10 hidden rounded-xl border border-border bg-surface px-3 py-2 shadow-floating sm:block" style={{ animationDelay: "1.4s" }}>
+        <p className="flex items-center gap-2 text-xs font-medium text-text-primary">
+          <Wallet className="h-4 w-4 text-danger" aria-hidden />
+          دفعة متأخرة — تذكير
+        </p>
       </div>
 
-      <div className="flex-1">
-        <div className="flex items-center border-b border-border bg-surface-sunken px-4 py-3">
-          <span className="text-xs font-medium text-text-secondary">الرئيسية</span>
-        </div>
-        <CardContent className="flex flex-col gap-3 p-4">
-          <div className="flex items-center justify-between rounded-md border border-border bg-brand-subtle px-3 py-2 text-sm">
-            <span className="text-brand-subtle-foreground">الحصة القادمة: مجموعة الرياضيات</span>
-            <span className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground">فتح الحصة</span>
+      <Card className="overflow-hidden rounded-2xl border-border/80 shadow-floating">
+        <div className="flex">
+          <div className="hidden w-14 shrink-0 flex-col items-center gap-3 bg-shell py-4 sm:flex">
+            <span className="text-sm font-bold text-white">ر</span>
+            <span className="h-8 w-8 rounded-md bg-shell-active" />
+            {[Users, Layers, CalendarRange, Wallet].map((Icon, i) => (
+              <Icon key={i} className="h-4 w-4 text-shell-text-muted" aria-hidden />
+            ))}
           </div>
-          <p className="text-xs font-semibold text-text-secondary">يحتاج إجراء الآن</p>
-          {[
-            { label: "3 طلاب لم يُسجَّل حضورهم في حصة الأمس", tone: "warning" as const },
-            { label: "دفعة متأخرة من ولي أمر — تذكير مطلوب", tone: "danger" as const },
-            { label: "متابعة مستحقة لحالة انتباه مفتوحة", tone: "neutral" as const },
-          ].map((row) => (
-            <div key={row.label} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-              <span className="text-text-primary">{row.label}</span>
-              <Badge tone={row.tone}>{row.tone === "warning" ? "متوسط" : row.tone === "danger" ? "عاجل" : "سياقي"}</Badge>
+          <div className="flex-1">
+            <div className="flex items-center justify-between border-b border-border bg-surface-sunken px-4 py-3">
+              <span className="text-xs font-medium text-text-secondary">الرئيسية</span>
+              <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
+                <Sparkles className="h-3 w-3 text-brand" aria-hidden />
+                مركز الإجراءات
+              </span>
             </div>
-          ))}
-          <div className="grid grid-cols-3 gap-2 pt-1">
-            <MiniStat icon={Users} label="الطلاب" />
-            <MiniStat icon={Wallet} label="المالية" />
-            <MiniStat icon={FileBarChart} label="التقارير" />
+            <CardContent className="flex flex-col gap-3 p-4">
+              <div className="flex items-center justify-between rounded-lg border border-brand/20 bg-brand-subtle px-3 py-2.5 text-sm">
+                <span className="text-brand-subtle-foreground">الحصة القادمة: مجموعة الرياضيات</span>
+                <span className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground">فتح الحصة</span>
+              </div>
+              <p className="pt-1 text-xs font-semibold text-text-secondary">يحتاج إجراء الآن</p>
+              {[
+                { label: "٣ طلاب لم يُسجَّل حضورهم أمس", tone: "warning" as const, badge: "متوسط" },
+                { label: "دفعة متأخرة من ولي أمر — تذكير مطلوب", tone: "danger" as const, badge: "عاجل" },
+                { label: "متابعة مستحقة لحالة انتباه مفتوحة", tone: "neutral" as const, badge: "سياقي" },
+              ].map((row) => (
+                <div key={row.label} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5 text-sm">
+                  <span className="text-text-primary">{row.label}</span>
+                  <Badge tone={row.tone}>{row.badge}</Badge>
+                </div>
+              ))}
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <MiniStat icon={Users} label="الطلاب" />
+                <MiniStat icon={Wallet} label="المالية" />
+                <MiniStat icon={FileBarChart} label="التقارير" />
+              </div>
+            </CardContent>
           </div>
-        </CardContent>
-      </div>
-    </Card>
+        </div>
+      </Card>
+    </div>
   );
 }
 
 function MiniStat({ icon: Icon, label }: { icon: typeof Users; label: string }) {
   return (
-    <div className="flex flex-col items-center gap-1 rounded-md border border-border py-3 text-xs text-text-secondary">
+    <div className="flex flex-col items-center gap-1 rounded-lg border border-border py-3 text-xs text-text-secondary">
       <Icon className="h-4 w-4 text-brand" aria-hidden />
       {label}
     </div>
