@@ -24,20 +24,19 @@ esac
 require_pg17
 PG_RESTORE="$(pgbin pg_restore)"
 PSQL="$(pgbin psql)"
-b2_aws_env
-EP="$(b2_endpoint)"
+b2_configure
 WORKDIR="${WORKDIR:-./_verify}"; mkdir -p "$WORKDIR"
 
 OBJS="$(mktemp)"; trap 'rm -f "$OBJS"' EXIT
-aws s3api list-objects-v2 --bucket "$B2_BUCKET_NAME" --prefix "production/" --endpoint-url "$EP" --output json > "$OBJS"
+b2_aws s3api list-objects-v2 --bucket "$B2_BUCKET_NAME" --prefix "production/" --output json > "$OBJS"
 NEWEST="$(jq -r '[.Contents[]? | select(.Key|endswith(".dump"))] | max_by(.LastModified) | .Key // empty' "$OBJS")"
 [ -n "$NEWEST" ] || die "no Production backup (.dump) found under production/"
 BASE="${NEWEST%.dump}"
 log "newest backup: $NEWEST"
 
 DUMP="${WORKDIR}/restore.dump"
-aws s3 cp "s3://${B2_BUCKET_NAME}/${NEWEST}"           "$DUMP"          --endpoint-url "$EP" --only-show-errors
-aws s3 cp "s3://${B2_BUCKET_NAME}/${BASE}.dump.sha256" "${DUMP}.sha256" --endpoint-url "$EP" --only-show-errors
+b2_aws s3 cp "s3://${B2_BUCKET_NAME}/${NEWEST}"           "$DUMP"          --only-show-errors
+b2_aws s3 cp "s3://${B2_BUCKET_NAME}/${BASE}.dump.sha256" "${DUMP}.sha256" --only-show-errors
 [ -s "$DUMP" ] || die "downloaded dump is empty"
 
 # Verify checksum.

@@ -11,18 +11,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/backup/lib.sh
 source "$HERE/lib.sh"
 
-b2_aws_env
-EP="$(b2_endpoint)"
+b2_configure
 PREFIX="production/"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 CUTOFF="$(date -u -d "${RETENTION_DAYS} days ago" +%s)"
 
 OBJS="$(mktemp)"
 trap 'rm -f "$OBJS"' EXIT
-aws s3api list-objects-v2 \
+b2_aws s3api list-objects-v2 \
   --bucket "$B2_BUCKET_NAME" \
   --prefix "$PREFIX" \
-  --endpoint-url "$EP" \
   --output json > "$OBJS"
 
 # Protect the newest .dump (by LastModified) and its sibling group — never delete it.
@@ -45,7 +43,7 @@ while IFS=$'\t' read -r KEY LM; do
   esac
   OBJ_EPOCH="$(date -u -d "$LM" +%s 2>/dev/null || echo 0)"
   if [ "$OBJ_EPOCH" -gt 0 ] && [ "$OBJ_EPOCH" -lt "$CUTOFF" ]; then
-    aws s3api delete-object --bucket "$B2_BUCKET_NAME" --key "$KEY" --endpoint-url "$EP" >/dev/null
+    b2_aws s3api delete-object --bucket "$B2_BUCKET_NAME" --key "$KEY" >/dev/null
     log "deleted (older than ${RETENTION_DAYS}d): $KEY"
     deleted=$((deleted + 1))
   fi

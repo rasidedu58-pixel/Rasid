@@ -57,17 +57,56 @@ b2_endpoint() {
   case "$ep" in http://*|https://*) printf '%s' "$ep";; *) printf 'https://%s' "$ep";; esac
 }
 
-# Derive the S3 region from a Backblaze endpoint,
-# e.g. https://s3.us-west-004.backblazeb2.com -> us-west-004
+# Derive the S3 signing region from a Backblaze endpoint. B2's SigV4 region is
+# the middle token of the host, e.g.
+#   https://s3.eu-central-003.backblazeb2.com -> eu-central-003
+#   https://s3.us-west-004.backblazeb2.com    -> us-west-004
 b2_region() {
   b2_endpoint | sed -E 's#^https?://##; s#^s3\.##; s#\.backblazeb2\.com/?$##'
 }
 
-# Export aws-cli credentials/region from the B2 secrets. Values are never printed.
-b2_aws_env() {
+# --- Centralised B2 (S3-compatible) client -----------------------------------
+# EVERY B2 call — upload, head/list verification, retention, weekly restore —
+# MUST go through b2_aws() so they can never diverge on endpoint, region or
+# signing behaviour. b2_configure() must be called once before b2_aws().
+#
+# Notes on the SignatureDoesNotMatch class of failures on B2:
+#  * The signing region MUST equal the endpoint's region token (b2_region);
+#    high-level `aws s3 cp` auto-discovers and re-signs, but `aws s3api …`
+#    does not, so a wrong/implicit region only surfaces on s3api verify/list.
+#    We therefore pin --region explicitly on every call.
+#  * AWS CLI v2 (>= 2.23) turns ON request/response integrity checksums by
+#    default (aws-chunked / trailing checksums) which B2's S3 API rejects with
+#    SignatureDoesNotMatch. We restore the pre-2.23 "when_required" behaviour.
+b2_configure() {
   require_env B2_KEY_ID B2_APPLICATION_KEY B2_BUCKET_NAME B2_ENDPOINT
   export AWS_ACCESS_KEY_ID="$B2_KEY_ID"
   export AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY"
-  export AWS_DEFAULT_REGION="$(b2_region)"
+  export B2_EP B2_REGION
+  B2_EP="$(b2_endpoint)"
+  B2_REGION="$(b2_region)"
+  # Pin region for both the SDK and any implicit resolution.
+  export AWS_DEFAULT_REGION="$B2_REGION"
+  export AWS_REGION="$B2_REGION"
   export AWS_EC2_METADATA_DISABLED=true
+  # B2-compatibility: do not add SDK integrity checksums unless the operation
+  # requires them (avoids SignatureDoesNotMatch on AWS CLI v2 >= 2.23).
+  export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+  export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+}
+
+# Backwards-compatible name kept for existing callers.
+b2_aws_env() { b2_configure; }
+
+# Run an aws command against B2 with the shared endpoint + region. Credentials
+# live in the environment only and are never passed as arguments or printed.
+b2_aws() {
+  [ -n "${B2_EP:-}" ] && [ -n "${B2_REGION:-}" ] || b2_configure
+  aws --endpoint-url "$B2_EP" --region "$B2_REGION" "$@"
+}
+
+# Assert one exact object exists (exact-key HeadObject, not a bucket listing).
+b2_head_object() {
+  local key="$1"
+  b2_aws s3api head-object --bucket "$B2_BUCKET_NAME" --key "$key" >/dev/null 2>&1
 }
