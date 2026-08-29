@@ -197,6 +197,101 @@ body * {
   background: linear-gradient(90deg, transparent, hsl(var(--brand) / 0.35), transparent);
 }
 
+/* ---- Design System v2 — type scale (responsive, RTL-friendly) ---- */
+.text-display {
+  font-size: clamp(2.6rem, 6.2vw, 4.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+.text-h1 {
+  font-size: clamp(2.1rem, 5vw, 3.5rem);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+.text-h2 {
+  font-size: clamp(1.7rem, 3.4vw, 2.5rem);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+.text-h3 {
+  font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+/* ---- Hero atmosphere: theme-aware gradient mesh + faint grid ---- */
+.hero-mesh {
+  background:
+    radial-gradient(42% 52% at 82% -4%, hsl(var(--brand) / 0.18), transparent 70%),
+    radial-gradient(38% 46% at 16% 6%, hsl(var(--brand-secondary) / 0.14), transparent 70%),
+    radial-gradient(34% 42% at 52% 26%, hsl(var(--info) / 0.09), transparent 72%);
+}
+.hero-grid {
+  background-image:
+    linear-gradient(hsl(var(--foreground) / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / 0.035) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(ellipse 78% 58% at 50% 0%, #000 30%, transparent 76%);
+  mask-image: radial-gradient(ellipse 78% 58% at 50% 0%, #000 30%, transparent 76%);
+}
+/* Very slow, subtle drift so the mesh feels alive without distracting. */
+@keyframes hero-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2%, 1.5%, 0) scale(1.06);
+  }
+}
+.hero-drift {
+  animation: hero-drift 22s ease-in-out infinite;
+  will-change: transform;
+}
+/* Animated conic glow ring for CTA/section accents. */
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin-slow {
+  animation: spin-slow 14s linear infinite;
+}
+
+/* Auto-scrolling logo marquee (pauses on hover). */
+.marquee {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+.marquee-track {
+  display: inline-flex;
+  width: max-content;
+  animation: marquee 32s linear infinite;
+}
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-drift,
+  .spin-slow,
+  .marquee-track {
+    animation: none !important;
+  }
+}
+
 /* Financial/tabular figures should never jitter in width as digits change. */
 .tabular-nums {
   font-variant-numeric: tabular-nums;

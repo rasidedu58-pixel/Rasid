@@ -29,9 +29,12 @@ import {
 import { Badge, Button, Card, CardContent } from "@academic-precision/ui";
 import { AuthenticatedRedirect } from "../../components/marketing/authenticated-redirect";
 import { PricingTable } from "../../components/marketing/pricing-table";
+import { PricingCalculator } from "../../components/marketing/pricing-calculator";
 import { SplashScreen } from "../../components/marketing/splash-screen";
 import { MotionRoot, Reveal } from "../../components/marketing/motion";
-import { FaqAccordion } from "../../components/marketing/faq-accordion";
+import { TiltCard } from "../../components/marketing/anim";
+import { FaqSearch } from "../../components/marketing/faq-search";
+import { TestimonialsSection, LogosSection, StatsSection } from "../../components/marketing/social-proof";
 import { FAQ_ITEMS } from "../../lib/marketing/faq-config";
 import { TRIAL_DAYS } from "../../lib/marketing/pricing-config";
 
@@ -42,7 +45,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-/* ── Content models (unchanged copy; only the presentation is redesigned) ── */
+/* ── Content models (real, shipped capabilities; only presentation changed) ── */
 
 const HOW_IT_WORKS = [
   {
@@ -67,6 +70,7 @@ const FEATURE_GROUPS = [
     title: "التشغيل اليومي",
     tone: "brand" as const,
     icon: CalendarClock,
+    wide: true,
     items: [
       { icon: CalendarClock, label: "الحصص", description: "جدول حصص يتولّد تلقائيًا من مواعيدك الأسبوعية." },
       { icon: ClipboardCheck, label: "الحضور", description: "تسجيل حضور سريع من الهاتف أثناء الحصة." },
@@ -77,6 +81,7 @@ const FEATURE_GROUPS = [
     title: "إدارة الطلاب",
     tone: "neutral" as const,
     icon: Users,
+    wide: false,
     items: [
       { icon: Users, label: "ملفات الطلاب", description: "بيانات كل طالب وأولياء أموره وسجله." },
       { icon: Layers, label: "المجموعات", description: "مجموعاتك الدائمة بجدولها ورسومها." },
@@ -87,6 +92,7 @@ const FEATURE_GROUPS = [
     title: "القرارات والمتابعة",
     tone: "brand" as const,
     icon: Sparkles,
+    wide: false,
     items: [
       { icon: Sparkles, label: "مركز الإجراءات", description: "كل ما يحتاج قرارك الآن في شاشة واحدة." },
       { icon: Bell, label: "التنبيهات", description: "تنبيهات بما يحتاج متابعة قبل أن يفوتك." },
@@ -97,6 +103,7 @@ const FEATURE_GROUPS = [
     title: "المالية",
     tone: "neutral" as const,
     icon: Wallet,
+    wide: true,
     items: [
       { icon: Wallet, label: "المستحقات", description: "ما على كل طالب هذا الشهر، بوضوح." },
       { icon: HeartHandshake, label: "المدفوعات", description: "سجّل الدفعات وهي مرتبطة بسجلها." },
@@ -151,11 +158,11 @@ const TRUST_POINTS = [
 ];
 
 /**
- * Landing page (`/`) — the public marketing home. Server Component (real
- * content server-rendered for SEO) composing small client islands:
- * `SplashScreen`, `MotionRoot`, `AuthenticatedRedirect`, `Reveal`,
- * `FaqAccordion`. Every capability listed is a real, shipped Teacher V1
- * feature — nothing here is aspirational.
+ * Landing page (`/`) — Design System v2 (dark-first). Real content is
+ * server-rendered for SEO; small client islands add motion (`SplashScreen`,
+ * `MotionRoot`/`Reveal`, `TiltCard`, `FaqSearch`, social-proof shells). Every
+ * capability shown is a real, shipped Teacher V1 feature. Social-proof sections
+ * render nothing until real testimonials/logos/metrics are supplied.
  */
 export default function LandingPage() {
   return (
@@ -167,25 +174,24 @@ export default function LandingPage() {
 
       {/* ── Hero ── */}
       <section className="relative overflow-hidden">
-        <div aria-hidden className="rasid-hero-glow pointer-events-none absolute inset-0" />
-        <div className="relative mx-auto max-w-6xl px-4 pb-20 pt-14 sm:px-6 sm:pt-20 lg:pt-24">
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+          <div className="hero-drift hero-mesh absolute inset-0" />
+          <div className="hero-grid absolute inset-0" />
+        </div>
+        <div className="relative mx-auto max-w-6xl px-4 pb-24 pt-16 sm:px-6 sm:pt-24 lg:pt-28">
           <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
             <div className="flex flex-col items-start gap-6">
               <Reveal as="div" className="w-fit">
-                <Badge tone="brand" className="border border-brand/15 px-3 py-1">
+                <Badge tone="brand" className="border border-brand/20 px-3 py-1">
                   لأصحاب المجموعات التعليمية والمدرسين المستقلين
                 </Badge>
               </Reveal>
-              <Reveal
-                as="h1"
-                delay={60}
-                className="text-4xl font-bold leading-[1.15] tracking-tight text-text-primary sm:text-5xl lg:text-[3.35rem]"
-              >
+              <Reveal as="h1" delay={60} className="text-display text-text-primary">
                 شغّل مجموعاتك التعليمية
                 <br />
-                <span className="text-brand">من مكان واحد</span>
+                <span className="text-gradient">من مكان واحد</span>
               </Reveal>
-              <Reveal as="p" delay={120} className="max-w-xl text-lg leading-relaxed text-text-secondary">
+              <Reveal as="p" delay={120} className="max-w-xl text-lg leading-relaxed text-text-secondary sm:text-[1.125rem]">
                 الحضور، التحصيل، الواجبات، المتابعة والتقارير — بدون دفاتر متفرقة أو رسائل تضيع منك.
               </Reveal>
               <Reveal as="div" delay={180}>
@@ -211,11 +217,14 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Partner logos — renders only when real logos are supplied. */}
+      <LogosSection />
+
       {/* ── Before / After ── */}
       <section className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-5xl px-4 sm:px-6">
           <Reveal as="div" className="mb-12 text-center">
-            <h2 className="text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">من متابعة تتفكك، إلى تشغيل واضح</h2>
+            <h2 className="text-h2 text-text-primary">من متابعة تتفكك، إلى تشغيل واضح</h2>
             <p className="mx-auto mt-3 max-w-2xl text-text-secondary">
               ليس لأنك مقصّر — بل لأن الأدوات مبعثرة. راصد يجمعها ويعرض لك ما يحتاج قرارك دون أن تبحث عنه.
             </p>
@@ -235,10 +244,9 @@ export default function LandingPage() {
       <section id="how-it-works" className="mx-auto max-w-5xl px-4 py-20 sm:px-6">
         <Reveal as="div" className="mb-14 text-center">
           <SectionEyebrow>كيف يعمل</SectionEyebrow>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">ثلاث خطوات، لا أكثر</h2>
+          <h2 className="mt-3 text-h2 text-text-primary">ثلاث خطوات، لا أكثر</h2>
         </Reveal>
         <div className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
-          {/* connecting path (desktop only) */}
           <div aria-hidden className="absolute inset-x-[16%] top-9 hidden h-px bg-gradient-to-l from-transparent via-border-strong to-transparent md:block" />
           {HOW_IT_WORKS.map((item, i) => (
             <Reveal as="div" key={item.step} delay={i * 90} className="relative">
@@ -248,16 +256,21 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Features — grouped bento ── */}
+      {/* ── Features — asymmetric bento ── */}
       <section id="features" className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <Reveal as="div" className="mb-12 text-center">
             <SectionEyebrow>المزايا</SectionEyebrow>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">كل ما تحتاجه لتشغيل مجموعاتك، جاهز اليوم</h2>
+            <h2 className="mt-3 text-h2 text-text-primary">كل ما تحتاجه لتشغيل مجموعاتك، جاهز اليوم</h2>
           </Reveal>
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
             {FEATURE_GROUPS.map((group, i) => (
-              <Reveal as="div" key={group.title} delay={(i % 2) * 90}>
+              <Reveal
+                as="div"
+                key={group.title}
+                delay={(i % 2) * 90}
+                className={group.wide ? "lg:col-span-2" : "lg:col-span-1"}
+              >
                 <FeatureGroupCard group={group} />
               </Reveal>
             ))}
@@ -265,11 +278,14 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Data-driven stats — renders only when real metrics are supplied. */}
+      <StatsSection />
+
       {/* ── Audience personas ── */}
       <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
         <Reveal as="div" className="mb-12 text-center">
           <SectionEyebrow>لمن هو راصد</SectionEyebrow>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">راصد مبني اليوم من أجل</h2>
+          <h2 className="mt-3 text-h2 text-text-primary">راصد مبني اليوم من أجل</h2>
         </Reveal>
         <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           {PERSONAS.map((persona, i) => (
@@ -287,13 +303,18 @@ export default function LandingPage() {
       {/* ── Pricing ── */}
       <section id="pricing" className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <Reveal as="div" className="mb-12 text-center">
+          <Reveal as="div" className="mb-10 text-center">
             <SectionEyebrow>الأسعار</SectionEyebrow>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">باقات حسب سعة طلابك</h2>
+            <h2 className="mt-3 text-h2 text-text-primary">باقات حسب سعة طلابك</h2>
             <p className="mt-3 text-text-secondary">
               تجربة مجانية {TRIAL_DAYS} يومًا في كل باقة — بدون بطاقة، وإلغاء في أي وقت.
             </p>
           </Reveal>
+
+          <Reveal as="div" className="mb-12">
+            <PricingCalculator />
+          </Reveal>
+
           <Reveal as="div">
             <PricingTable />
           </Reveal>
@@ -306,11 +327,14 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Testimonials — renders only when real testimonials are supplied. */}
+      <TestimonialsSection />
+
       {/* ── Security / trust ── */}
       <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
         <Reveal as="div" className="mb-12 text-center">
           <SectionEyebrow>الأمان والموثوقية</SectionEyebrow>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">بياناتك في مكان آمن</h2>
+          <h2 className="mt-3 text-h2 text-text-primary">بياناتك في مكان آمن</h2>
         </Reveal>
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {TRUST_POINTS.map((point, i) => (
@@ -321,15 +345,15 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── FAQ ── */}
+      {/* ── FAQ (searchable) ── */}
       <section className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-3xl px-4 sm:px-6">
           <Reveal as="div" className="mb-10 text-center">
             <SectionEyebrow>الأسئلة الشائعة</SectionEyebrow>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">أسئلة قد تدور في ذهنك</h2>
+            <h2 className="mt-3 text-h2 text-text-primary">أسئلة قد تدور في ذهنك</h2>
           </Reveal>
           <Reveal as="div">
-            <FaqAccordion items={FAQ_ITEMS.slice(0, 5)} />
+            <FaqSearch items={FAQ_ITEMS} />
           </Reveal>
           <div className="mt-8 text-center">
             <Link href="/faq" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline">
@@ -342,9 +366,12 @@ export default function LandingPage() {
 
       {/* ── Final CTA ── */}
       <section className="relative overflow-hidden py-24">
-        <div aria-hidden className="rasid-cta-glow pointer-events-none absolute inset-0" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+          <div className="rasid-cta-glow absolute inset-0" />
+          <div className="hero-grid absolute inset-0 opacity-60" />
+        </div>
         <Reveal as="div" className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
-          <h2 className="text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">خلّي تشغيل مجموعاتك أوضح من أول يوم</h2>
+          <h2 className="text-h1 text-text-primary">خلّي تشغيل مجموعاتك أوضح من أول يوم</h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-text-secondary">
             ابدأ تجربتك المجانية واكتشف كيف يجمع راصد كل ما تحتاجه في مكان واحد.
           </p>
@@ -389,13 +416,13 @@ function ComparisonCard({ variant, title, items }: { variant: "before" | "after"
   return (
     <div
       className={`h-full rounded-2xl border p-6 transition-shadow sm:p-7 ${
-        isAfter ? "border-brand/25 bg-surface shadow-sm ring-1 ring-brand/10" : "border-border bg-surface/60"
+        isAfter ? "border-brand/30 bg-surface shadow-sm ring-1 ring-brand/10" : "border-border bg-surface/60"
       }`}
     >
       <div className="mb-5 flex items-center gap-2.5">
         <span
           className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-            isAfter ? "bg-brand text-brand-foreground" : "bg-surface-sunken text-text-tertiary"
+            isAfter ? "bg-gradient-cta text-brand-foreground" : "bg-surface-sunken text-text-tertiary"
           }`}
         >
           {isAfter ? <Check className="h-4 w-4" aria-hidden /> : <X className="h-4 w-4" aria-hidden />}
@@ -405,11 +432,7 @@ function ComparisonCard({ variant, title, items }: { variant: "before" | "after"
       <ul className="flex flex-col gap-3.5">
         {items.map((item) => (
           <li key={item} className="flex items-start gap-2.5 text-sm">
-            <span
-              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
-                isAfter ? "text-brand" : "text-text-tertiary"
-              }`}
-            >
+            <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${isAfter ? "text-brand" : "text-text-tertiary"}`}>
               {isAfter ? <Check className="h-4 w-4" aria-hidden /> : <X className="h-[13px] w-[13px]" aria-hidden />}
             </span>
             <span className={isAfter ? "text-text-primary" : "text-text-secondary"}>{item}</span>
@@ -422,8 +445,8 @@ function ComparisonCard({ variant, title, items }: { variant: "before" | "after"
 
 function StepCard({ step, title, description }: { step: string; title: string; description: string }) {
   return (
-    <div className="group relative h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
-      <span className="relative flex h-[68px] w-[68px] items-center justify-center rounded-2xl bg-brand-subtle text-2xl font-bold text-brand ring-4 ring-surface">
+    <div className="card-glow group relative h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-card-hover">
+      <span className="relative flex h-[68px] w-[68px] items-center justify-center rounded-2xl bg-brand-subtle text-2xl font-bold text-brand-subtle-foreground ring-4 ring-surface">
         {step}
       </span>
       <p className="mt-5 text-lg font-semibold text-text-primary">{title}</p>
@@ -437,25 +460,35 @@ type FeatureGroup = (typeof FEATURE_GROUPS)[number];
 function FeatureGroupCard({ group }: { group: FeatureGroup }) {
   const GroupIcon = group.icon;
   return (
-    <div className="group h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md sm:p-7">
+    <div className="card-glow group h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-card-hover sm:p-7">
       <div className="mb-5 flex items-center gap-3">
         <span
           className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-            group.tone === "brand" ? "bg-brand text-brand-foreground" : "bg-brand-subtle text-brand"
+            group.tone === "brand" ? "bg-gradient-cta text-brand-foreground" : "bg-brand-subtle text-brand-subtle-foreground"
           }`}
         >
           <GroupIcon className="h-5 w-5" aria-hidden />
         </span>
         <h3 className="text-lg font-semibold text-text-primary">{group.title}</h3>
       </div>
-      <ul className="flex flex-col divide-y divide-border">
+      <ul className={group.wide ? "grid gap-4 sm:grid-cols-3" : "flex flex-col divide-y divide-border"}>
         {group.items.map((item) => (
-          <li key={item.label} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-            <item.icon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand" aria-hidden />
-            <div>
-              <p className="text-sm font-medium text-text-primary">{item.label}</p>
-              <p className="mt-0.5 text-sm text-text-secondary">{item.description}</p>
-            </div>
+          <li key={item.label} className={group.wide ? "" : "flex items-start gap-3 py-3 first:pt-0 last:pb-0"}>
+            {group.wide ? (
+              <>
+                <item.icon className="mb-2 h-[18px] w-[18px] text-brand" aria-hidden />
+                <p className="text-sm font-medium text-text-primary">{item.label}</p>
+                <p className="mt-0.5 text-sm text-text-secondary">{item.description}</p>
+              </>
+            ) : (
+              <>
+                <item.icon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand" aria-hidden />
+                <div>
+                  <p className="text-sm font-medium text-text-primary">{item.label}</p>
+                  <p className="mt-0.5 text-sm text-text-secondary">{item.description}</p>
+                </div>
+              </>
+            )}
           </li>
         ))}
       </ul>
@@ -468,8 +501,8 @@ type Persona = (typeof PERSONAS)[number];
 function PersonaCard({ persona }: { persona: Persona }) {
   const Icon = persona.icon;
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
-      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-subtle text-brand">
+    <div className="card-glow flex h-full flex-col rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-card-hover">
+      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-subtle text-brand-subtle-foreground">
         <Icon className="h-5 w-5" aria-hidden />
       </span>
       <p className="mt-4 text-lg font-semibold text-text-primary">{persona.title}</p>
@@ -484,8 +517,8 @@ function PersonaCard({ persona }: { persona: Persona }) {
 
 function TrustCard({ icon: Icon, title, description }: { icon: typeof KeyRound; title: string; description: string }) {
   return (
-    <div className="h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
-      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-subtle text-brand">
+    <div className="card-glow h-full rounded-2xl border border-border bg-surface p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-card-hover">
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-subtle text-brand-subtle-foreground">
         <Icon className="h-5 w-5" aria-hidden />
       </span>
       <p className="mt-4 font-semibold text-text-primary">{title}</p>
@@ -495,15 +528,17 @@ function TrustCard({ icon: Icon, title, description }: { icon: typeof KeyRound; 
 }
 
 /**
- * A faithful, honest stand-in for a real product screenshot: built from the
- * SAME design tokens/labels the actual Dashboard uses (real feature names,
- * real "مركز الإجراءات" framing), inside a premium frame with a soft glow and
- * two slow-floating status chips. Not a generic stock illustration or invented
- * metrics.
+ * Honest product mockup — built from the SAME design tokens/labels the real
+ * Dashboard uses (real feature names, real "مركز الإجراءات" framing), inside a
+ * premium frame with a soft glow and two slow-floating status chips, with a
+ * subtle pointer 3D tilt. Not a stock illustration or invented metrics.
  */
 function HeroProductPreview() {
   return (
     <div className="relative mx-auto max-w-md lg:max-w-none">
+      {/* ambient glow behind the frame */}
+      <div aria-hidden className="pointer-events-none absolute -inset-6 -z-10 bg-[radial-gradient(60%_60%_at_50%_30%,hsl(var(--brand)/0.18),transparent_70%)]" />
+
       {/* floating chips */}
       <div className="rasid-float pointer-events-none absolute -start-4 top-14 z-10 hidden rounded-xl border border-border bg-surface px-3 py-2 shadow-floating sm:block" style={{ animationDelay: "0.4s" }}>
         <p className="flex items-center gap-2 text-xs font-medium text-text-primary">
@@ -518,48 +553,50 @@ function HeroProductPreview() {
         </p>
       </div>
 
-      <Card className="overflow-hidden rounded-2xl border-border/80 shadow-floating">
-        <div className="flex">
-          <div className="hidden w-14 shrink-0 flex-col items-center gap-3 bg-shell py-4 sm:flex">
-            <span className="text-sm font-bold text-white">ر</span>
-            <span className="h-8 w-8 rounded-md bg-shell-active" />
-            {[Users, Layers, CalendarRange, Wallet].map((Icon, i) => (
-              <Icon key={i} className="h-4 w-4 text-shell-text-muted" aria-hidden />
-            ))}
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between border-b border-border bg-surface-sunken px-4 py-3">
-              <span className="text-xs font-medium text-text-secondary">الرئيسية</span>
-              <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
-                <Sparkles className="h-3 w-3 text-brand" aria-hidden />
-                مركز الإجراءات
-              </span>
-            </div>
-            <CardContent className="flex flex-col gap-3 p-4">
-              <div className="flex items-center justify-between rounded-lg border border-brand/20 bg-brand-subtle px-3 py-2.5 text-sm">
-                <span className="text-brand-subtle-foreground">الحصة القادمة: مجموعة الرياضيات</span>
-                <span className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground">فتح الحصة</span>
-              </div>
-              <p className="pt-1 text-xs font-semibold text-text-secondary">يحتاج إجراء الآن</p>
-              {[
-                { label: "٣ طلاب لم يُسجَّل حضورهم أمس", tone: "warning" as const, badge: "متوسط" },
-                { label: "دفعة متأخرة من ولي أمر — تذكير مطلوب", tone: "danger" as const, badge: "عاجل" },
-                { label: "متابعة مستحقة لحالة انتباه مفتوحة", tone: "neutral" as const, badge: "سياقي" },
-              ].map((row) => (
-                <div key={row.label} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5 text-sm">
-                  <span className="text-text-primary">{row.label}</span>
-                  <Badge tone={row.tone}>{row.badge}</Badge>
-                </div>
+      <TiltCard>
+        <Card className="overflow-hidden rounded-2xl border-border/80 shadow-floating">
+          <div className="flex">
+            <div className="hidden w-14 shrink-0 flex-col items-center gap-3 bg-shell py-4 sm:flex">
+              <span className="text-sm font-bold text-white">ر</span>
+              <span className="h-8 w-8 rounded-md bg-shell-active" />
+              {[Users, Layers, CalendarRange, Wallet].map((Icon, i) => (
+                <Icon key={i} className="h-4 w-4 text-shell-text-muted" aria-hidden />
               ))}
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                <MiniStat icon={Users} label="الطلاب" />
-                <MiniStat icon={Wallet} label="المالية" />
-                <MiniStat icon={FileBarChart} label="التقارير" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between border-b border-border bg-surface-sunken px-4 py-3">
+                <span className="text-xs font-medium text-text-secondary">الرئيسية</span>
+                <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
+                  <Sparkles className="h-3 w-3 text-brand" aria-hidden />
+                  مركز الإجراءات
+                </span>
               </div>
-            </CardContent>
+              <CardContent className="flex flex-col gap-3 p-4">
+                <div className="flex items-center justify-between rounded-lg border border-brand/25 bg-brand-subtle px-3 py-2.5 text-sm">
+                  <span className="text-brand-subtle-foreground">الحصة القادمة: مجموعة الرياضيات</span>
+                  <span className="rounded-md bg-gradient-cta px-2 py-1 text-xs font-medium text-brand-foreground">فتح الحصة</span>
+                </div>
+                <p className="pt-1 text-xs font-semibold text-text-secondary">يحتاج إجراء الآن</p>
+                {[
+                  { label: "٣ طلاب لم يُسجَّل حضورهم أمس", tone: "warning" as const, badge: "متوسط" },
+                  { label: "دفعة متأخرة من ولي أمر — تذكير مطلوب", tone: "danger" as const, badge: "عاجل" },
+                  { label: "متابعة مستحقة لحالة انتباه مفتوحة", tone: "neutral" as const, badge: "سياقي" },
+                ].map((row) => (
+                  <div key={row.label} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5 text-sm">
+                    <span className="text-text-primary">{row.label}</span>
+                    <Badge tone={row.tone}>{row.badge}</Badge>
+                  </div>
+                ))}
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  <MiniStat icon={Users} label="الطلاب" />
+                  <MiniStat icon={Wallet} label="المالية" />
+                  <MiniStat icon={FileBarChart} label="التقارير" />
+                </div>
+              </CardContent>
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </TiltCard>
     </div>
   );
 }
