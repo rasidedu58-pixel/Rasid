@@ -35,8 +35,9 @@ BASE="${NEWEST%.dump}"
 log "newest backup: $NEWEST"
 
 DUMP="${WORKDIR}/restore.dump"
-b2_aws s3 cp "s3://${B2_BUCKET_NAME}/${NEWEST}"           "$DUMP"          --only-show-errors
-b2_aws s3 cp "s3://${B2_BUCKET_NAME}/${BASE}.dump.sha256" "${DUMP}.sha256" --only-show-errors
+# Deterministic single-request GetObject (same B2 client) — no streaming cp.
+b2_aws s3api get-object --bucket "$B2_BUCKET_NAME" --key "$NEWEST"            "$DUMP"          >/dev/null
+b2_aws s3api get-object --bucket "$B2_BUCKET_NAME" --key "${BASE}.dump.sha256" "${DUMP}.sha256" >/dev/null
 [ -s "$DUMP" ] || die "downloaded dump is empty"
 
 # Verify checksum.

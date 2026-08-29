@@ -12,29 +12,43 @@ source "$HERE/lib.sh"
 
 require_env DUMP SHA META KEY_PREFIX
 b2_configure
-DEST="s3://${B2_BUCKET_NAME}/${KEY_PREFIX}"
 
-for f in "$DUMP" "$SHA" "$META"; do
-  [ -s "$f" ] || die "artifact missing/empty before upload: $f"
-  name="$(basename "$f")"
-  b2_aws s3 cp "$f" "${DEST}/${name}" --only-show-errors
-  log "uploaded: ${KEY_PREFIX}/${name}"
-done
+# Deterministic single-request PutObject from the real local file path.
+#
+# We deliberately do NOT use `aws s3 cp`: its transfer manager can send the body
+# with aws-chunked / streaming payload signing (and may switch to multipart),
+# which Backblaze B2 miscounts as "IncompleteBody: request body too small".
+# `s3api put-object --body <file>` issues one plain PutObject with a real
+# Content-Length and a full-payload signature — the B2-compatible path. Each
+# object is then verified so a printed line is never mistaken for proof.
+upload_and_verify() {
+  local f="$1" key size remote
+  # Pre-upload assertions: file exists and has a real, non-zero size.
+  [ -f "$f" ] || die "artifact not found before upload: $f"
+  size="$(stat -c%s "$f")"
+  [ -n "$size" ] && [ "$size" -gt 0 ] || die "artifact is empty (0 bytes): $f"
+  key="${KEY_PREFIX}/$(basename "$f")"
+  log "uploading: $(basename "$f") | local=${size} bytes | key=${key}"
 
-# Post-upload verification: prove EACH of the three objects exists using an
-# exact-key HeadObject (not a bucket listing). This is the authoritative check —
-# a printed "uploaded" line is NOT proof the object landed.
-verify_one() {
-  local key="$1" size
-  size="$(b2_aws s3api head-object --bucket "$B2_BUCKET_NAME" --key "$key" \
-            --query 'ContentLength' --output text 2>/dev/null || true)"
-  case "$size" in
-    ''|None|0) die "post-upload verification FAILED — object missing or empty: ${key}";;
-    *[!0-9]*)  die "post-upload verification FAILED — unexpected size for ${key}";;
+  b2_aws s3api put-object \
+    --bucket "$B2_BUCKET_NAME" \
+    --key "$key" \
+    --body "$f" >/dev/null \
+    || die "put-object failed for ${key}"
+
+  # Post-upload: object must exist AND remote ContentLength must match exactly.
+  remote="$(b2_aws s3api head-object --bucket "$B2_BUCKET_NAME" --key "$key" \
+              --query 'ContentLength' --output text 2>/dev/null || true)"
+  case "$remote" in
+    ''|None)  die "post-upload verification FAILED — object missing: ${key}";;
+    *[!0-9]*) die "post-upload verification FAILED — non-numeric ContentLength for ${key}";;
   esac
-  log "verified in bucket: ${key} (${size} bytes)"
+  [ "$remote" = "$size" ] \
+    || die "post-upload verification FAILED — size mismatch for ${key}: local=${size} remote=${remote}"
+  log "verified: key=${key} | local=${size} | remote ContentLength=${remote}"
 }
-verify_one "${KEY_PREFIX}/$(basename "$DUMP")"
-verify_one "${KEY_PREFIX}/$(basename "$SHA")"
-verify_one "${KEY_PREFIX}/$(basename "$META")"
-log "post-upload verification PASSED — all 3 objects present in ${B2_BUCKET_NAME}/${KEY_PREFIX}/"
+
+upload_and_verify "$DUMP"
+upload_and_verify "$SHA"
+upload_and_verify "$META"
+log "upload + verification PASSED — all 3 objects present with exact byte sizes in ${B2_BUCKET_NAME}/${KEY_PREFIX}/"
