@@ -18,6 +18,8 @@ import type {
   EnrollmentPreviewResponse,
   EnrollmentCreateRequest,
   EnrollmentCreateResponse,
+  EnrollmentBatchRequest,
+  EnrollmentBatchResponse,
   EnrollmentWithdrawRequest,
   EnrollmentWithdrawResponse,
   EnrollmentTransferPreviewRequest,
@@ -93,6 +95,11 @@ export function previewEnrollment(workspaceId: string, groupMonthId: string, bod
 
 export function createEnrollment(workspaceId: string, groupMonthId: string, body: EnrollmentCreateRequest): Promise<EnrollmentCreateResponse> {
   return apiRequest<EnrollmentCreateResponse>(`/group-months/${groupMonthId}/enrollments`, { method: "POST", workspaceId, body });
+}
+
+/** Bulk-enroll several existing students into one GroupMonth (single call, reuses the per-student create/reactivate logic server-side). */
+export function batchEnrollStudents(workspaceId: string, groupMonthId: string, body: EnrollmentBatchRequest): Promise<EnrollmentBatchResponse> {
+  return apiRequest<EnrollmentBatchResponse>(`/group-months/${groupMonthId}/enrollments/batch`, { method: "POST", workspaceId, body });
 }
 
 export function withdrawEnrollment(workspaceId: string, enrollmentId: string, body: EnrollmentWithdrawRequest): Promise<EnrollmentWithdrawResponse> {

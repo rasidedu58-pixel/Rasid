@@ -206,6 +206,42 @@ export type EnrollmentCreateRequest = z.infer<typeof enrollmentCreateRequestSche
 export const enrollmentCreateResponseSchema = z.object({ enrollment: enrollmentSchema, obligation: obligationSchema });
 export type EnrollmentCreateResponse = z.infer<typeof enrollmentCreateResponseSchema>;
 
+/**
+ * Bulk enroll several EXISTING students into one GroupMonth in a single call
+ * (Enrollment UX — "طلاب موجودون" tab). This is NOT an import: it only wires
+ * already-created Students to a group, reusing the exact same per-enrollment
+ * create/reactivate + obligation logic as the single-student endpoint (no
+ * parallel finance path). `feeMethod` is a SINGLE choice applied to the whole
+ * batch — CUSTOM is excluded here (no per-student custom amounts in bulk), and
+ * it is only honored when the GroupMonth's `join_fee_policy` is ASK_EVERY_TIME
+ * (FULL/REMAINING force their method, mirroring `resolveFeeMethod`). Unlike the
+ * single flow there is no preview token: the server resolves each student's due
+ * from the group's own policy, never from a client-supplied amount.
+ */
+export const enrollmentBatchFeeMethodSchema = z.enum(["FULL_MONTH", "REMAINING_SESSIONS"]);
+export const enrollmentBatchRequestSchema = z.object({
+  studentIds: z.array(z.string().uuid()).min(1).max(50),
+  joinDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  feeMethod: enrollmentBatchFeeMethodSchema.optional(),
+});
+export type EnrollmentBatchRequest = z.infer<typeof enrollmentBatchRequestSchema>;
+
+export const enrollmentBatchResultItemSchema = z.object({
+  studentId: z.string().uuid(),
+  outcome: z.enum(["ENROLLED", "REACTIVATED", "FAILED"]),
+  enrollmentId: z.string().uuid().nullable(),
+  message: z.string().nullable(),
+});
+export type EnrollmentBatchResultItem = z.infer<typeof enrollmentBatchResultItemSchema>;
+
+export const enrollmentBatchResponseSchema = z.object({
+  results: z.array(enrollmentBatchResultItemSchema),
+  enrolledCount: z.number().int(),
+  reactivatedCount: z.number().int(),
+  failedCount: z.number().int(),
+});
+export type EnrollmentBatchResponse = z.infer<typeof enrollmentBatchResponseSchema>;
+
 export const enrollmentWithdrawRequestSchema = z.object({
   reason: z.string().trim().min(1).optional(),
   effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

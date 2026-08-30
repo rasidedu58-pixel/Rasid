@@ -1,6 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   Enrollment,
+  EnrollmentBatchRequest,
+  EnrollmentBatchResponse,
+  EnrollmentBatchResultItem,
   EnrollmentCreateRequest,
   EnrollmentCreateResponse,
   EnrollmentPreviewRequest,
@@ -185,6 +188,94 @@ export class EnrollmentsService {
     });
 
     return { enrollment: this.toEnrollmentDto(enrollment), obligation: this.toObligationDto(obligation) };
+  }
+
+  /**
+   * Bulk enroll several EXISTING students into one GroupMonth ("طلاب موجودون").
+   * Reuses the EXACT single-enrollment pipeline per student — `resolveFeeMethod`
+   * → `computeDue` → `resolveObligationTerms` → `createOrReactivateEnrollmentTransaction`
+   * — so there is no parallel finance/enrollment logic. Group scope + student
+   * workspace membership are validated up front and the whole call fails closed
+   * (nothing written) if any studentId is forged / cross-workspace / out of
+   * scope. Duplicate (already-enrolled) students take the existing reactivation
+   * path — reported as REACTIVATED, not an error. Each student enrolls in its
+   * own atomic transaction; a per-student failure (e.g. REMAINING_SESSIONS with
+   * no billable sessions) is reported individually without aborting the rest.
+   */
+  async batchEnrollStudents(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    groupMonthId: string,
+    body: EnrollmentBatchRequest,
+    correlationId: string | null,
+  ): Promise<EnrollmentBatchResponse> {
+    const { groupMonth } = await this.loadGroupMonthInScope(authUser, workspaceContext, groupMonthId, "students.edit");
+
+    // Resolve the single fee method for the whole batch, honoring the group's
+    // policy exactly like the single flow. CUSTOM is impossible here (the
+    // contract excludes it), so no per-student amount is ever fabricated.
+    const feeMethod = this.resolveFeeMethod(groupMonth, body.feeMethod);
+    if (feeMethod === "CUSTOM") {
+      throw new ValidationApiException({ feeMethod: ["التسجيل الجماعي لا يدعم المبلغ المخصص لكل طالب."] });
+    }
+
+    // Fail-closed pre-validation: every student must exist in this workspace
+    // BEFORE any write happens (forged/cross-workspace ids reject the call).
+    // De-duplicate ids so a repeated id can't double-process.
+    const uniqueStudentIds = Array.from(new Set(body.studentIds));
+    for (const studentId of uniqueStudentIds) {
+      await this.loadStudentInWorkspace(workspaceContext, studentId);
+    }
+
+    const results: EnrollmentBatchResultItem[] = [];
+    for (const studentId of uniqueStudentIds) {
+      try {
+        const { calculatedDueMinor } = await this.computeDue(workspaceContext, groupMonth, feeMethod, body.joinDate, undefined);
+        const obligationTerms = await this.resolveObligationTerms(workspaceContext, groupMonth, feeMethod, calculatedDueMinor, {
+          joinDate: body.joinDate,
+        });
+        const { enrollment, reactivated } = await this.repository.createOrReactivateEnrollmentTransaction({
+          workspaceId: workspaceContext.workspaceId,
+          studentId,
+          groupMonthId,
+          joinDate: body.joinDate,
+          status: "ACTIVE",
+          feeMethod,
+          customFeeMinor: null,
+          obligation: obligationTerms,
+        });
+        await this.repository.insertAuditEvent({
+          workspaceId: workspaceContext.workspaceId,
+          actorUserId: authUser.id,
+          actorMembershipId: workspaceContext.membership.id,
+          action: reactivated ? "enrollment.reactivated" : "enrollment.created",
+          entityType: "enrollment",
+          entityId: enrollment.id,
+          afterJson: { enrollment: this.toEnrollmentDto(enrollment), batch: true },
+          correlationId,
+        });
+        results.push({
+          studentId,
+          outcome: reactivated ? "REACTIVATED" : "ENROLLED",
+          enrollmentId: enrollment.id,
+          message: null,
+        });
+      } catch (error) {
+        results.push({
+          studentId,
+          outcome: "FAILED",
+          enrollmentId: null,
+          message: error instanceof Error && error.message ? error.message : "تعذّر تسجيل هذا الطالب.",
+        });
+      }
+    }
+
+    return {
+      results,
+      enrolledCount: results.filter((r) => r.outcome === "ENROLLED").length,
+      reactivatedCount: results.filter((r) => r.outcome === "REACTIVATED").length,
+      failedCount: results.filter((r) => r.outcome === "FAILED").length,
+    };
   }
 
   async withdrawEnrollment(

@@ -1,11 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Card, ErrorState, LoadingRegion, MetricCell, MetricStrip, SectionCard, StatusDot, formatMoney, formatMonthLabel } from "@academic-precision/ui";
+import { Badge, Button, Card, EmptyState, ErrorState, LoadingRegion, MetricCell, MetricStrip, SectionCard, StatusDot, formatMoney, formatMonthLabel } from "@academic-precision/ui";
+import { UserPlus } from "lucide-react";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { ExportCsvButton } from "../../../../components/reports/export-csv-button";
+import { AddStudentsToGroupSheet } from "../../../../components/enrollment/add-students-to-group-sheet";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
 import { fetchGroup } from "../../../../lib/api/scheduling";
@@ -22,7 +25,9 @@ import { fetchGroupReport } from "../../../../lib/api/reports";
  */
 export default function GroupDetailPage() {
   const { groupId } = useParams<{ groupId: string }>();
-  const { workspaceId } = useWorkspace();
+  const { workspaceId, canWrite, hasPermission } = useWorkspace();
+  const [addOpen, setAddOpen] = useState(false);
+  const canManage = canWrite("CORE_OPERATIONS") && hasPermission("students.edit");
 
   const groupQuery = useQuery({
     queryKey: workspaceId ? qk.groups.detail(workspaceId, groupId) : ["group", "none"],
@@ -78,9 +83,22 @@ export default function GroupDetailPage() {
             </MetricStrip>
           </section>
 
-          <SectionCard title="الطلاب المسجّلون">
+          <SectionCard
+            title="الطلاب المسجّلون"
+            action={canManage ? (
+              <Button size="sm" onClick={() => setAddOpen(true)}>
+                <UserPlus className="h-4 w-4" aria-hidden />
+                إضافة طلاب
+              </Button>
+            ) : undefined}
+          >
             {report.roster.length === 0 ? (
-              <p className="text-sm text-text-secondary">لا يوجد طلاب مسجّلون هذا الشهر.</p>
+              <EmptyState
+                icon={<UserPlus className="h-8 w-8 text-text-tertiary" aria-hidden />}
+                title="لا يوجد طلاب في هذه المجموعة بعد."
+                description="أضف طلابًا جددًا أو سجّل طلابًا موجودين لبدء التشغيل."
+                action={canManage ? <Button size="sm" onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" aria-hidden />إضافة طلاب</Button> : undefined}
+              />
             ) : (
               <ul className="flex flex-col divide-y divide-border">
                 {report.roster.map((r) => (
@@ -102,6 +120,8 @@ export default function GroupDetailPage() {
           </SectionCard>
         </div>
       )}
+
+      <AddStudentsToGroupSheet group={{ id: groupId, name: group.name }} open={addOpen} onOpenChange={setAddOpen} />
     </>
   );
 }

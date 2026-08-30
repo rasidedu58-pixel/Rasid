@@ -2,8 +2,10 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Plus, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, CalendarClock, Plus, Trash2, UserPlus } from "lucide-react";
+import type { FeeMethod } from "@academic-precision/contracts";
 import {
   Button,
   Dialog,
@@ -13,11 +15,20 @@ import {
   DialogTrigger,
   Field,
   Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   toast,
 } from "@academic-precision/ui";
 import { createStudent, previewStudentMatch } from "../../../lib/api/students";
 import { qk } from "../../../lib/query-keys";
 import { useWorkspace } from "../../../lib/workspace-provider";
+import { GroupPicker } from "../../../components/enrollment/group-picker";
+import { useCurrentGroupMonth } from "../../../lib/use-current-group-month";
+import { enrollStudentIntoGroupMonth, todayIso } from "../../../lib/enroll-student";
+import { invalidateAfterEnrollment } from "../../../lib/invalidate-enrollment";
 
 interface GuardianRow {
   name: string;
@@ -32,10 +43,12 @@ interface Candidate {
 const emptyGuardian = (): GuardianRow => ({ name: "", phone: "" });
 
 /**
- * Fast student add (§18–19): student name + guardian(s), with a "save and add
- * another" flow for entering many students quickly, plus the existing
- * duplicate-candidate gate (match-preview). Multiple guardians are supported
- * (the backend already allows many; the first with a phone is primary).
+ * Fast student add: student name + guardian(s), a "save and add another" flow
+ * for entering many students quickly, the duplicate-candidate gate
+ * (match-preview), AND optional one-step enrollment into a group (§Flow A).
+ * Enrollment is anchored to the group's CURRENT-month GroupMonth (resolved via
+ * `useCurrentGroupMonth`) — the student is created first, then enrolled; if the
+ * enroll step fails, the student is NOT lost (recovery: "إعادة محاولة التسجيل").
  *
  * NOTE: school / grade / date-of-birth / notes / photo are NOT modeled in the
  * students schema today, so they are intentionally omitted here rather than
@@ -54,11 +67,24 @@ export function CreateStudentDialog() {
   const [ackDuplicates, setAckDuplicates] = useState(false);
   const [addAnotherMode, setAddAnotherMode] = useState(false);
 
-  function resetForm() {
+  // Enrollment section
+  const [groupId, setGroupId] = useState<string | null>(null);
+  const [feeMethod, setFeeMethod] = useState<FeeMethod>("FULL_MONTH");
+  const [pendingEnrollId, setPendingEnrollId] = useState<string | null>(null); // created but enroll failed
+  const { state: gmState, isLoading: gmLoading } = useCurrentGroupMonth(groupId);
+  const groupReady = gmState.status === "READY";
+  const askFee = groupReady && gmState.groupMonth.joinFeePolicy === "ASK_EVERY_TIME";
+
+  function resetForm(keepGroup = false) {
     setName("");
     setGuardians([emptyGuardian()]);
     setCandidates(null);
     setAckDuplicates(false);
+    setPendingEnrollId(null);
+    if (!keepGroup) {
+      setGroupId(null);
+      setFeeMethod("FULL_MONTH");
+    }
   }
   function invalidateDuplicateGate() {
     setCandidates(null);
@@ -66,7 +92,6 @@ export function CreateStudentDialog() {
   }
 
   const primaryPhone = guardians.find((g) => g.phone.trim())?.phone.trim();
-  // A guardian row is only valid if it has a phone; a name without a phone can't be saved.
   const guardianError = guardians.some((g) => g.name.trim() && !g.phone.trim());
   const canSubmit = name.trim().length > 0 && !guardianError;
 
@@ -83,9 +108,51 @@ export function CreateStudentDialog() {
     },
   });
 
+  /** Enroll an existing student (from the duplicate-candidate list) into the chosen group. */
+  async function enrollExistingCandidate(studentId: string) {
+    if (!groupReady) return;
+    try {
+      await enrollStudentIntoGroupMonth(workspaceId!, gmState.groupMonth, {
+        studentId,
+        joinDate: todayIso(),
+        feeMethod: askFee ? feeMethod : undefined,
+      });
+      invalidateAfterEnrollment(queryClient, workspaceId!, { studentId, groupId: groupId! });
+      toast.success("تم تسجيل الطالب الموجود في المجموعة");
+      setOpen(false);
+      resetForm();
+      router.push(`/students/${studentId}`);
+    } catch {
+      toast.error("تعذّر تسجيل هذا الطالب في المجموعة");
+    }
+  }
+
   async function submit(addAnother: boolean) {
     if (!canSubmit) return;
     setAddAnotherMode(addAnother);
+
+    // Recovery: student already created, only the enroll step failed before.
+    if (pendingEnrollId) {
+      if (!groupReady) {
+        toast.error("المجموعة غير جاهزة للتسجيل الآن.");
+        return;
+      }
+      try {
+        await enrollStudentIntoGroupMonth(workspaceId!, gmState.groupMonth, {
+          studentId: pendingEnrollId,
+          joinDate: todayIso(),
+          feeMethod: askFee ? feeMethod : undefined,
+        });
+      } catch {
+        toast.error("تعذّر تسجيل الطالب في المجموعة، حاول مجددًا");
+        return;
+      }
+      invalidateAfterEnrollment(queryClient, workspaceId!, { studentId: pendingEnrollId, groupId: groupId! });
+      toast.success("تم تسجيل الطالب في المجموعة");
+      finishAfterSuccess(pendingEnrollId, addAnother);
+      return;
+    }
+
     // Duplicate gate: preview once; if candidates surface, require a second press.
     if (!ackDuplicates) {
       const result = await preview.mutateAsync();
@@ -95,16 +162,41 @@ export function CreateStudentDialog() {
         return;
       }
     }
+
     const res = await create.mutateAsync();
-    queryClient.invalidateQueries({ queryKey: qk.students.list(workspaceId!) });
-    toast.success("تم إضافة الطالب");
+    const studentId = res.student.id;
+
+    // Optional enroll step — the student is already saved; never lose them.
+    if (groupReady) {
+      try {
+        await enrollStudentIntoGroupMonth(workspaceId!, gmState.groupMonth, {
+          studentId,
+          joinDate: todayIso(),
+          feeMethod: askFee ? feeMethod : undefined,
+        });
+      } catch {
+        setPendingEnrollId(studentId);
+        queryClient.invalidateQueries({ queryKey: qk.students.list(workspaceId!) });
+        toast.warning("تم حفظ الطالب، لكن تعذّر تسجيله في المجموعة. أعد المحاولة.");
+        return;
+      }
+      invalidateAfterEnrollment(queryClient, workspaceId!, { studentId, groupId: groupId! });
+      toast.success("تمت إضافة الطالب وتسجيله في المجموعة");
+    } else {
+      queryClient.invalidateQueries({ queryKey: qk.students.list(workspaceId!) });
+      toast.success("تم إضافة الطالب");
+    }
+    finishAfterSuccess(studentId, addAnother);
+  }
+
+  function finishAfterSuccess(studentId: string, addAnother: boolean) {
     if (addAnother) {
-      resetForm();
+      resetForm(true); // keep the group so several students go to the same group fast
       nameRef.current?.focus();
     } else {
       setOpen(false);
       resetForm();
-      router.push(`/students/${res.student.id}`);
+      router.push(`/students/${studentId}`);
     }
   }
 
@@ -146,6 +238,7 @@ export function CreateStudentDialog() {
               onChange={(e) => {
                 setName(e.target.value);
                 invalidateDuplicateGate();
+                setPendingEnrollId(null);
               }}
               autoFocus
             />
@@ -192,18 +285,60 @@ export function CreateStudentDialog() {
             </Button>
           </div>
 
+          {/* Enrollment section (§Flow A) */}
+          <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-sunken p-3">
+            <span className="text-xs font-medium text-text-secondary">التسجيل في مجموعة</span>
+            <GroupPicker value={groupId} onChange={(id) => { setGroupId(id); setPendingEnrollId(null); }} />
+            {groupId === null ? (
+              <p className="text-xs text-text-tertiary">يمكنك تسجيل الطالب في مجموعة الآن أو تركه بدون مجموعة وإضافته لاحقًا.</p>
+            ) : gmLoading ? (
+              <p className="text-xs text-text-tertiary">جارٍ التحقق من تجهيز المجموعة…</p>
+            ) : gmState.status === "NOT_PREPARED" ? (
+              <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-subtle p-2 text-xs text-text-secondary">
+                <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+                <span>
+                  هذه المجموعة غير مُضمّنة في الشهر التشغيلي الحالي، فلا يمكن التسجيل فيها بعد.{" "}
+                  <button type="button" className="font-medium text-brand hover:underline" onClick={() => setGroupId(null)}>اختيار مجموعة أخرى</button>
+                  {" "}أو تضمينها من{" "}
+                  <Link href="/months" className="font-medium text-brand hover:underline" onClick={() => setOpen(false)}>الأشهر التشغيلية</Link>.
+                </span>
+              </div>
+            ) : gmState.status === "NO_CURRENT_MONTH" ? (
+              <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-subtle p-2 text-xs text-text-secondary">
+                <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+                <span>لا يوجد شهر تشغيلي حالي. سيُحفظ الطالب بدون تسجيل.</span>
+              </div>
+            ) : askFee ? (
+              <Field label="طريقة احتساب الرسوم" htmlFor="feeMethod-a">
+                <Select value={feeMethod} onValueChange={(v) => setFeeMethod(v as FeeMethod)}>
+                  <SelectTrigger id="feeMethod-a"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="FULL_MONTH">الرسوم الشهرية كاملة</SelectItem>
+                    <SelectItem value="REMAINING_SESSIONS">حسب الحصص المتبقية</SelectItem>
+                    <SelectItem value="CUSTOM">مبلغ مخصص</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            ) : null}
+          </div>
+
           {acted ? (
             <div className="flex flex-col gap-2 rounded-md border border-warning/30 bg-warning-subtle p-3">
               <div className="flex items-center gap-2 text-sm font-medium text-warning">
                 <AlertTriangle className="h-4 w-4" aria-hidden />
                 قد يكون هذا الطالب موجودًا بالفعل
               </div>
-              <ul className="flex flex-col gap-1 text-sm text-text-secondary">
+              <ul className="flex flex-col gap-1.5 text-sm text-text-secondary">
                 {candidates!.map((c) => (
-                  <li key={c.studentId}>
+                  <li key={c.studentId} className="flex items-center justify-between gap-2">
                     <button type="button" className="text-brand hover:underline" onClick={() => { setOpen(false); router.push(`/students/${c.studentId}`); }}>
                       {c.name} — {c.studentCode}
                     </button>
+                    {groupReady ? (
+                      <button type="button" className="shrink-0 text-xs font-medium text-brand hover:underline" onClick={() => void enrollExistingCandidate(c.studentId)}>
+                        سجّل هذا الطالب في المجموعة
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -212,11 +347,17 @@ export function CreateStudentDialog() {
           ) : null}
 
           <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-            <Button type="button" variant="outline" loading={busy && addAnotherMode} disabled={!canSubmit} onClick={() => void submit(true)}>
-              {acted ? "حفظ على أي حال وإضافة آخر" : "حفظ وإضافة آخر"}
-            </Button>
+            {pendingEnrollId ? (
+              <Button type="button" variant="outline" onClick={() => { setOpen(false); resetForm(); router.push(`/students/${pendingEnrollId}`); }}>
+                فتح ملف الطالب
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" loading={busy && addAnotherMode} disabled={!canSubmit} onClick={() => void submit(true)}>
+                {acted ? "حفظ على أي حال وإضافة آخر" : "حفظ وإضافة آخر"}
+              </Button>
+            )}
             <Button type="submit" loading={busy && !addAnotherMode} disabled={!canSubmit}>
-              {acted ? "حفظ على أي حال" : "حفظ"}
+              {pendingEnrollId ? "إعادة محاولة التسجيل" : acted ? "حفظ على أي حال" : groupReady ? "حفظ وتسجيل" : "حفظ"}
             </Button>
           </div>
         </form>

@@ -371,6 +371,90 @@ describe("EnrollmentsService", () => {
     });
   });
 
+  describe("batch enroll (طلاب موجودون)", () => {
+    it("enrolls several existing students in one call and creates an obligation for each", async () => {
+      const gm = seedGroupMonth({ joinFeePolicy: "FULL", baseFeeMinor: 50000 });
+      const s1 = await seedStudent("طالب ١");
+      const s2 = await seedStudent("طالب ٢");
+      const s3 = await seedStudent("طالب ٣");
+
+      const res = await service.batchEnrollStudents(
+        owner,
+        ownerContext,
+        gm.id,
+        { studentIds: [s1.id, s2.id, s3.id], joinDate: "2026-08-15" },
+        null,
+      );
+
+      expect(res.enrolledCount).toBe(3);
+      expect(res.reactivatedCount).toBe(0);
+      expect(res.failedCount).toBe(0);
+      expect(res.results.every((r) => r.outcome === "ENROLLED" && r.enrollmentId)).toBe(true);
+      // One enrollment + one obligation per student.
+      expect(repo.enrollmentsById.size).toBe(3);
+      for (const r of res.results) {
+        const obligation = await repo.findObligationByEnrollmentId(r.enrollmentId!);
+        expect(obligation).toBeDefined();
+        expect(obligation!.netDueMinor).toBe(50000);
+      }
+    });
+
+    it("reports an already-enrolled student as REACTIVATED, not a failure, and never creates a duplicate row", async () => {
+      const gm = seedGroupMonth({ joinFeePolicy: "FULL" });
+      const student = await seedStudent();
+
+      const first = await service.batchEnrollStudents(owner, ownerContext, gm.id, { studentIds: [student.id], joinDate: "2026-08-01" }, null);
+      expect(first.enrolledCount).toBe(1);
+
+      const second = await service.batchEnrollStudents(owner, ownerContext, gm.id, { studentIds: [student.id], joinDate: "2026-08-10" }, null);
+      expect(second.reactivatedCount).toBe(1);
+      expect(second.failedCount).toBe(0);
+      expect(repo.enrollmentsById.size).toBe(1); // same (student, group_month) row reused
+    });
+
+    it("de-duplicates repeated ids so a student can't be processed twice in one call", async () => {
+      const gm = seedGroupMonth({ joinFeePolicy: "FULL" });
+      const student = await seedStudent();
+      const res = await service.batchEnrollStudents(owner, ownerContext, gm.id, { studentIds: [student.id, student.id], joinDate: "2026-08-01" }, null);
+      expect(res.results).toHaveLength(1);
+      expect(res.enrolledCount).toBe(1);
+    });
+
+    it("fails closed — if ANY studentId is invalid, nothing is enrolled (pre-validated before writes)", async () => {
+      const gm = seedGroupMonth({ joinFeePolicy: "FULL" });
+      const valid = await seedStudent();
+      await expect(
+        service.batchEnrollStudents(owner, ownerContext, gm.id, { studentIds: [valid.id, "00000000-0000-0000-0000-000000000000"], joinDate: "2026-08-01" }, null),
+      ).rejects.toBeInstanceOf(ResourceNotFoundException);
+      expect(repo.enrollmentsById.size).toBe(0); // the valid one was NOT enrolled either
+    });
+
+    it("rejects a cross-workspace student id (no leak)", async () => {
+      const gm = seedGroupMonth({ joinFeePolicy: "FULL" });
+      // A student that lives in workspace-b, created there so it genuinely exists.
+      const foreignOwner: VerifiedSupabaseToken = { id: "u-owner-b", email: "b@example.com" };
+      const foreignMembership = teamRepo.seedMembership({ workspaceId: "workspace-b", userId: foreignOwner.id, roleLabel: "OWNER" });
+      const foreignContext: WorkspaceContext = { workspaceId: "workspace-b", membership: foreignMembership };
+      const foreignStudent = await studentsService.createStudent(foreignOwner, foreignContext, { name: "أجنبي" }, null);
+
+      await expect(
+        service.batchEnrollStudents(owner, ownerContext, gm.id, { studentIds: [foreignStudent.student.id], joinDate: "2026-08-01" }, null),
+      ).rejects.toBeInstanceOf(ResourceNotFoundException);
+    });
+
+    it("a caller outside the group's scope is rejected before any enrollment", async () => {
+      const gm = seedGroupMonth({ joinFeePolicy: "FULL" });
+      const student = await seedStudent();
+      const scopedUser: VerifiedSupabaseToken = { id: "u-scoped-batch", email: "scoped-b@example.com" };
+      const scopedMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: scopedUser.id, roleLabel: "ASSISTANT" });
+      const scopedContext: WorkspaceContext = { workspaceId: WORKSPACE_A, membership: scopedMembership };
+      await expect(
+        service.batchEnrollStudents(scopedUser, scopedContext, gm.id, { studentIds: [student.id], joinDate: "2026-08-01" }, null),
+      ).rejects.toBeInstanceOf(ResourceNotFoundException);
+      expect(repo.enrollmentsById.size).toBe(0);
+    });
+  });
+
   describe("cross-workspace / scope safety", () => {
     it("404s (safe no-leak) when the group_month belongs to a different workspace", async () => {
       const foreignGroup = repo.seedGroup({ workspaceId: "workspace-b", name: "Foreign" });

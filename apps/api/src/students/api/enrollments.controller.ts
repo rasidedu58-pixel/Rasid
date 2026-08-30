@@ -12,11 +12,14 @@ import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/pe
 import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
 import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
+  enrollmentBatchRequestSchema,
   enrollmentCreateRequestSchema,
   enrollmentPreviewRequestSchema,
   enrollmentTransferPreviewRequestSchema,
   enrollmentTransferRequestSchema,
   enrollmentWithdrawRequestSchema,
+  type EnrollmentBatchRequest,
+  type EnrollmentBatchResponse,
   type EnrollmentCreateRequest,
   type EnrollmentCreateResponse,
   type EnrollmentPreviewRequest,
@@ -84,6 +87,29 @@ export class EnrollmentsController {
       workspaceContext,
       id,
       parsed.data as EnrollmentCreateRequest,
+      extractHeader(request, REQUEST_ID_HEADER),
+    );
+  }
+
+  @Post("group-months/:id/enrollments/batch")
+  @RequirePermission("students.edit")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
+  @ApiOperation({ summary: "Bulk-enroll existing students into a GroupMonth (POST /api/v1/group-months/:id/enrollments/batch)" })
+  batchEnroll(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<EnrollmentBatchResponse> {
+    const parsed = enrollmentBatchRequestSchema.safeParse(body);
+    if (!parsed.success) throw new ValidationApiException(toFieldErrors(parsed.error));
+    return this.enrollmentsService.batchEnrollStudents(
+      user,
+      workspaceContext,
+      id,
+      parsed.data as EnrollmentBatchRequest,
       extractHeader(request, REQUEST_ID_HEADER),
     );
   }
