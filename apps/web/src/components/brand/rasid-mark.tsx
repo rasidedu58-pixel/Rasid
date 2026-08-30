@@ -1,3 +1,6 @@
+"use client";
+
+import { useId } from "react";
 import { cn } from "@academic-precision/ui";
 import {
   RASID_VIEWBOX,
@@ -18,10 +21,13 @@ import {
 
 /**
  * RasidMark — the one brand mark for the whole product. Pure SVG, geometry from
- * `rasid-geometry.ts` (identical to the splash animation's final frame). No
- * hooks, so it renders in Server Components too; gradient ids are stable and
- * self-consistent, and because every instance's gradients are byte-identical,
- * sharing ids across instances renders correctly.
+ * `rasid-geometry.ts` (identical to the splash animation's final frame). Each
+ * instance gets `useId`-scoped gradient ids: `url(#…)` is document-scoped, so
+ * two instances sharing a static id would both resolve to the FIRST match — and
+ * when that first copy sits in a `display:none` subtree (e.g. the mobile mark on
+ * an auth page), its gradients aren't painted and the OTHER instances render
+ * invisible. Unique per-instance ids remove that collision entirely. (`useId`
+ * makes this a Client Component; it still renders fine inside Server Components.)
  *
  *   variant  "icon" (mark only) | "lockup" (mark + "راصد")
  *   size     rendered px (default 28); below COMPACT_THRESHOLD it auto-switches
@@ -54,6 +60,16 @@ export function RasidMark({
   const useCompact = compact ?? size < COMPACT_THRESHOLD;
   const labelled = Boolean(title);
 
+  // Per-instance gradient ids (sanitized — useId can contain ':'), so multiple
+  // marks on one page never collide on `url(#…)` references.
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const id = {
+    ring: `rasidRing-${uid}`,
+    accent: `rasidAccent-${uid}`,
+    center: `rasidCenter-${uid}`,
+    arrow: `rasidArrow-${uid}`,
+  };
+
   const svg = (
     <svg
       width={size}
@@ -68,21 +84,21 @@ export function RasidMark({
     >
       {!mono ? (
         <defs>
-          <linearGradient id="rasidRingG" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+          <linearGradient id={id.ring} x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
             <stop offset="0" stopColor="#3B82F6" />
             <stop offset="0.55" stopColor="#0EA5E9" />
             <stop offset="1" stopColor="#14B8A6" />
           </linearGradient>
-          <linearGradient id="rasidAccentG" x1="18" y1="14" x2="50" y2="50" gradientUnits="userSpaceOnUse">
+          <linearGradient id={id.accent} x1="18" y1="14" x2="50" y2="50" gradientUnits="userSpaceOnUse">
             <stop offset="0" stopColor="#22D3EE" />
             <stop offset="1" stopColor="#38BDF8" />
           </linearGradient>
-          <radialGradient id="rasidCenterG" cx="0.42" cy="0.4" r="0.72">
+          <radialGradient id={id.center} cx="0.42" cy="0.4" r="0.72">
             <stop offset="0" stopColor="#67E8F9" />
             <stop offset="0.6" stopColor="#22D3EE" />
             <stop offset="1" stopColor="#0EA5E9" />
           </radialGradient>
-          <linearGradient id="rasidArrowG" x1="30" y1="30" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+          <linearGradient id={id.arrow} x1="30" y1="30" x2="52" y2="52" gradientUnits="userSpaceOnUse">
             <stop offset="0" stopColor="#67E8F9" />
             <stop offset="1" stopColor="#2563EB" />
           </linearGradient>
@@ -90,10 +106,10 @@ export function RasidMark({
       ) : null}
 
       {(() => {
-        const ring = mono ? "currentColor" : "url(#rasidRingG)";
-        const accent = mono ? "currentColor" : "url(#rasidAccentG)";
-        const center = mono ? "currentColor" : "url(#rasidCenterG)";
-        const arrow = mono ? "currentColor" : "url(#rasidArrowG)";
+        const ring = mono ? "currentColor" : `url(#${id.ring})`;
+        const accent = mono ? "currentColor" : `url(#${id.accent})`;
+        const center = mono ? "currentColor" : `url(#${id.center})`;
+        const arrow = mono ? "currentColor" : `url(#${id.arrow})`;
         if (useCompact) {
           return (
             <>
