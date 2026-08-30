@@ -21,6 +21,8 @@ export interface IdentityRepositoryPort {
   /** Phase 15C — GET /me steady-state fast path: user + all memberships in one transaction. `undefined` = not yet provisioned. */
   loadUserWithMemberships(userId: string): Promise<UserWithMemberships | undefined>;
   listMemberships(userId: string): Promise<MembershipWithWorkspace[]>;
+  /** Is this user a Rasid platform-staff member (row in `platform_admins`)? Read-only signal for the `/me` `platform.isStaff` flag. */
+  isPlatformStaff(userId: string): Promise<boolean>;
   findMembership(workspaceId: string, userId: string): Promise<MembershipWithWorkspace | undefined>;
   completeOnboarding(input: OnboardingCompleteInput): Promise<WorkspaceRow>;
   /** Phase 8 — the workspace's current commercial state, for `GET /me/workspaces/:id/context`'s `subscriptionState` field. */

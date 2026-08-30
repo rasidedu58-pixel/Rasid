@@ -27,7 +27,7 @@ export function Sidebar() {
   const bodySections = NAV_SECTION_ORDER.filter((s) => s !== "account");
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col bg-shell md:flex">
+    <aside className="sticky top-0 hidden h-[100dvh] w-64 shrink-0 flex-col self-start bg-shell md:flex">
       {/* Brand + workspace context */}
       <div className="flex flex-col gap-3 px-4 pb-4 pt-5">
         <BrandMark tone="onDark" size="md" />

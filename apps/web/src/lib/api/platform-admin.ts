@@ -2,9 +2,12 @@ import type {
   ListPlatformAdminSubscriptionsResponse,
   ListPlatformAdminUsersResponse,
   ListPlatformAdminWorkspacesResponse,
+  PlatformActivityResponse,
   PlatformAdminDashboardResponse,
   PlatformAdminUserDetail,
   PlatformAdminWorkspaceDetail,
+  PlatformNeedsAttentionResponse,
+  PlatformOperationalSnapshot,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -28,7 +31,7 @@ export function fetchPlatformAdminUser(userId: string): Promise<PlatformAdminUse
   return apiRequest<PlatformAdminUserDetail>(`/platform-admin/users/${userId}`);
 }
 
-export function fetchPlatformAdminWorkspaces(params: { search?: string; cursor?: string; limit?: number } = {}): Promise<ListPlatformAdminWorkspacesResponse> {
+export function fetchPlatformAdminWorkspaces(params: { search?: string; state?: string; cursor?: string; limit?: number } = {}): Promise<ListPlatformAdminWorkspacesResponse> {
   return apiRequest<ListPlatformAdminWorkspacesResponse>("/platform-admin/workspaces", { query: params });
 }
 
@@ -38,4 +41,16 @@ export function fetchPlatformAdminWorkspace(workspaceId: string): Promise<Platfo
 
 export function fetchPlatformAdminSubscriptions(params: { state?: string; cursor?: string; limit?: number } = {}): Promise<ListPlatformAdminSubscriptionsResponse> {
   return apiRequest<ListPlatformAdminSubscriptionsResponse>("/platform-admin/subscriptions", { query: params });
+}
+
+export function fetchPlatformNeedsAttention(): Promise<PlatformNeedsAttentionResponse> {
+  return apiRequest<PlatformNeedsAttentionResponse>("/platform-admin/needs-attention");
+}
+
+export function fetchPlatformActivity(): Promise<PlatformActivityResponse> {
+  return apiRequest<PlatformActivityResponse>("/platform-admin/activity");
+}
+
+export function fetchPlatformWorkspaceOperational(workspaceId: string): Promise<PlatformOperationalSnapshot> {
+  return apiRequest<PlatformOperationalSnapshot>(`/platform-admin/workspaces/${workspaceId}/operational`);
 }

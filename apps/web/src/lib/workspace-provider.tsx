@@ -56,6 +56,8 @@ interface WorkspaceContextValue {
   entitlements: ReadonlySet<string>;
   subscriptionState: string | null;
   isOwner: boolean;
+  /** True if the signed-in user is Rasid platform staff (from `/me`). Gates the "إدارة راصد" entry; NOT an authorization boundary. */
+  isPlatformStaff: boolean;
   hasPermission: (key: PermissionKey) => boolean;
   canWrite: (capability?: CapabilityDto) => boolean;
   refetch: () => void;
@@ -143,6 +145,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         entitlements: new Set(),
         subscriptionState: null,
         isOwner: false,
+        isPlatformStaff: false,
         hasPermission: () => false,
         canWrite: () => false,
         refetch: () => {
@@ -164,6 +167,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         entitlements: new Set(),
         subscriptionState: null,
         isOwner: false,
+        isPlatformStaff: meQuery.data?.platform?.isStaff ?? false,
         hasPermission: () => false,
         canWrite: () => false,
         refetch: () => void meQuery.refetch(),
@@ -186,6 +190,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       entitlements,
       subscriptionState,
       isOwner: roleLabel === "OWNER",
+      isPlatformStaff: meQuery.data?.platform?.isStaff ?? false,
       hasPermission: (key) => permissions.has(key),
       // No capability arg => "is the workspace writable at all right now".
       // WRITE_BLOCKING_STATES mirrors the backend's own entitlement matrix

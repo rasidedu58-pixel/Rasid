@@ -49,7 +49,7 @@ export default function PlatformAdminUsersPage() {
 
       <div className="relative mb-4 max-w-sm">
         <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث بالاسم أو البريد الإلكتروني..." className="ps-9" />
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث بالاسم أو البريد أو الهاتف..." className="ps-9" />
       </div>
 
       {query.isLoading ? (

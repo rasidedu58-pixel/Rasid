@@ -134,6 +134,15 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
     return [...primary, ...(this.extraMembershipsByUserId.get(userId) ?? [])];
   }
 
+  private readonly platformStaff = new Set<string>();
+  /** Test helper: mark a user as platform staff. */
+  seedPlatformStaff(userId: string): void {
+    this.platformStaff.add(userId);
+  }
+  async isPlatformStaff(userId: string): Promise<boolean> {
+    return this.platformStaff.has(userId);
+  }
+
   /**
    * Phase 15C — the single-transaction combined read. Mirrors the real
    * repository: returns the user + ALL their memberships, or undefined when

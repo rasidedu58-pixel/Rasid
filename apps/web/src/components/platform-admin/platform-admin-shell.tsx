@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, Users, Building2, CreditCard } from "lucide-react";
 import { cn } from "@academic-precision/ui";
-import { RasidMark } from "../brand/rasid-mark";
+import { RasidWordmark } from "../brand/rasid-wordmark";
 
 const NAV_ITEMS = [
   { href: "/platform-admin", label: "لوحة التحكم", icon: LayoutDashboard },
@@ -25,13 +25,10 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="hidden w-60 shrink-0 flex-col gap-1 bg-shell p-4 md:flex">
-        <div className="mb-6 flex items-center gap-2.5 px-2">
-          <RasidMark size={30} />
-          <div className="flex flex-col">
-            <span className="text-base font-bold leading-tight text-white">راصد</span>
-            <span className="text-xs text-shell-text-muted">Platform Admin</span>
-          </div>
+      <aside className="sticky top-0 hidden h-[100dvh] w-60 shrink-0 flex-col gap-1 self-start overflow-y-auto bg-shell p-4 md:flex">
+        <div className="mb-6 flex flex-col gap-1.5 px-2">
+          <RasidWordmark variant="default" tone="onDark" />
+          <span className="ps-[42px] text-xs text-shell-text-muted">Platform Admin</span>
         </div>
         {NAV_ITEMS.map((item) => {
           const active = pathname === item.href || (item.href !== "/platform-admin" && pathname?.startsWith(item.href));
@@ -60,8 +57,8 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
         {/* Mobile: a simple top bar instead of the sidebar — critical lookups only, per §L. */}
         <div className="flex items-center justify-between border-b border-shell-border bg-shell px-4 py-3 text-white md:hidden">
           <span className="flex items-center gap-2 text-sm font-bold">
-            <RasidMark size={22} />
-            راصد — Platform Admin
+            <RasidWordmark variant="compact" tone="onDark" />
+            <span className="text-shell-text-muted">— Platform Admin</span>
           </span>
         </div>
         <main className="mx-auto max-w-6xl p-4 sm:p-6">{children}</main>

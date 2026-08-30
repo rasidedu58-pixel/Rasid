@@ -5,6 +5,7 @@ import {
   createUserWorkspaceMembership,
   findMembership,
   findSubscriptionByWorkspaceId,
+  isPlatformAdmin,
   listAllowedEntitlementsForWorkspace,
   listMembershipsForUser,
   loadProvisionedIdentity,
@@ -88,6 +89,15 @@ export class DrizzleIdentityRepository implements IdentityRepositoryPort {
    */
   loadUserWithMemberships(userId: string): Promise<UserWithMemberships | undefined> {
     return withRuntimeContext({ userId }, (db) => loadUserWithMemberships(db, userId));
+  }
+
+  /**
+   * Cheap self-check on the `platform_admins` allowlist (SELECT-granted to
+   * app_runtime, no RLS) — the same function PlatformAdminGuard uses. Read-only
+   * signal for `/me`'s `platform.isStaff`; it is NOT an authorization boundary.
+   */
+  isPlatformStaff(userId: string): Promise<boolean> {
+    return isPlatformAdmin(userId);
   }
 
   /**

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, LogOut, Menu, User } from "lucide-react";
+import { Bell, LogOut, Menu, Shield, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -23,7 +23,7 @@ import { SubscriptionStatusBadge } from "../billing/subscription-status-badge";
 import { ThemeToggle } from "../theme-toggle";
 
 export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
-  const { workspaceId, workspaceName, subscriptionState } = useWorkspace();
+  const { workspaceId, workspaceName, subscriptionState, isPlatformStaff } = useWorkspace();
 
   const notificationsQuery = useQuery({
     queryKey: workspaceId ? qk.notifications.list(workspaceId) : ["notifications", "none"],
@@ -79,6 +79,14 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
                 الحساب والإعدادات
               </Link>
             </DropdownMenuItem>
+            {isPlatformStaff ? (
+              <DropdownMenuItem asChild>
+                <Link href="/platform-admin">
+                  <Shield className="h-4 w-4" aria-hidden />
+                  إدارة راصد
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={handleSignOut}>
               <LogOut className="h-4 w-4" aria-hidden />

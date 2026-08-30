@@ -25,23 +25,26 @@ import { PageHeader } from "../../../components/shell/page-header";
 import { useDebounce } from "../../../hooks/use-debounce";
 import { fetchPlatformAdminWorkspaces } from "../../../lib/api/platform-admin";
 import { isForbidden } from "../../../lib/api/client";
+import { SUB_STATE_LABEL, subStateTone } from "../../../lib/platform-labels";
 
-const STATE_LABEL: Record<string, string> = {
-  TRIAL: "تجربة",
-  ACTIVE: "نشط",
-  EXPIRING: "قارب على الانتهاء",
-  EXPIRED: "منتهٍ",
-  PAYMENT_FAILED: "فشل الدفع",
-  CANCELLED_AT_PERIOD_END: "سيُلغى نهاية الفترة",
-};
+const STATE_FILTERS: Array<{ value: string | null; label: string }> = [
+  { value: null, label: "الكل" },
+  { value: "TRIAL", label: "تجربة" },
+  { value: "ACTIVE", label: "نشط" },
+  { value: "EXPIRED", label: "منتهٍ" },
+  { value: "PAYMENT_FAILED", label: "فشل الدفع" },
+  { value: "CANCELLED_AT_PERIOD_END", label: "سيُلغى" },
+];
 
 export default function PlatformAdminWorkspacesPage() {
   const [search, setSearch] = useState("");
+  const [state, setState] = useState<string | null>(null);
   const debouncedSearch = useDebounce(search, 300);
 
   const query = useInfiniteQuery({
-    queryKey: ["platform-admin", "workspaces", debouncedSearch],
-    queryFn: ({ pageParam }: { pageParam?: string }) => fetchPlatformAdminWorkspaces({ search: debouncedSearch || undefined, cursor: pageParam, limit: 30 }),
+    queryKey: ["platform-admin", "workspaces", debouncedSearch, state],
+    queryFn: ({ pageParam }: { pageParam?: string }) =>
+      fetchPlatformAdminWorkspaces({ search: debouncedSearch || undefined, state: state ?? undefined, cursor: pageParam, limit: 30 }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
     retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
@@ -56,9 +59,30 @@ export default function PlatformAdminWorkspacesPage() {
     <>
       <PageHeader title="مساحات العمل" description="كل مساحات العمل عبر المنصة." />
 
-      <div className="relative mb-4 max-w-sm">
-        <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث باسم مساحة العمل..." className="ps-9" />
+      <div className="mb-4 flex flex-col gap-3">
+        <div className="relative max-w-sm">
+          <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث باسم مساحة العمل..." className="ps-9" />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {STATE_FILTERS.map((f) => {
+            const active = state === f.value;
+            return (
+              <button
+                key={f.label}
+                type="button"
+                onClick={() => setState(f.value)}
+                className={
+                  active
+                    ? "rounded-full bg-brand px-3 py-1 text-xs font-medium text-brand-foreground"
+                    : "rounded-full border border-border px-3 py-1 text-xs font-medium text-text-secondary hover:bg-surface-sunken"
+                }
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {query.isLoading ? (
@@ -90,7 +114,11 @@ export default function PlatformAdminWorkspacesPage() {
                     </TableCell>
                     <TableCell className="text-text-secondary">{w.ownerName ?? "—"}</TableCell>
                     <TableCell>
-                      <Badge tone="neutral">{w.subscriptionState ? (STATE_LABEL[w.subscriptionState] ?? w.subscriptionState) : "—"}</Badge>
+                      {w.subscriptionState ? (
+                        <Badge tone={subStateTone(w.subscriptionState)}>{SUB_STATE_LABEL[w.subscriptionState] ?? w.subscriptionState}</Badge>
+                      ) : (
+                        <span className="text-text-tertiary">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge tone={w.status === "ACTIVE" ? "success" : "neutral"}>{w.status === "ACTIVE" ? "نشطة" : "مؤرشفة"}</Badge>

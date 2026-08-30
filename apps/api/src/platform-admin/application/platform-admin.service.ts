@@ -3,18 +3,41 @@ import type {
   ListPlatformAdminSubscriptionsResponse,
   ListPlatformAdminUsersResponse,
   ListPlatformAdminWorkspacesResponse,
+  PlatformActivityResponse,
   PlatformAdminDashboardResponse,
   PlatformAdminUserDetail,
   PlatformAdminWorkspaceDetail,
+  PlatformNeedsAttentionResponse,
+  PlatformOperationalSnapshot,
 } from "@academic-precision/contracts";
 import {
   getDashboardStats,
+  getNeedsAttention,
+  getPlatformActivity,
   getUserDetail,
   getWorkspaceDetail,
+  getWorkspaceOperationalSnapshot,
   listSubscriptions,
   listUsers,
   listWorkspaces,
+  type PlatformAttentionRow,
 } from "@academic-precision/database";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+function daysLeft(periodEnd: Date | null): number | null {
+  if (!periodEnd) return null;
+  return Math.ceil((periodEnd.getTime() - Date.now()) / DAY_MS);
+}
+function toAttentionItem(r: PlatformAttentionRow) {
+  return {
+    workspaceId: r.workspaceId,
+    workspaceName: r.workspaceName,
+    ownerName: r.ownerName,
+    state: r.state,
+    periodEnd: r.periodEnd ? r.periodEnd.toISOString() : null,
+    daysLeft: daysLeft(r.periodEnd),
+  };
+}
 import { ResourceNotFoundException } from "../../common/exceptions/api.exception";
 
 /**
@@ -72,7 +95,7 @@ export class PlatformAdminService {
     };
   }
 
-  async listWorkspaces(params: { search?: string; cursor?: string; limit?: number }): Promise<ListPlatformAdminWorkspacesResponse> {
+  async listWorkspaces(params: { search?: string; state?: string; cursor?: string; limit?: number }): Promise<ListPlatformAdminWorkspacesResponse> {
     const result = await listWorkspaces(params);
     return {
       items: result.items.map((w) => ({
@@ -116,6 +139,43 @@ export class PlatformAdminService {
           }
         : null,
       entitlements: detail.entitlements,
+    };
+  }
+
+  async getNeedsAttention(): Promise<PlatformNeedsAttentionResponse> {
+    const data = await getNeedsAttention();
+    return {
+      trialsExpiringSoon: data.trialsExpiringSoon.map(toAttentionItem),
+      expired: data.expired.map(toAttentionItem),
+      paymentFailed: data.paymentFailed.map(toAttentionItem),
+    };
+  }
+
+  async getActivity(): Promise<PlatformActivityResponse> {
+    const data = await getPlatformActivity();
+    return {
+      available: data.available,
+      items: data.items.map((i) => ({
+        kind: i.kind,
+        at: i.at.toISOString(),
+        workspaceId: i.workspaceId,
+        workspaceName: i.workspaceName,
+        label: i.label,
+        detail: i.detail,
+      })),
+    };
+  }
+
+  async getOperationalSnapshot(workspaceId: string): Promise<PlatformOperationalSnapshot> {
+    const snap = await getWorkspaceOperationalSnapshot(workspaceId);
+    return {
+      available: snap.available,
+      currentMonth: snap.currentMonth,
+      groupsCount: snap.groupsCount,
+      studentsCount: snap.studentsCount,
+      activeEnrollmentsCount: snap.activeEnrollmentsCount,
+      sessionsThisMonth: snap.sessionsThisMonth,
+      lastActivityAt: snap.lastActivityAt ? snap.lastActivityAt.toISOString() : null,
     };
   }
 

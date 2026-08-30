@@ -6,6 +6,16 @@ const fetchDashboardMock = vi.fn();
 
 vi.mock("../lib/api/platform-admin", () => ({
   fetchPlatformAdminDashboard: () => fetchDashboardMock(),
+  // The command center also loads these; default them so only the dashboard
+  // query drives the auth gate under test.
+  fetchPlatformNeedsAttention: () => Promise.resolve({ trialsExpiringSoon: [], expired: [], paymentFailed: [] }),
+  fetchPlatformActivity: () => Promise.resolve({ items: [], available: true }),
+  fetchPlatformAdminWorkspaces: () => Promise.resolve({ items: [], page: { hasNext: false, nextCursor: null } }),
+  fetchPlatformAdminUsers: () => Promise.resolve({ items: [], page: { hasNext: false, nextCursor: null } }),
+}));
+
+vi.mock("../lib/api/health", () => ({
+  fetchApiHealth: () => Promise.resolve({ api: "up", database: "up" }),
 }));
 
 afterEach(() => {
@@ -52,7 +62,7 @@ describe("Platform Admin — non-admin rejection (frontend)", () => {
 
     await renderDashboard();
 
-    expect(await screen.findByText("لوحة التحكم")).toBeTruthy();
+    expect(await screen.findByText("مركز تشغيل راصد")).toBeTruthy();
     expect(screen.getByText("12")).toBeTruthy();
     expect(screen.getByText("8")).toBeTruthy();
   });

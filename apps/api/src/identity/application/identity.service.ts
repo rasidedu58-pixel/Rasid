@@ -56,18 +56,21 @@ export class IdentityService {
     // only after SupabaseAuthGuard has verified the token).
     const loaded = await this.repository.loadUserWithMemberships(authUser.id);
     if (loaded) {
-      return this.toMeResponse(loaded.user.id, loaded.user.fullName, loaded.memberships);
+      const isStaff = await this.repository.isPlatformStaff(loaded.user.id);
+      return this.toMeResponse(loaded.user.id, loaded.user.fullName, loaded.memberships, isStaff);
     }
 
     const provisioned = await this.ensureProvisioned(authUser);
     const memberships = await this.repository.listMemberships(provisioned.user.id);
-    return this.toMeResponse(provisioned.user.id, provisioned.user.fullName, memberships);
+    const isStaff = await this.repository.isPlatformStaff(provisioned.user.id);
+    return this.toMeResponse(provisioned.user.id, provisioned.user.fullName, memberships, isStaff);
   }
 
   private toMeResponse(
     userId: string,
     fullName: string,
     memberships: MembershipWithWorkspace[],
+    isPlatformStaff: boolean,
   ): MeResponse {
     return {
       user: { id: userId, fullName },
@@ -77,6 +80,7 @@ export class IdentityService {
         roleLabel: membership.roleLabel,
         status: membership.status as "INVITED" | "ACTIVE" | "DISABLED",
       })),
+      platform: { isStaff: isPlatformStaff },
     };
   }
 

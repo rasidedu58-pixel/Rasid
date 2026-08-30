@@ -14,13 +14,19 @@
  *   only reachable after `isPlatformAdmin` has already confirmed
  *   authorization.
  */
-import { and, desc, eq, gte, ilike, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb, getPlatformAdminDb } from "../connection";
 import { users } from "../schema/identity";
 import { workspaces } from "../schema/workspaces";
 import { memberships } from "../schema/permissions";
 import { subscriptions, entitlements } from "../schema/subscriptions";
 import { platformAdmins, platformAuditEvents } from "../schema/platform-admin";
+import { groups, groupMonths } from "../schema/groups";
+import { students } from "../schema/students";
+import { operatingMonths } from "../schema/months";
+import { sessions } from "../schema/sessions";
+import { enrollments } from "../schema/enrollments";
+import { auditEvents } from "../schema/audit";
 
 export async function isPlatformAdmin(userId: string): Promise<boolean> {
   const rows = await getDb().select({ id: platformAdmins.id }).from(platformAdmins).where(eq(platformAdmins.userId, userId)).limit(1);
@@ -56,7 +62,13 @@ export async function listUsers(params: ListUsersParams) {
   const decoded = decodeCursor(params.cursor);
 
   const conditions = [
-    params.search ? or(ilike(users.fullName, `%${params.search}%`), ilike(users.emailDisplay, `%${params.search}%`)) : undefined,
+    params.search
+      ? or(
+          ilike(users.fullName, `%${params.search}%`),
+          ilike(users.emailDisplay, `%${params.search}%`),
+          ilike(users.phone, `%${params.search}%`),
+        )
+      : undefined,
     decoded ? or(lt(users.createdAt, decoded.createdAt), and(eq(users.createdAt, decoded.createdAt), lt(users.id, decoded.id))) : undefined,
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
 
@@ -108,6 +120,7 @@ export async function getUserDetail(userId: string) {
 
 export interface ListWorkspacesParams {
   search?: string;
+  state?: string;
   cursor?: string;
   limit?: number;
 }
@@ -120,6 +133,7 @@ export async function listWorkspaces(params: ListWorkspacesParams) {
 
   const conditions = [
     params.search ? ilike(workspaces.name, `%${params.search}%`) : undefined,
+    params.state ? eq(subscriptions.state, params.state) : undefined,
     decoded ? or(lt(workspaces.createdAt, decoded.createdAt), and(eq(workspaces.createdAt, decoded.createdAt), lt(workspaces.id, decoded.id))) : undefined,
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
 
@@ -261,6 +275,205 @@ export async function getDashboardStats() {
     recentSignups: recentSignupRows,
     expiringWithin7Days: expiringRows[0]?.expiringWithin7Days ?? 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Phase C — read-only operational snapshot / needs-attention / activity.
+// The operational reads degrade gracefully: until 0055 grants app_platform_admin
+// SELECT on the operational tables, those queries raise "permission denied" and
+// we return `available:false` rather than 500 — the console still shows
+// identity/subscription, and the operational panel lights up once 0055 is applied.
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceOperationalSnapshot {
+  available: boolean;
+  currentMonth: { id: string; year: number; month: number; status: string } | null;
+  groupsCount: number | null;
+  studentsCount: number | null;
+  activeEnrollmentsCount: number | null;
+  sessionsThisMonth: { total: number; completed: number } | null;
+  lastActivityAt: Date | null;
+}
+
+export async function getWorkspaceOperationalSnapshot(workspaceId: string): Promise<WorkspaceOperationalSnapshot> {
+  const db = getPlatformAdminDb();
+  const unavailable: WorkspaceOperationalSnapshot = {
+    available: false,
+    currentMonth: null,
+    groupsCount: null,
+    studentsCount: null,
+    activeEnrollmentsCount: null,
+    sessionsThisMonth: null,
+    lastActivityAt: null,
+  };
+  try {
+    const [current] = await db
+      .select({ id: operatingMonths.id, year: operatingMonths.year, month: operatingMonths.month, status: operatingMonths.status })
+      .from(operatingMonths)
+      .where(and(eq(operatingMonths.workspaceId, workspaceId), eq(operatingMonths.status, "CURRENT")))
+      .limit(1);
+
+    const [groupsRow] = await db
+      .select({ c: sql<number>`count(*)`.mapWith(Number) })
+      .from(groups)
+      .where(and(eq(groups.workspaceId, workspaceId), eq(groups.status, "ACTIVE")));
+    const [studentsRow] = await db
+      .select({ c: sql<number>`count(*)`.mapWith(Number) })
+      .from(students)
+      .where(and(eq(students.workspaceId, workspaceId), eq(students.status, "ACTIVE")));
+    const [enrollRow] = await db
+      .select({ c: sql<number>`count(*)`.mapWith(Number) })
+      .from(enrollments)
+      .where(and(eq(enrollments.workspaceId, workspaceId), eq(enrollments.status, "ACTIVE")));
+
+    let sessionsThisMonth: { total: number; completed: number } | null = null;
+    if (current) {
+      const [sessRow] = await db
+        .select({
+          total: sql<number>`count(*)`.mapWith(Number),
+          completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')`.mapWith(Number),
+        })
+        .from(sessions)
+        .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
+        .where(and(eq(groupMonths.workspaceId, workspaceId), eq(groupMonths.operatingMonthId, current.id)));
+      sessionsThisMonth = { total: sessRow?.total ?? 0, completed: sessRow?.completed ?? 0 };
+    }
+
+    const [activityRow] = await db
+      .select({ last: sql<Date | null>`max(${auditEvents.createdAt})` })
+      .from(auditEvents)
+      .where(eq(auditEvents.workspaceId, workspaceId));
+
+    return {
+      available: true,
+      currentMonth: current ?? null,
+      groupsCount: groupsRow?.c ?? 0,
+      studentsCount: studentsRow?.c ?? 0,
+      activeEnrollmentsCount: enrollRow?.c ?? 0,
+      sessionsThisMonth,
+      lastActivityAt: activityRow?.last ?? null,
+    };
+  } catch {
+    // Permission denied (0055 not yet applied) — degrade, never 500.
+    return unavailable;
+  }
+}
+
+export interface PlatformAttentionRow {
+  workspaceId: string;
+  workspaceName: string;
+  ownerName: string | null;
+  state: string;
+  periodEnd: Date | null;
+}
+
+async function listSubscriptionsByStates(states: string[], order: "asc" | "desc", limit: number): Promise<PlatformAttentionRow[]> {
+  const db = getPlatformAdminDb();
+  return db
+    .select({
+      workspaceId: subscriptions.workspaceId,
+      workspaceName: workspaces.name,
+      ownerName: users.fullName,
+      state: subscriptions.state,
+      periodEnd: subscriptions.periodEnd,
+    })
+    .from(subscriptions)
+    .innerJoin(workspaces, eq(workspaces.id, subscriptions.workspaceId))
+    .leftJoin(users, eq(users.id, workspaces.ownerUserId))
+    .where(inArray(subscriptions.state, states))
+    .orderBy(order === "asc" ? asc(subscriptions.periodEnd) : desc(subscriptions.periodEnd))
+    .limit(limit);
+}
+
+export async function getNeedsAttention(): Promise<{ trialsExpiringSoon: PlatformAttentionRow[]; expired: PlatformAttentionRow[]; paymentFailed: PlatformAttentionRow[] }> {
+  const db = getPlatformAdminDb();
+  const now = new Date();
+  const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const [trialsExpiringSoon, expired, paymentFailed] = await Promise.all([
+    db
+      .select({
+        workspaceId: subscriptions.workspaceId,
+        workspaceName: workspaces.name,
+        ownerName: users.fullName,
+        state: subscriptions.state,
+        periodEnd: subscriptions.periodEnd,
+      })
+      .from(subscriptions)
+      .innerJoin(workspaces, eq(workspaces.id, subscriptions.workspaceId))
+      .leftJoin(users, eq(users.id, workspaces.ownerUserId))
+      .where(
+        and(
+          inArray(subscriptions.state, ["TRIAL", "CANCELLED_AT_PERIOD_END"]),
+          gte(subscriptions.periodEnd, now),
+          lt(subscriptions.periodEnd, in7),
+        ),
+      )
+      .orderBy(asc(subscriptions.periodEnd))
+      .limit(20),
+    listSubscriptionsByStates(["EXPIRED"], "desc", 20),
+    listSubscriptionsByStates(["PAYMENT_FAILED"], "desc", 20),
+  ]);
+  return { trialsExpiringSoon, expired, paymentFailed };
+}
+
+export interface PlatformActivityRow {
+  kind: "workspace.created" | "subscription.state_changed";
+  at: Date;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  label: string;
+  detail: string | null;
+}
+
+export async function getPlatformActivity(): Promise<{ items: PlatformActivityRow[]; available: boolean }> {
+  const db = getPlatformAdminDb();
+  // Signups are always readable (workspaces granted since 0048).
+  const signups = await db
+    .select({ id: workspaces.id, name: workspaces.name, createdAt: workspaces.createdAt })
+    .from(workspaces)
+    .orderBy(desc(workspaces.createdAt))
+    .limit(20);
+  const items: PlatformActivityRow[] = signups.map((w) => ({
+    kind: "workspace.created" as const,
+    at: w.createdAt,
+    workspaceId: w.id,
+    workspaceName: w.name,
+    label: "مساحة عمل جديدة",
+    detail: null,
+  }));
+
+  let available = true;
+  try {
+    // Subscription state changes come from tenant audit_events (needs 0055).
+    const changes = await db
+      .select({
+        at: auditEvents.createdAt,
+        workspaceId: auditEvents.workspaceId,
+        workspaceName: workspaces.name,
+        afterJson: auditEvents.afterJson,
+      })
+      .from(auditEvents)
+      .leftJoin(workspaces, eq(workspaces.id, auditEvents.workspaceId))
+      .where(eq(auditEvents.action, "subscription.state_changed"))
+      .orderBy(desc(auditEvents.createdAt))
+      .limit(20);
+    for (const c of changes) {
+      const nextState = (c.afterJson as { state?: string } | null)?.state ?? null;
+      items.push({
+        kind: "subscription.state_changed",
+        at: c.at,
+        workspaceId: c.workspaceId,
+        workspaceName: c.workspaceName ?? null,
+        label: "تغيّر حالة الاشتراك",
+        detail: nextState,
+      });
+    }
+  } catch {
+    available = false; // audit_events not yet granted (0055 pending)
+  }
+
+  items.sort((a, b) => b.at.getTime() - a.at.getTime());
+  return { items: items.slice(0, 30), available };
 }
 
 export interface InsertPlatformAuditEventInput {

@@ -19,6 +19,10 @@ export const meResponseSchema = z.object({
       status: z.enum(["INVITED", "ACTIVE", "DISABLED"]),
     }),
   ),
+  // Platform (company-internal) staff status — lets the app conditionally show
+  // an "إدارة راصد" entry. Read-only signal; the real authorization boundary is
+  // still the server-side PlatformAdminGuard on every /platform-admin call.
+  platform: z.object({ isStaff: z.boolean() }),
 });
 
 export type MeResponse = z.infer<typeof meResponseSchema>;

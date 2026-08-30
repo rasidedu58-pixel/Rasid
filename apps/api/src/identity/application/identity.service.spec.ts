@@ -19,6 +19,20 @@ describe("IdentityService", () => {
     service = new IdentityService(repository, new PermissionResolverService(teamRepository));
   });
 
+  describe("platform staff flag on /me", () => {
+    it("reports platform.isStaff=false for an ordinary teacher", async () => {
+      const me = await service.getMe(AUTH_USER);
+      expect(me.platform.isStaff).toBe(false);
+    });
+
+    it("reports platform.isStaff=true once the user is on the platform_admins allowlist", async () => {
+      const first = await service.getMe(AUTH_USER); // provisions the user
+      repository.seedPlatformStaff(first.user.id);
+      const me = await service.getMe(AUTH_USER);
+      expect(me.platform.isStaff).toBe(true);
+    });
+  });
+
   describe("idempotent provisioning", () => {
     it("creates exactly one user/workspace/owner-membership across repeated calls", async () => {
       const first = await service.getMe(AUTH_USER);

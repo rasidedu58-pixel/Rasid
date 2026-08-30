@@ -68,6 +68,10 @@ export const qk = {
     user: (id: string) => ["platform-admin", "users", "detail", id] as const,
     workspaces: (params?: Record<string, unknown>) => ["platform-admin", "workspaces", params] as const,
     workspace: (id: string) => ["platform-admin", "workspaces", "detail", id] as const,
+    workspaceOperational: (id: string) => ["platform-admin", "workspaces", "operational", id] as const,
     subscriptions: (params?: Record<string, unknown>) => ["platform-admin", "subscriptions", params] as const,
+    needsAttention: () => ["platform-admin", "needs-attention"] as const,
+    activity: () => ["platform-admin", "activity"] as const,
+    health: () => ["platform-admin", "health"] as const,
   },
 } as const;

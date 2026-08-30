@@ -120,3 +120,52 @@ export const platformAdminDashboardResponseSchema = z.object({
   expiringWithin7Days: z.number().int(),
 });
 export type PlatformAdminDashboardResponse = z.infer<typeof platformAdminDashboardResponseSchema>;
+
+/**
+ * Read-only operational snapshot for one workspace — the "support diagnostic".
+ * `available:false` means the platform-admin DB role has not yet been granted
+ * the (additive) read policies on the operational tables (see the pending
+ * migration); the console degrades gracefully to identity/subscription only
+ * until that migration is applied. No PII beyond what support needs.
+ */
+export const platformOperationalSnapshotSchema = z.object({
+  available: z.boolean(),
+  currentMonth: z.object({ id: z.string().uuid(), year: z.number().int(), month: z.number().int(), status: z.string() }).nullable(),
+  groupsCount: z.number().int().nullable(),
+  studentsCount: z.number().int().nullable(),
+  activeEnrollmentsCount: z.number().int().nullable(),
+  sessionsThisMonth: z.object({ total: z.number().int(), completed: z.number().int() }).nullable(),
+  lastActivityAt: z.string().nullable(),
+});
+export type PlatformOperationalSnapshot = z.infer<typeof platformOperationalSnapshotSchema>;
+
+/** A single "needs attention" row for the platform command center. */
+export const platformAttentionItemSchema = z.object({
+  workspaceId: z.string().uuid(),
+  workspaceName: z.string(),
+  ownerName: z.string().nullable(),
+  state: z.string(),
+  periodEnd: z.string().nullable(),
+  daysLeft: z.number().int().nullable(),
+});
+export const platformNeedsAttentionResponseSchema = z.object({
+  trialsExpiringSoon: z.array(platformAttentionItemSchema),
+  expired: z.array(platformAttentionItemSchema),
+  paymentFailed: z.array(platformAttentionItemSchema),
+});
+export type PlatformNeedsAttentionResponse = z.infer<typeof platformNeedsAttentionResponseSchema>;
+
+/** Read-only platform activity feed (operational events, never noisy tech logs). */
+export const platformActivityItemSchema = z.object({
+  kind: z.enum(["workspace.created", "subscription.state_changed"]),
+  at: z.string(),
+  workspaceId: z.string().uuid().nullable(),
+  workspaceName: z.string().nullable(),
+  label: z.string(),
+  detail: z.string().nullable(),
+});
+export const platformActivityResponseSchema = z.object({
+  items: z.array(platformActivityItemSchema),
+  available: z.boolean(),
+});
+export type PlatformActivityResponse = z.infer<typeof platformActivityResponseSchema>;

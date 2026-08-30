@@ -5,9 +5,12 @@ import type {
   ListPlatformAdminSubscriptionsResponse,
   ListPlatformAdminUsersResponse,
   ListPlatformAdminWorkspacesResponse,
+  PlatformActivityResponse,
   PlatformAdminDashboardResponse,
   PlatformAdminUserDetail,
   PlatformAdminWorkspaceDetail,
+  PlatformNeedsAttentionResponse,
+  PlatformOperationalSnapshot,
 } from "@academic-precision/contracts";
 import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
@@ -39,6 +42,24 @@ export class PlatformAdminController {
     return this.service.getDashboard();
   }
 
+  @Get("needs-attention")
+  @ApiOperation({ summary: "Trials expiring soon / expired / payment-failed workspaces (GET /api/v1/platform-admin/needs-attention)" })
+  getNeedsAttention(): Promise<PlatformNeedsAttentionResponse> {
+    return this.service.getNeedsAttention();
+  }
+
+  @Get("activity")
+  @ApiOperation({ summary: "Recent platform operational activity — signups + subscription changes (GET /api/v1/platform-admin/activity)" })
+  getActivity(): Promise<PlatformActivityResponse> {
+    return this.service.getActivity();
+  }
+
+  @Get("workspaces/:id/operational")
+  @ApiOperation({ summary: "Read-only operational snapshot / support diagnostic for one workspace (GET /api/v1/platform-admin/workspaces/:id/operational)" })
+  getOperationalSnapshot(@Param("id") id: string): Promise<PlatformOperationalSnapshot> {
+    return this.service.getOperationalSnapshot(id);
+  }
+
   @Get("users")
   @ApiOperation({ summary: "Search/list users across every workspace (GET /api/v1/platform-admin/users)" })
   listUsers(
@@ -59,10 +80,11 @@ export class PlatformAdminController {
   @ApiOperation({ summary: "Search/list every Teacher Workspace (GET /api/v1/platform-admin/workspaces)" })
   listWorkspaces(
     @Query("search") search?: string,
+    @Query("state") state?: string,
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ): Promise<ListPlatformAdminWorkspacesResponse> {
-    return this.service.listWorkspaces({ search, cursor, limit: limit ? Number(limit) : undefined });
+    return this.service.listWorkspaces({ search, state, cursor, limit: limit ? Number(limit) : undefined });
   }
 
   @Get("workspaces/:id")
