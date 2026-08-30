@@ -72,7 +72,7 @@ const FEATURE_GROUPS = [
     icon: CalendarClock,
     wide: true,
     items: [
-      { icon: CalendarClock, label: "حصص تُجدوَل عنك", description: "جدول حصصك يتولّد من مواعيدك الأسبوعية — بلا إدخال يدوي متكرر." },
+      { icon: CalendarClock, label: "حصصك مرتّبة قبل أن يبدأ يومك", description: "جدول حصصك يُبنى من مواعيدك الأسبوعية — بلا إدخال يدوي متكرر." },
       { icon: ClipboardCheck, label: "حضور في لحظته", description: "سجّله من هاتفك أثناء الحصة، واعرف من غاب فورًا." },
       { icon: NotebookPen, label: "لا واجب يمرّ دون رصد", description: "من أنجز، ومن لم يُسجَّل له شيء بعد — أمامك." },
     ],
@@ -183,15 +183,18 @@ export default function LandingPage() {
             <div className="flex flex-col items-start gap-6">
               <Reveal as="div" className="w-fit">
                 <Badge tone="brand" className="border border-brand/20 px-3 py-1">
-                  نظام تشغيل مجموعاتك — لا مجرّد تسجيل بيانات
+                  كل ما يجري في مجموعاتك… وما يحتاج تدخّلك
                 </Badge>
               </Reveal>
               <Reveal as="h1" delay={60} className="text-display text-text-primary">
-                شغّل مجموعاتك
-                <br />
+                شغّل مجموعاتك{" "}
+                {/* Break kept on ≥sm for the clean two-tone split; hidden on
+                    mobile so `text-wrap: balance` activates and avoids a
+                    single-word orphan (a hard <br> disables balancing). */}
+                <br className="hidden sm:block" />
                 <span className="text-gradient">دون أن يضيع منك شيء</span>
               </Reveal>
-              <Reveal as="p" delay={120} className="max-w-xl text-lg leading-relaxed text-text-secondary sm:text-[1.125rem]">
+              <Reveal as="p" delay={120} className="max-w-[38rem] text-lg leading-[1.85] text-text-secondary sm:text-[1.125rem]">
                 الحصص والحضور والواجبات والتحصيل والمتابعة في مكان واحد — وراصد يُظهر لك ما يحتاج تدخّلك الآن، قبل أن يفوتك.
               </Reveal>
               <Reveal as="div" delay={180}>
@@ -371,7 +374,7 @@ export default function LandingPage() {
           <div className="hero-grid absolute inset-0 opacity-60" />
         </div>
         <Reveal as="div" className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
-          <h2 className="text-h1 text-text-primary">دع راصد يمسك التفاصيل… وركّز أنت في طلابك</h2>
+          <h2 className="text-h1 text-text-primary">دع راصد يتابع التفاصيل… وركّز أنت على طلابك</h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-text-secondary">
             ابدأ اليوم، ونظّم مجموعاتك من الحصة القادمة — وستعرف ما يحتاج تدخّلك قبل أن تنساه.
           </p>
