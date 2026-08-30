@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { IBM_Plex_Sans_Arabic, Alexandria } from "next/font/google";
+import { IBM_Plex_Sans_Arabic } from "next/font/google";
 import { GeistSans } from "geist/font/sans";
 import { Toaster } from "@academic-precision/ui";
 import { AppQueryProvider } from "../lib/query-provider";
@@ -16,15 +16,6 @@ const plexArabic = IBM_Plex_Sans_Arabic({
   display: "swap",
 });
 
-// Marketing display face (headings only, scoped to the marketing site via
-// `.marketing-scope` in globals.css). Alexandria is an OFL-licensed modern
-// Arabic family; self-hosted through next/font (no external request, no CLS).
-const alexandria = Alexandria({
-  subsets: ["arabic", "latin"],
-  weight: ["500", "600", "700"],
-  variable: "--font-alexandria",
-  display: "swap",
-});
 
 /**
  * Applied before paint so the persisted theme choice never flashes. Defaults
@@ -56,7 +47,7 @@ export const metadata: Metadata = {
 /** Root layout — Arabic-first/RTL. Providers are ordered so WorkspaceProvider can read SessionProvider's state, and AppQueryProvider wraps both (both use TanStack Query). */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="ar" dir="rtl" data-theme="dark" suppressHydrationWarning className={`${plexArabic.variable} ${GeistSans.variable} ${alexandria.variable}`}>
+    <html lang="ar" dir="rtl" data-theme="dark" suppressHydrationWarning className={`${plexArabic.variable} ${GeistSans.variable}`}>
       <body className="font-sans">
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME }} />
         <ThemeProvider>

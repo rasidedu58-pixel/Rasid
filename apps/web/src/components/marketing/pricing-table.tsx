@@ -38,7 +38,7 @@ export function PricingTable() {
             <div className="mt-1 min-h-[3rem]">
               {plan.monthlyPriceEGP !== null ? (
                 <p className="flex items-baseline gap-1.5">
-                  <span className="text-4xl font-bold tabular-nums tracking-tight text-text-primary">{plan.monthlyPriceEGP}</span>
+                  <span className="font-english text-4xl font-bold tabular-nums tracking-tight text-text-primary">{plan.monthlyPriceEGP}</span>
                   <span className="text-sm text-text-secondary">جنيه / شهريًا</span>
                 </p>
               ) : (

@@ -67,9 +67,9 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-plex-arabic)", "var(--font-geist-sans)", "system-ui", "sans-serif"],
-        // Marketing display face (Alexandria); falls back to Plex/system so it
-        // is safe anywhere even before the marketing scope applies it.
-        display: ["var(--font-alexandria)", "var(--font-plex-arabic)", "system-ui", "sans-serif"],
+        // `font-english` (Geist) — for Latin words, prices, and tabular figures
+        // in mixed Arabic/English/number content.
+        english: ["var(--font-geist-sans)", "var(--font-plex-arabic)", "system-ui", "sans-serif"],
       },
       backgroundImage: {
         "gradient-hero": "linear-gradient(135deg, #0D9488 0%, #6366F1 50%, #0EA5E9 100%)",

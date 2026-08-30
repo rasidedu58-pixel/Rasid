@@ -396,7 +396,7 @@ export default function LandingPage() {
 /* ─────────────────────────── Presentational parts ─────────────────────────── */
 
 function SectionEyebrow({ children }: { children: ReactNode }) {
-  return <p className="text-sm font-semibold tracking-wide text-brand">{children}</p>;
+  return <p className="text-xs font-semibold uppercase tracking-[0.05em] text-brand">{children}</p>;
 }
 
 /** The سجّل → افهم → تصرّف → تابع rhythm as a compact right-to-left flow. */
