@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   IdempotencyConflictException,
   MonthAlreadyExistsException,
+  NoCurrentMonthException,
   ResourceNotFoundException,
   SessionInvalidStateException,
   VersionConflictException,
@@ -64,6 +65,108 @@ describe("SchedulingService", () => {
     const confirmed = await service.confirmCreateMonth(owner, ownerContext, idempotencyKey, { previewToken: preview.previewToken }, null);
     return { preview, confirmed };
   }
+
+  describe("prepareGroupForCurrentMonth (Group Wizard foundation)", () => {
+    const PREPARE_BODY = {
+      locationId: null,
+      baseFeeMinor: 20000,
+      currencyCode: "EGP",
+      duePolicy: "PER_GROUP" as const,
+      dueDay: null,
+      joinFeePolicy: "FULL" as const,
+      scheduleRules: [{ weekday: 5, startTime: "10:00", durationMinutes: 60 }],
+    };
+    const repoInput = (groupId: string, extra: Partial<Parameters<InMemorySchedulingRepository["prepareGroupForCurrentMonth"]>[0]> = {}) => ({
+      workspaceId: WORKSPACE_A,
+      groupId,
+      createdByUserId: owner.id,
+      createdByMembershipId: null,
+      workspaceTimezone: "Africa/Cairo",
+      now: new Date("2026-08-01T00:00:00.000Z"),
+      locationId: null,
+      baseFeeMinor: 20000,
+      currencyCode: "EGP",
+      duePolicy: "PER_GROUP",
+      dueDay: null,
+      joinFeePolicy: "FULL",
+      scheduleRules: [{ weekday: 5, startTime: "10:00", durationMinutes: 60 }],
+      ...extra,
+    });
+
+    it("throws NO_CURRENT_MONTH when the workspace has no CURRENT operating month (never auto-creates one)", async () => {
+      const group = seedActiveGroup();
+      await expect(service.prepareGroupForCurrentMonth(owner, ownerContext, group.id, PREPARE_BODY, null)).rejects.toBeInstanceOf(
+        NoCurrentMonthException,
+      );
+    });
+
+    it("returns a no-leak 404 for a group in another workspace (scope enforced in backend)", async () => {
+      const groupB = repo.seedGroup({ workspaceId: WORKSPACE_B, name: "Foreign" });
+      repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id });
+      await expect(service.prepareGroupForCurrentMonth(owner, ownerContext, groupB.id, PREPARE_BODY, null)).rejects.toBeInstanceOf(
+        ResourceNotFoundException,
+      );
+    });
+
+    it("is idempotent: a group already prepared this month returns ALREADY_PREPARED (no duplicate)", async () => {
+      const group = seedActiveGroup();
+      const month = repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id });
+      repo.seedGroupMonth({ workspaceId: WORKSPACE_A, groupId: group.id, operatingMonthId: month.id });
+      const res = await service.prepareGroupForCurrentMonth(owner, ownerContext, group.id, PREPARE_BODY, null);
+      expect(res.status).toBe("ALREADY_PREPARED");
+    });
+
+    it("prepares a new group mid-month: creates the GroupMonth + generates only sessions at/after the prepare date (no past)", async () => {
+      const group = seedActiveGroup();
+      repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id });
+      const now = new Date("2026-08-01T00:00:00.000Z");
+      const res = await repo.prepareGroupForCurrentMonth(repoInput(group.id, { now }));
+      expect(res.status).toBe("PREPARED");
+      if (res.status !== "PREPARED") return;
+      expect(res.generatedSessionCount).toBeGreaterThan(0);
+      const created = [...repo.sessionsById.values()].filter((s) => s.groupMonthId === res.groupMonth.id);
+      expect(created).toHaveLength(res.generatedSessionCount);
+      for (const s of created) expect(s.scheduledAt.getTime()).toBeGreaterThanOrEqual(now.getTime());
+    });
+
+    it("supports multiple weekly slots (more slots → more generated sessions)", async () => {
+      const g1 = seedActiveGroup();
+      const g2 = seedActiveGroup();
+      repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id });
+      const one = await repo.prepareGroupForCurrentMonth(repoInput(g1.id, { scheduleRules: [{ weekday: 5, startTime: "10:00", durationMinutes: 60 }] }));
+      const two = await repo.prepareGroupForCurrentMonth(
+        repoInput(g2.id, { scheduleRules: [{ weekday: 5, startTime: "10:00", durationMinutes: 60 }, { weekday: 2, startTime: "12:00", durationMinutes: 90 }] }),
+      );
+      const c1 = one.status === "PREPARED" ? one.generatedSessionCount : -1;
+      const c2 = two.status === "PREPARED" ? two.generatedSessionCount : -1;
+      expect(c2).toBeGreaterThan(c1);
+    });
+
+    it("preparing twice never duplicates sessions (second call is ALREADY_PREPARED with the same count)", async () => {
+      const group = seedActiveGroup();
+      repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id });
+      const first = await repo.prepareGroupForCurrentMonth(repoInput(group.id));
+      const second = await repo.prepareGroupForCurrentMonth(repoInput(group.id));
+      expect(first.status).toBe("PREPARED");
+      expect(second.status).toBe("ALREADY_PREPARED");
+      const firstCount = first.status === "PREPARED" ? first.generatedSessionCount : -1;
+      const secondCount = second.status === "ALREADY_PREPARED" ? second.generatedSessionCount : -2;
+      expect(secondCount).toBe(firstCount);
+      const gmId = first.status === "PREPARED" ? first.groupMonth.id : "";
+      expect([...repo.sessionsById.values()].filter((s) => s.groupMonthId === gmId)).toHaveLength(firstCount);
+    });
+
+    it("generates fewer sessions when prepared later in the month (never in the past)", async () => {
+      const g1 = seedActiveGroup();
+      const g2 = seedActiveGroup();
+      repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id });
+      const early = await repo.prepareGroupForCurrentMonth(repoInput(g1.id, { now: new Date("2026-08-01T00:00:00.000Z") }));
+      const late = await repo.prepareGroupForCurrentMonth(repoInput(g2.id, { now: new Date("2026-08-28T00:00:00.000Z") }));
+      const ec = early.status === "PREPARED" ? early.generatedSessionCount : -1;
+      const lc = late.status === "PREPARED" ? late.generatedSessionCount : -1;
+      expect(lc).toBeLessThanOrEqual(ec);
+    });
+  });
 
   describe("CreateMonth", () => {
     it("is idempotent: same key + same payload twice returns the same result with no duplicate side effects", async () => {

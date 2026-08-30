@@ -12,11 +12,12 @@
  * aggregates, recomputed ONLY inside `recordPaymentTransaction`/
  * `reversePaymentTransaction` — never touched anywhere else.
  */
-import { and, desc, eq, inArray, sql as rawSql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql as rawSql } from "drizzle-orm";
 import { financialObligations, payments, paymentReversals } from "../schema/finance";
 import { enrollments } from "../schema/enrollments";
-import { groupMonths } from "../schema/groups";
+import { groupMonths, groups } from "../schema/groups";
 import { students } from "../schema/students";
+import { users } from "../schema/identity";
 import { auditEvents } from "../schema/audit";
 import { outboxEvents } from "../schema/outbox";
 import type { Db } from "./identity.repository";
@@ -262,6 +263,77 @@ export async function listCollectionQueue(
     .orderBy(financialObligations.dueDate, financialObligations.id)
     .limit(params.limit);
   return rows;
+}
+
+export interface PaymentLedgerRow {
+  payment: PaymentRow;
+  studentId: string;
+  studentName: string;
+  studentCode: string;
+  groupId: string;
+  groupName: string;
+  /** Full name of who recorded the payment (null if RLS hides it or user gone). */
+  recordedByName: string | null;
+}
+
+/**
+ * Payment ledger (§27): every payment in the workspace, joined to its student
+ * + group + recorder, newest first, with optional period / method / status /
+ * group-scope filters. ONE query (no N+1); RLS (app.workspace_id) isolates the
+ * tenant and the recorder name resolves via the co-member users policy. Cursor
+ * is (paid_at, id) descending, matching the collection-queue convention.
+ */
+export async function listPaymentsLedger(
+  db: Db,
+  params: {
+    workspaceId: string;
+    restrictToGroupIds?: string[];
+    from?: Date;
+    to?: Date;
+    method?: string;
+    status?: string;
+    limit: number;
+    cursor?: { paidAt: string; id: string };
+  },
+): Promise<PaymentLedgerRow[]> {
+  const conditions = [eq(payments.workspaceId, params.workspaceId)];
+  if (params.from) conditions.push(gte(payments.paidAt, params.from));
+  if (params.to) conditions.push(lte(payments.paidAt, params.to));
+  if (params.method) conditions.push(eq(payments.method, params.method));
+  if (params.status) conditions.push(eq(payments.status, params.status));
+  if (params.restrictToGroupIds !== undefined) {
+    conditions.push(
+      params.restrictToGroupIds.length === 0 ? rawSql`false` : inArray(groups.id, params.restrictToGroupIds),
+    );
+  }
+  if (params.cursor) {
+    conditions.push(
+      rawSql`(${payments.paidAt}, ${payments.id}) < (${params.cursor.paidAt}::timestamptz, ${params.cursor.id})`,
+    );
+  }
+
+  const rows = await db
+    .select({
+      payment: payments,
+      studentId: students.id,
+      studentName: students.name,
+      studentCode: students.studentCode,
+      groupId: groups.id,
+      groupName: groups.name,
+      recordedByName: users.fullName,
+    })
+    .from(payments)
+    .innerJoin(financialObligations, eq(financialObligations.id, payments.obligationId))
+    .innerJoin(enrollments, eq(enrollments.id, financialObligations.enrollmentId))
+    .innerJoin(groupMonths, eq(groupMonths.id, enrollments.groupMonthId))
+    .innerJoin(groups, eq(groups.id, groupMonths.groupId))
+    .innerJoin(students, eq(students.id, enrollments.studentId))
+    .leftJoin(users, eq(users.id, payments.recordedByUserId))
+    .where(and(...conditions))
+    .orderBy(desc(payments.paidAt), desc(payments.id))
+    .limit(params.limit);
+
+  return rows.map((r) => ({ ...r, recordedByName: r.recordedByName ?? null }));
 }
 
 export interface FinanceSummary {

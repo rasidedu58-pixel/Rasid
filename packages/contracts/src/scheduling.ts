@@ -75,6 +75,32 @@ const scheduleRuleInputSchema = z.object({
 export type ScheduleRuleInputDto = z.infer<typeof scheduleRuleInputSchema>;
 
 /**
+ * `POST /groups/:id/prepare-current-month` — attaches this group to the
+ * workspace's CURRENT operating month: its GroupMonth (fee/policy), weekly
+ * schedule, and the REMAINING sessions this month. Powers the Group Wizard's
+ * schedule + fee steps for a group created mid-month. Same field shape as
+ * `groupInitialConfig` so the two creation paths stay identical.
+ */
+export const prepareGroupCurrentMonthRequestSchema = z.object({
+  locationId: z.string().uuid().nullable().optional(),
+  baseFeeMinor: z.number().int().min(0),
+  currencyCode: z.string().length(3).default("EGP"),
+  duePolicy: z.enum(["UNIFIED", "PER_GROUP", "OVERRIDE"]).default("PER_GROUP"),
+  dueDay: z.number().int().min(1).max(28).nullable().optional(),
+  joinFeePolicy: z.enum(["ASK_EVERY_TIME", "FULL", "REMAINING"]).default("FULL"),
+  scheduleRules: z.array(scheduleRuleInputSchema).min(1),
+});
+export type PrepareGroupCurrentMonthRequest = z.infer<typeof prepareGroupCurrentMonthRequestSchema>;
+
+export const prepareGroupCurrentMonthResponseSchema = z.object({
+  /** PREPARED = created now; ALREADY_PREPARED = idempotent no-op (existing GroupMonth). */
+  status: z.enum(["PREPARED", "ALREADY_PREPARED"]),
+  groupMonthId: z.string().uuid(),
+  generatedSessionCount: z.number().int(),
+});
+export type PrepareGroupCurrentMonthResponse = z.infer<typeof prepareGroupCurrentMonthResponseSchema>;
+
+/**
  * `groupInitialConfig` supplies the per-group commercial + schedule facts
  * needed to create the FIRST-EVER GroupMonth for a group with no
  * `sourceMonthId` to carry forward from — see the Phase 3 handoff notes on
@@ -284,6 +310,25 @@ export type Session = z.infer<typeof sessionSchema>;
 
 export const listSessionsResponseSchema = cursorPageSchema(sessionSchema);
 export type ListSessionsResponse = z.infer<typeof listSessionsResponseSchema>;
+
+/**
+ * Enriched calendar item — a session plus the group identity it belongs to
+ * (resolved server-side through group_month → group, which the bare session
+ * lacks) and a student count, for the Session Operations calendar. Returned by
+ * `GET /sessions/calendar?from&to`, which is date-range-bounded (no cursor) and
+ * group-scope-resolved server-side so scoped assistants need no groupMonthId.
+ */
+export const sessionCalendarItemSchema = sessionSchema.extend({
+  groupId: z.string().uuid(),
+  groupName: z.string(),
+  studentCount: z.number().int(),
+});
+export type SessionCalendarItem = z.infer<typeof sessionCalendarItemSchema>;
+
+export const listSessionsCalendarResponseSchema = z.object({
+  items: z.array(sessionCalendarItemSchema),
+});
+export type ListSessionsCalendarResponse = z.infer<typeof listSessionsCalendarResponseSchema>;
 
 export const sessionCancelResponseSchema = z.object({ session: sessionSchema });
 export type SessionCancelResponse = z.infer<typeof sessionCancelResponseSchema>;

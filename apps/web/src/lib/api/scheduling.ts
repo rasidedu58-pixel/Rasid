@@ -10,6 +10,8 @@ import type {
   Group,
   CreateGroupRequest,
   UpdateGroupRequest,
+  PrepareGroupCurrentMonthRequest,
+  PrepareGroupCurrentMonthResponse,
   GroupMonth,
   GroupMonthChangePreviewRequest,
   GroupMonthChangePreviewResponse,
@@ -21,6 +23,7 @@ import type {
   ScheduleApplyRequest,
   ScheduleApplyResponse,
   ListSessionsResponse,
+  ListSessionsCalendarResponse,
   Session,
   SessionCancelResponse,
   SessionReschedulePreviewRequest,
@@ -71,6 +74,11 @@ export function updateGroup(workspaceId: string, groupId: string, body: UpdateGr
   return apiRequest<Group>(`/groups/${groupId}`, { method: "PATCH", workspaceId, body });
 }
 
+/** Attaches a group to the current month: GroupMonth (fee) + weekly schedule + remaining sessions. Idempotent. */
+export function prepareGroupCurrentMonth(workspaceId: string, groupId: string, body: PrepareGroupCurrentMonthRequest): Promise<PrepareGroupCurrentMonthResponse> {
+  return apiRequest<PrepareGroupCurrentMonthResponse>(`/groups/${groupId}/prepare-current-month`, { method: "POST", workspaceId, body });
+}
+
 // --- Group months (monthly operational config) ----------------------------
 
 export function fetchGroupMonth(workspaceId: string, groupMonthId: string): Promise<GroupMonth> {
@@ -101,6 +109,11 @@ export function applySchedule(workspaceId: string, groupMonthId: string, body: S
 
 export function fetchSessions(workspaceId: string, params: { groupMonthId?: string; status?: string; from?: string; to?: string; cursor?: string; limit?: number } = {}): Promise<ListSessionsResponse> {
   return apiRequest<ListSessionsResponse>("/sessions", { workspaceId, query: params });
+}
+
+/** Date-range calendar read — enriched (group name + student count), group-scope-resolved server-side. */
+export function fetchSessionsCalendar(workspaceId: string, params: { from: string; to: string }): Promise<ListSessionsCalendarResponse> {
+  return apiRequest<ListSessionsCalendarResponse>("/sessions/calendar", { workspaceId, query: params });
 }
 
 export function fetchSession(workspaceId: string, sessionId: string): Promise<Session> {

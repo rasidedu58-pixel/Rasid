@@ -145,6 +145,34 @@ export const collectionQueueResponseSchema = z.object({
 export type CollectionQueueResponse = z.infer<typeof collectionQueueResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// Payment ledger — GET /finance/payments (the operations-center ledger, §27)
+// ---------------------------------------------------------------------------
+
+export const paymentLedgerItemSchema = z.object({
+  id: z.string().uuid(),
+  obligationId: z.string().uuid(),
+  amountMinor: z.number().int(),
+  currency: z.string(),
+  method: paymentMethodSchema,
+  paidAt: z.string(),
+  status: paymentStatusSchema,
+  note: z.string().nullable(),
+  studentId: z.string().uuid(),
+  studentName: z.string(),
+  studentCode: z.string(),
+  groupId: z.string().uuid(),
+  groupName: z.string(),
+  recordedByName: z.string().nullable(),
+});
+export type PaymentLedgerItem = z.infer<typeof paymentLedgerItemSchema>;
+
+export const paymentLedgerResponseSchema = z.object({
+  items: z.array(paymentLedgerItemSchema),
+  page: z.object({ hasNext: z.boolean(), nextCursor: z.string().nullable() }),
+});
+export type PaymentLedgerResponse = z.infer<typeof paymentLedgerResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Finance summary — API §9.6 GET /finance/summary
 // ---------------------------------------------------------------------------
 

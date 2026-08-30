@@ -12,8 +12,10 @@ import type {
   QrReissueRequest,
   QrResolveRequest,
   QrResolveResponse,
+  ListStudentEnrollmentsResponse,
   Student,
   StudentDetailResponse,
+  StudentEnrollmentHistoryItem,
   UpdateStudentGuardianRequest,
   UpdateStudentRequest,
 } from "@academic-precision/contracts";
@@ -273,6 +275,36 @@ export class StudentsService {
       student: this.toStudentDto(student),
       guardians: links.map(({ link, guardian }) => this.toGuardianLinkDto(link, guardian)),
       qr: { hasActive: !!activeQr, credentialId: activeQr?.id ?? null },
+    };
+  }
+
+  /**
+   * A student's enrollment history (newest first): every group they've been in,
+   * with status/join/end/reason as actually stored. Scope enforced in-backend
+   * (students.view_basic + same-workspace + in-group-scope → no-leak 404).
+   * Never invents an end date or reason — nulls pass through as nulls.
+   */
+  async getStudentEnrollments(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    studentId: string,
+  ): Promise<ListStudentEnrollmentsResponse> {
+    await this.loadStudentInScope(authUser.id, workspaceContext, studentId, "students.view_basic");
+    const rows = await this.repository.listEnrollmentsForStudent(studentId);
+    return {
+      enrollments: rows.map((r): StudentEnrollmentHistoryItem => ({
+        id: r.enrollment.id,
+        groupId: r.groupId,
+        groupName: r.groupName,
+        groupMonthId: r.enrollment.groupMonthId,
+        year: r.year,
+        month: r.month,
+        status: r.enrollment.status as StudentEnrollmentHistoryItem["status"],
+        joinDate: r.enrollment.joinDate,
+        endedAt: r.enrollment.endedAt ? r.enrollment.endedAt.toISOString() : null,
+        endReason: r.enrollment.endReason,
+        feeMethod: r.enrollment.feeMethod as StudentEnrollmentHistoryItem["feeMethod"],
+      })),
     };
   }
 

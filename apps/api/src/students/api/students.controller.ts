@@ -29,6 +29,7 @@ import {
   type MatchPreviewResponse,
   type QrIssueResponse,
   type QrReissueRequest,
+  type ListStudentEnrollmentsResponse,
   type Student,
   type StudentDetailResponse,
   type UpdateStudentGuardianRequest,
@@ -116,6 +117,17 @@ export class StudentsController {
     @Param("id") id: string,
   ): Promise<StudentDetailResponse> {
     return this.studentsService.getStudent(user, workspaceContext, id);
+  }
+
+  @Get("students/:id/enrollments")
+  @RequirePermission("students.view_basic")
+  @ApiOperation({ summary: "Student enrollment history, newest first (GET /api/v1/students/:id/enrollments)" })
+  getStudentEnrollments(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Param("id") id: string,
+  ): Promise<ListStudentEnrollmentsResponse> {
+    return this.studentsService.getStudentEnrollments(user, workspaceContext, id);
   }
 
   @Patch("students/:id")

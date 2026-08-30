@@ -1,5 +1,6 @@
 import type {
   CollectionQueueRow,
+  PaymentLedgerRow,
   EnrollmentRow,
   FinanceSummary,
   FinancialObligationRow,
@@ -34,6 +35,16 @@ export interface FinanceRepositoryPort {
   listPaymentsForObligation(obligationId: string): Promise<PaymentRow[]>;
   listObligationsForStudent(params: { workspaceId: string; studentId: string }): Promise<StudentObligationRow[]>;
   listCollectionQueue(params: { workspaceId: string; restrictToGroupIds?: string[]; limit: number; cursor?: { dueDate: string; id: string } }): Promise<CollectionQueueRow[]>;
+  listPaymentsLedger(params: {
+    workspaceId: string;
+    restrictToGroupIds?: string[];
+    from?: Date;
+    to?: Date;
+    method?: string;
+    status?: string;
+    limit: number;
+    cursor?: { paidAt: string; id: string };
+  }): Promise<PaymentLedgerRow[]>;
   getFinanceSummary(params: { workspaceId: string; restrictToGroupIds?: string[]; todayIsoDate: string }): Promise<FinanceSummary>;
 
   // Reads reused for scope resolution / DTOs (delegate to the same

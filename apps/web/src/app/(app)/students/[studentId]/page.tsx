@@ -13,6 +13,7 @@ import { fetchStudentReport } from "../../../../lib/api/reports";
 import { OverviewTab } from "./overview-tab";
 import { GuardiansTab } from "./guardians-tab";
 import { FinanceTab } from "./finance-tab";
+import { EnrollmentsTab } from "./enrollments-tab";
 
 /**
  * Student Profile — the strongest single screen in the product (§13).
@@ -98,6 +99,7 @@ export default function StudentProfilePage() {
         <TabsList>
           <TabsTrigger value="overview">نظرة عامة</TabsTrigger>
           <TabsTrigger value="guardians">أولياء الأمور ({guardians.length})</TabsTrigger>
+          <TabsTrigger value="enrollments">المجموعات</TabsTrigger>
           <TabsTrigger value="finance">المالية</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
@@ -105,6 +107,9 @@ export default function StudentProfilePage() {
         </TabsContent>
         <TabsContent value="guardians">
           <GuardiansTab studentId={studentId} guardians={guardians} />
+        </TabsContent>
+        <TabsContent value="enrollments">
+          <EnrollmentsTab studentId={studentId} />
         </TabsContent>
         <TabsContent value="finance">
           <FinanceTab studentId={studentId} />

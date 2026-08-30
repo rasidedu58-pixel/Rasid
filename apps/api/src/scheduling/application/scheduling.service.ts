@@ -15,7 +15,10 @@ import type {
   ListMonthsResponse,
   ListScheduleRulesResponse,
   ListSessionsResponse,
+  ListSessionsCalendarResponse,
   OperatingMonth,
+  PrepareGroupCurrentMonthRequest,
+  PrepareGroupCurrentMonthResponse,
   ScheduleApplyResponse,
   SchedulePreviewRequest,
   SchedulePreviewResponse,
@@ -41,6 +44,7 @@ import {
   IdempotencyConflictException,
   MonthAlreadyExistsException,
   MonthCreateFailedException,
+  NoCurrentMonthException,
   ResourceNotFoundException,
   SessionInvalidStateException,
   ValidationApiException,
@@ -163,6 +167,52 @@ export class SchedulingService {
     });
 
     return this.toGroupDto(created);
+  }
+
+  /**
+   * Prepares a group for the CURRENT operating month — creates its GroupMonth
+   * (fee/policy) + weekly schedule + the remaining sessions this month, in one
+   * transaction (see `prepareGroupForCurrentMonthTransaction`). Scope + existence
+   * enforced here (groups.manage, same-workspace, in-group-scope → no-leak 404).
+   * With no CURRENT month it surfaces `NO_CURRENT_MONTH` so the UI can send the
+   * user to the month-prep flow instead of failing generically. Idempotent.
+   */
+  async prepareGroupForCurrentMonth(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    groupId: string,
+    body: PrepareGroupCurrentMonthRequest,
+    correlationId: string | null,
+  ): Promise<PrepareGroupCurrentMonthResponse> {
+    await this.loadGroupInScope(authUser, workspaceContext, groupId, "groups.manage");
+
+    const timezone = await this.repository.findWorkspaceTimezone(workspaceContext.workspaceId);
+
+    const result = await this.repository.prepareGroupForCurrentMonth({
+      workspaceId: workspaceContext.workspaceId,
+      groupId,
+      createdByUserId: authUser.id,
+      createdByMembershipId: workspaceContext.membership.id,
+      correlationId,
+      workspaceTimezone: timezone ?? "Africa/Cairo",
+      now: new Date(),
+      locationId: body.locationId ?? null,
+      baseFeeMinor: body.baseFeeMinor,
+      currencyCode: body.currencyCode,
+      duePolicy: body.duePolicy,
+      dueDay: body.dueDay ?? null,
+      joinFeePolicy: body.joinFeePolicy,
+      scheduleRules: body.scheduleRules,
+    });
+
+    if (result.status === "NO_CURRENT_MONTH") {
+      throw new NoCurrentMonthException();
+    }
+    return {
+      status: result.status,
+      groupMonthId: result.groupMonth.id,
+      generatedSessionCount: result.generatedSessionCount,
+    };
   }
 
   async getGroup(
@@ -783,6 +833,54 @@ export class SchedulingService {
   async getSession(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, id: string): Promise<Session> {
     const { session } = await this.loadSessionInScope(authUser, workspaceContext, id, "groups.view");
     return this.toSessionDto(session);
+  }
+
+  /**
+   * Session Operations calendar read — every session in `[from, to]`, enriched
+   * with group name + student count, group-scope-resolved server-side (so a
+   * SELECTED_GROUPS assistant gets their groups' sessions without a
+   * groupMonthId). Date-range-bounded (no cursor); the UI fetches one visible
+   * window at a time — never all history (§42).
+   */
+  async listSessionsCalendar(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    query: { from?: string; to?: string },
+  ): Promise<ListSessionsCalendarResponse> {
+    const fieldErrors: Record<string, string[]> = {};
+    if (!query.from) fieldErrors.from = ["مطلوب."];
+    if (!query.to) fieldErrors.to = ["مطلوب."];
+    if (Object.keys(fieldErrors).length > 0) throw new ValidationApiException(fieldErrors);
+
+    const from = new Date(query.from!);
+    const to = new Date(query.to!);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+      throw new ValidationApiException({ from: ["نطاق تاريخ غير صالح."] });
+    }
+
+    // Reuse the grant PermissionGuard already resolved for groups.view; scope
+    // resolution mirrors listGroups exactly (ALL_GROUPS = unrestricted).
+    const grant =
+      workspaceContext.grant && workspaceContext.grant.permission === "groups.view"
+        ? workspaceContext.grant
+        : await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, "groups.view");
+    const restrictToGroupIds = !grant || grant.scope === "ALL_GROUPS" ? undefined : grant.groupIds ?? [];
+
+    const rows = await this.repository.listSessionsInRangeWithGroup({
+      workspaceId: workspaceContext.workspaceId,
+      scheduledFrom: from,
+      scheduledTo: to,
+      restrictToGroupIds,
+    });
+
+    return {
+      items: rows.map((r) => ({
+        ...this.toSessionDto(r.session),
+        groupId: r.groupId,
+        groupName: r.groupName,
+        studentCount: r.studentCount,
+      })),
+    };
   }
 
   async cancelSession(

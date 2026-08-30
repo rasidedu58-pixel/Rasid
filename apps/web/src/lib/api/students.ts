@@ -25,6 +25,7 @@ import type {
   EnrollmentTransferRequest,
   EnrollmentTransferResponse,
   StudentObligationsResponse,
+  ListStudentEnrollmentsResponse,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -38,6 +39,10 @@ export function fetchStudentDetail(workspaceId: string, studentId: string): Prom
 
 export function fetchStudentObligations(workspaceId: string, studentId: string): Promise<StudentObligationsResponse> {
   return apiRequest<StudentObligationsResponse>(`/students/${studentId}/obligations`, { workspaceId });
+}
+
+export function fetchStudentEnrollments(workspaceId: string, studentId: string): Promise<ListStudentEnrollmentsResponse> {
+  return apiRequest<ListStudentEnrollmentsResponse>(`/students/${studentId}/enrollments`, { workspaceId });
 }
 
 export function previewStudentMatch(workspaceId: string, body: MatchPreviewRequest): Promise<MatchPreviewResponse> {

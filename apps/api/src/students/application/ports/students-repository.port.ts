@@ -1,5 +1,6 @@
 import type {
   CreateOrReactivateEnrollmentInput,
+  EnrollmentHistoryRow,
   EnrollmentRow,
   FinancialObligationRow,
   GroupMonthRow,
@@ -62,6 +63,8 @@ export interface StudentsRepositoryPort {
   searchStudents(filter: StudentSearchFilter): Promise<StudentRow[]>;
   /** Group-Scope Security Delta: all Group ids the Student has ever been Enrolled into. */
   listGroupIdsForStudent(studentId: string): Promise<string[]>;
+  /** Full enrollment history (any status) joined to group + operating month, newest first. */
+  listEnrollmentsForStudent(studentId: string): Promise<EnrollmentHistoryRow[]>;
 
   // Guardians / student_guardians
   insertGuardian(input: InsertGuardianInput): Promise<GuardianRow>;

@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   CollectionQueueResponse,
+  PaymentLedgerResponse,
+  PaymentLedgerItem,
   FinanceSummaryResponse,
   Obligation,
   Payment,
@@ -40,6 +42,7 @@ import { FINANCE_REPOSITORY, type FinanceRepositoryPort } from "./ports/finance-
 const RECORD_PAYMENT_OPERATION = "RecordPayment";
 const REVERSE_PAYMENT_OPERATION = "ReversePayment";
 const COLLECTION_QUEUE_LIMIT = 200;
+const PAYMENT_LEDGER_LIMIT = 50;
 
 /**
  * Application service for Phase 6 Finance endpoints (Record Payment /
@@ -304,6 +307,78 @@ export class FinanceService {
       page: {
         hasNext,
         nextCursor: hasNext && last ? `${last.obligation.dueDate}_${last.obligation.id}` : null,
+      },
+    };
+  }
+
+  /**
+   * Payment ledger (§27) — every payment newest-first, group-scope-resolved,
+   * with optional period / method / status filters. Same OR-permission gate as
+   * the collection queue (payments.view_student_status OR finance.overview),
+   * cursor-paginated by (paid_at, id). DB-joined (no N+1).
+   */
+  async getPaymentLedger(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    query: { cursor?: string; from?: string; to?: string; method?: string; status?: string } = {},
+  ): Promise<PaymentLedgerResponse> {
+    const restrictToGroupIds = await this.resolveEitherPermissionScope(
+      workspaceContext.workspaceId,
+      authUser.id,
+      ["payments.view_student_status", "finance.overview"],
+      workspaceContext.membership,
+    );
+    if (restrictToGroupIds === "FORBIDDEN") {
+      throw new ForbiddenApiException();
+    }
+
+    let cursor: { paidAt: string; id: string } | undefined;
+    if (query.cursor) {
+      const sep = query.cursor.indexOf("_");
+      if (sep > 0) {
+        const paidAt = query.cursor.slice(0, sep);
+        const id = query.cursor.slice(sep + 1);
+        if (paidAt && id) cursor = { paidAt, id };
+      }
+    }
+
+    const rows = await this.repository.listPaymentsLedger({
+      workspaceId: workspaceContext.workspaceId,
+      restrictToGroupIds,
+      from: query.from ? new Date(query.from) : undefined,
+      to: query.to ? new Date(query.to) : undefined,
+      method: query.method,
+      status: query.status,
+      limit: PAYMENT_LEDGER_LIMIT + 1,
+      cursor,
+    });
+
+    const hasNext = rows.length > PAYMENT_LEDGER_LIMIT;
+    const items = rows.slice(0, PAYMENT_LEDGER_LIMIT);
+    const last = items[items.length - 1];
+
+    return {
+      items: items.map(
+        (r): PaymentLedgerItem => ({
+          id: r.payment.id,
+          obligationId: r.payment.obligationId,
+          amountMinor: r.payment.amountMinor,
+          currency: r.payment.currencyCode,
+          method: r.payment.method as PaymentLedgerItem["method"],
+          paidAt: r.payment.paidAt.toISOString(),
+          status: r.payment.status as PaymentLedgerItem["status"],
+          note: r.payment.note,
+          studentId: r.studentId,
+          studentName: r.studentName,
+          studentCode: r.studentCode,
+          groupId: r.groupId,
+          groupName: r.groupName,
+          recordedByName: r.recordedByName,
+        }),
+      ),
+      page: {
+        hasNext,
+        nextCursor: hasNext && last ? `${last.payment.paidAt.toISOString()}_${last.payment.id}` : null,
       },
     };
   }

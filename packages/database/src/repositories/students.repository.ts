@@ -6,12 +6,13 @@
  * exactly. Business/authorization decisions (permission checks, preview-
  * token validation) live in apps/api's application service layer, NOT here.
  */
-import { and, asc, eq, gt, inArray, isNull, sql as rawSql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, sql as rawSql } from "drizzle-orm";
 import { students } from "../schema/students";
 import { guardians, studentGuardians } from "../schema/guardians";
 import { qrCredentials } from "../schema/qr-credentials";
 import { enrollments } from "../schema/enrollments";
-import { groupMonths } from "../schema/groups";
+import { groupMonths, groups } from "../schema/groups";
+import { operatingMonths } from "../schema/months";
 import { sessions } from "../schema/sessions";
 import { auditEvents } from "../schema/audit";
 import type { Db } from "./identity.repository";
@@ -258,6 +259,38 @@ export async function listGroupIdsForStudent(db: Db, studentId: string): Promise
     .innerJoin(groupMonths, eq(groupMonths.id, enrollments.groupMonthId))
     .where(eq(enrollments.studentId, studentId));
   return rows.map((r) => r.groupId);
+}
+
+export interface EnrollmentHistoryRow {
+  enrollment: EnrollmentRow;
+  groupId: string;
+  groupName: string;
+  year: number;
+  month: number;
+}
+
+/**
+ * A student's full enrollment history — every enrollment (any status) joined to
+ * its group (name) and operating month, newest first. ONE query (no N+1); RLS
+ * (app.workspace_id) keeps it within the caller's workspace. The application
+ * layer additionally enforces student/group scope before calling this.
+ */
+export async function listEnrollmentsForStudentWithGroup(db: Db, studentId: string): Promise<EnrollmentHistoryRow[]> {
+  const rows = await db
+    .select({
+      enrollment: enrollments,
+      groupId: groups.id,
+      groupName: groups.name,
+      year: operatingMonths.year,
+      month: operatingMonths.month,
+    })
+    .from(enrollments)
+    .innerJoin(groupMonths, eq(groupMonths.id, enrollments.groupMonthId))
+    .innerJoin(groups, eq(groups.id, groupMonths.groupId))
+    .innerJoin(operatingMonths, eq(operatingMonths.id, groupMonths.operatingMonthId))
+    .where(eq(enrollments.studentId, studentId))
+    .orderBy(desc(operatingMonths.year), desc(operatingMonths.month), desc(enrollments.createdAt));
+  return rows.map((r) => ({ enrollment: r.enrollment, groupId: r.groupId, groupName: r.groupName, year: r.year, month: r.month }));
 }
 
 // ---------------------------------------------------------------------------

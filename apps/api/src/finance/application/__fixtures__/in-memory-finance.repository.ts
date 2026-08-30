@@ -17,6 +17,7 @@ import type {
   ObligationGroupContext,
   PaymentReversalRow,
   PaymentRow,
+  PaymentLedgerRow,
   RecordPaymentInput,
   ReversePaymentInput,
   StudentObligationRow,
@@ -113,6 +114,53 @@ export class InMemoryFinanceRepository implements FinanceRepositoryPort {
             r.obligation.dueDate.localeCompare(params.cursor!.dueDate) > 0 ||
             (r.obligation.dueDate === params.cursor!.dueDate && r.obligation.id.localeCompare(params.cursor!.id) > 0),
         )
+      : rows;
+    return afterCursor.slice(0, params.limit);
+  }
+
+  async listPaymentsLedger(params: {
+    workspaceId: string;
+    restrictToGroupIds?: string[];
+    from?: Date;
+    to?: Date;
+    method?: string;
+    status?: string;
+    limit: number;
+    cursor?: { paidAt: string; id: string };
+  }): Promise<PaymentLedgerRow[]> {
+    const rows: PaymentLedgerRow[] = [];
+    for (const payment of this.paymentsById.values()) {
+      if (payment.workspaceId !== params.workspaceId) continue;
+      if (params.from && payment.paidAt < params.from) continue;
+      if (params.to && payment.paidAt > params.to) continue;
+      if (params.method && payment.method !== params.method) continue;
+      if (params.status && payment.status !== params.status) continue;
+      const obligation = this.shared.obligationsById.get(payment.obligationId);
+      if (!obligation) continue;
+      const enrollment = this.shared.enrollmentsById.get(obligation.enrollmentId);
+      if (!enrollment) continue;
+      const groupMonth = this.shared.groupMonthsById.get(enrollment.groupMonthId);
+      if (!groupMonth) continue;
+      if (params.restrictToGroupIds !== undefined && !params.restrictToGroupIds.includes(groupMonth.groupId)) continue;
+      const group = this.shared.groupsById.get(groupMonth.groupId);
+      const student = this.shared.studentsById.get(enrollment.studentId);
+      if (!group || !student) continue;
+      rows.push({
+        payment,
+        studentId: student.id,
+        studentName: student.name,
+        studentCode: student.studentCode,
+        groupId: group.id,
+        groupName: group.name,
+        recordedByName: null,
+      });
+    }
+    rows.sort((a, b) => b.payment.paidAt.getTime() - a.payment.paidAt.getTime() || b.payment.id.localeCompare(a.payment.id));
+    const afterCursor = params.cursor
+      ? rows.filter((r) => {
+          const c = new Date(params.cursor!.paidAt).getTime();
+          return r.payment.paidAt.getTime() < c || (r.payment.paidAt.getTime() === c && r.payment.id.localeCompare(params.cursor!.id) < 0);
+        })
       : rows;
     return afterCursor.slice(0, params.limit);
   }

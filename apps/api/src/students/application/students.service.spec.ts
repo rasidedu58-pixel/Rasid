@@ -104,6 +104,17 @@ describe("StudentsService", () => {
       const other = repo.seedStudent({ workspaceId: WORKSPACE_B, studentCode: "AP-XXXXXX", name: "Other" });
       await expect(service.getStudent(owner, ownerContext, other.id)).rejects.toBeInstanceOf(ResourceNotFoundException);
     });
+
+    it("getStudentEnrollments 404s (safe no-leak) for a foreign-workspace student", async () => {
+      const other = repo.seedStudent({ workspaceId: WORKSPACE_B, studentCode: "AP-YYYYYY", name: "Other" });
+      await expect(service.getStudentEnrollments(owner, ownerContext, other.id)).rejects.toBeInstanceOf(ResourceNotFoundException);
+    });
+
+    it("getStudentEnrollments returns an empty history (never invents rows) for a student with no enrollments", async () => {
+      const created = await service.createStudent(owner, ownerContext, { name: "بلا مجموعة" }, null);
+      const res = await service.getStudentEnrollments(owner, ownerContext, created.student.id);
+      expect(res.enrollments).toEqual([]);
+    });
   });
 
   describe("update / archive", () => {

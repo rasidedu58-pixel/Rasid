@@ -20,6 +20,8 @@ import {
   listOperatingMonthsForWorkspace,
   listScheduleRulesForGroupMonth,
   listSessions,
+  listSessionsInRangeWithGroup,
+  prepareGroupForCurrentMonthTransaction,
   rescheduleSessionTransaction,
   runCreateMonthTransaction,
   tryInsertIdempotencyRecord,
@@ -32,8 +34,11 @@ import {
   type GroupRow,
   type IdempotencyRecordRow,
   type InsertGroupInput,
+  type CalendarSessionRow,
   type ListSessionsFilter,
   type OperatingMonthRow,
+  type PrepareGroupForCurrentMonthInput,
+  type PrepareGroupForCurrentMonthResult,
   type RescheduleInput,
   type ScheduleApplyInput,
   type ScheduleRuleRow,
@@ -133,12 +138,25 @@ export class DrizzleSchedulingRepository implements SchedulingRepositoryPort {
     return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => applyScheduleChangeTransaction(db, input));
   }
 
+  prepareGroupForCurrentMonth(input: PrepareGroupForCurrentMonthInput): Promise<PrepareGroupForCurrentMonthResult> {
+    return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => prepareGroupForCurrentMonthTransaction(db, input));
+  }
+
   findSessionById(id: string): Promise<SessionRow | undefined> {
     return withRuntimeContext(this.runtimeCtx(), (db) => findSessionById(db, id));
   }
 
   listSessions(filter: ListSessionsFilter): Promise<SessionRow[]> {
     return withRuntimeContext(this.runtimeCtx(filter.workspaceId), (db) => listSessions(db, filter));
+  }
+
+  listSessionsInRangeWithGroup(filter: {
+    workspaceId: string;
+    scheduledFrom: Date;
+    scheduledTo: Date;
+    restrictToGroupIds?: string[];
+  }): Promise<CalendarSessionRow[]> {
+    return withRuntimeContext(this.runtimeCtx(filter.workspaceId), (db) => listSessionsInRangeWithGroup(db, filter));
   }
 
   cancelSessionIfScheduled(sessionId: string): Promise<SessionRow | undefined> {

@@ -19,6 +19,9 @@ import {
   type ScheduleRuleRow,
   type SchedulingAuditEventInput,
   type SessionRow,
+  type CalendarSessionRow,
+  type PrepareGroupForCurrentMonthInput,
+  type PrepareGroupForCurrentMonthResult,
   type UpdateGroupInput,
 } from "@academic-precision/database";
 import type { SchedulingRepositoryPort } from "../ports/scheduling-repository.port";
@@ -369,6 +372,73 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
     return { cancelledSessionIds, createdSessions, scheduleRules: insertedRules };
   }
 
+  async prepareGroupForCurrentMonth(input: PrepareGroupForCurrentMonthInput): Promise<PrepareGroupForCurrentMonthResult> {
+    const currentMonth = [...this.monthsById.values()].find(
+      (m) => m.workspaceId === input.workspaceId && m.status === "CURRENT",
+    );
+    if (!currentMonth) return { status: "NO_CURRENT_MONTH" };
+
+    const existing = [...this.groupMonthsById.values()].find(
+      (gm) => gm.workspaceId === input.workspaceId && gm.groupId === input.groupId && gm.operatingMonthId === currentMonth.id,
+    );
+    if (existing) {
+      const generatedSessionCount = [...this.sessionsById.values()].filter((s) => s.groupMonthId === existing.id).length;
+      return { status: "ALREADY_PREPARED", groupMonth: existing, generatedSessionCount };
+    }
+
+    const groupMonth = this.seedGroupMonth({
+      workspaceId: input.workspaceId,
+      groupId: input.groupId,
+      operatingMonthId: currentMonth.id,
+      locationId: input.locationId,
+      baseFeeMinor: input.baseFeeMinor,
+      currencyCode: input.currencyCode,
+      duePolicy: input.duePolicy,
+      dueDay: input.dueDay,
+      joinFeePolicy: input.joinFeePolicy,
+    });
+
+    for (const rule of input.scheduleRules) {
+      const now = this.now();
+      const row: ScheduleRuleRow = {
+        id: randomUUID(),
+        workspaceId: input.workspaceId,
+        groupMonthId: groupMonth.id,
+        weekday: rule.weekday,
+        startTime: rule.startTime,
+        durationMinutes: rule.durationMinutes,
+        effectiveFrom: rule.effectiveFrom ?? null,
+        effectiveTo: rule.effectiveTo ?? null,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+      };
+      this.scheduleRulesById.set(row.id, row);
+    }
+
+    const occurrences = generateSessionOccurrencesForRules({
+      workspaceTimezone: input.workspaceTimezone,
+      year: currentMonth.year,
+      month: currentMonth.month,
+      rules: input.scheduleRules,
+    }).filter((o) => o.scheduledAt.getTime() >= input.now.getTime());
+
+    for (const occ of occurrences) {
+      this.seedSession({
+        workspaceId: input.workspaceId,
+        groupMonthId: groupMonth.id,
+        scheduledAt: occ.scheduledAt,
+        durationMinutes: occ.durationMinutes,
+        status: "SCHEDULED",
+        origin: "GENERATED",
+        billableForProration: true,
+        createdByUserId: input.createdByUserId,
+      });
+    }
+
+    return { status: "PREPARED", operatingMonth: currentMonth, groupMonth, generatedSessionCount: occurrences.length };
+  }
+
   async findSessionById(id: string): Promise<SessionRow | undefined> {
     return this.sessionsById.get(id);
   }
@@ -388,6 +458,38 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
       );
     }
     return rows.slice(0, filter.limit);
+  }
+
+  async listSessionsInRangeWithGroup(filter: {
+    workspaceId: string;
+    scheduledFrom: Date;
+    scheduledTo: Date;
+    restrictToGroupIds?: string[];
+  }): Promise<CalendarSessionRow[]> {
+    if (filter.restrictToGroupIds && filter.restrictToGroupIds.length === 0) return [];
+    const restrict = filter.restrictToGroupIds ? new Set(filter.restrictToGroupIds) : undefined;
+    const rows = [...this.sessionsById.values()]
+      .filter(
+        (s) =>
+          s.workspaceId === filter.workspaceId &&
+          s.scheduledAt >= filter.scheduledFrom &&
+          s.scheduledAt <= filter.scheduledTo,
+      )
+      .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime() || a.id.localeCompare(b.id));
+
+    const out: CalendarSessionRow[] = [];
+    for (const session of rows) {
+      const groupMonth = this.groupMonthsById.get(session.groupMonthId);
+      if (!groupMonth) continue;
+      const group = this.groupsById.get(groupMonth.groupId);
+      if (!group) continue;
+      if (restrict && !restrict.has(group.id)) continue;
+      const studentCount = [...this.enrollmentsById.values()].filter(
+        (e) => e.groupMonthId === session.groupMonthId && e.status === "ACTIVE",
+      ).length;
+      out.push({ session, groupId: group.id, groupName: group.name, studentCount });
+    }
+    return out;
   }
 
   async cancelSessionIfScheduled(sessionId: string): Promise<SessionRow | undefined> {

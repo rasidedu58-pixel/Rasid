@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   CreateOrReactivateEnrollmentInput,
+  EnrollmentHistoryRow,
   EnrollmentRow,
   FinancialObligationRow,
   GroupMonthRow,
@@ -331,6 +332,25 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
       if (groupMonth) groupIds.add(groupMonth.groupId);
     }
     return [...groupIds];
+  }
+
+  async listEnrollmentsForStudent(studentId: string): Promise<EnrollmentHistoryRow[]> {
+    const out: EnrollmentHistoryRow[] = [];
+    for (const enrollment of this.enrollmentsById.values()) {
+      if (enrollment.studentId !== studentId) continue;
+      const groupMonth = this.groupMonthsById.get(enrollment.groupMonthId);
+      if (!groupMonth) continue;
+      const group = this.groupsById.get(groupMonth.groupId);
+      const month = this.operatingMonthsById.get(groupMonth.operatingMonthId);
+      if (!group || !month) continue;
+      out.push({ enrollment, groupId: group.id, groupName: group.name, year: month.year, month: month.month });
+    }
+    return out.sort(
+      (a, b) =>
+        b.year - a.year ||
+        b.month - a.month ||
+        (b.enrollment.createdAt?.getTime() ?? 0) - (a.enrollment.createdAt?.getTime() ?? 0),
+    );
   }
 
   async insertGuardian(input: InsertGuardianInput): Promise<GuardianRow> {

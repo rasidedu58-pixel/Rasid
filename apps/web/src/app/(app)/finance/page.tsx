@@ -4,16 +4,20 @@ import { useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Wallet } from "lucide-react";
-import { Button, EmptyState, ErrorState, MetricCell, MetricStrip, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, formatDate, formatMoney } from "@academic-precision/ui";
+import { Button, EmptyState, ErrorState, MetricCell, MetricStrip, SegmentedControl, SkeletonRows, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, formatDate, formatMoney } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
 import { fetchCollectionQueue, fetchFinanceSummary } from "../../../lib/api/finance";
 import { RecordPaymentDialog } from "../../../components/finance/record-payment-dialog";
 import { ObligationStatusBadge } from "../students/[studentId]/overview-tab";
+import { PaymentLedger } from "./payment-ledger";
+
+type FinanceView = "attention" | "ledger";
 
 export default function FinancePage() {
   const { workspaceId, hasPermission } = useWorkspace();
+  const [view, setView] = useState<FinanceView>("attention");
   const [payingObligation, setPayingObligation] = useState<{ id: string; remainingMinor: number } | null>(null);
 
   const summaryQuery = useQuery({
@@ -38,7 +42,7 @@ export default function FinancePage() {
 
   return (
     <>
-      <PageHeader title="المالية" description="الالتزامات المستحقة والمتأخرة عبر كل الطلاب." />
+      <PageHeader title="المركز المالي" description="ما يحتاج متابعة وسجل الدفعات — في مكان واحد." />
 
       {summaryQuery.data ? (
         <MetricStrip className="mb-6">
@@ -54,7 +58,21 @@ export default function FinancePage() {
         </MetricStrip>
       ) : null}
 
-      {queueQuery.isLoading ? (
+      <div className="mb-4">
+        <SegmentedControl<FinanceView>
+          aria-label="عرض المالية"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "attention", label: "يحتاج متابعة" },
+            { value: "ledger", label: "سجل الدفعات" },
+          ]}
+        />
+      </div>
+
+      {view === "ledger" ? (
+        <PaymentLedger />
+      ) : queueQuery.isLoading ? (
         <SkeletonRows rows={6} />
       ) : queueQuery.isError ? (
         <ErrorState onRetry={() => queueQuery.refetch()} />

@@ -6,7 +6,7 @@ import { CurrentUser } from "../../identity/api/decorators/current-user.decorato
 import { CurrentWorkspaceContext } from "../../team/api/decorators/current-workspace-context.decorator";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
 import { PermissionGuard, type WorkspaceContext } from "../../team/api/guards/permission.guard";
-import type { CollectionQueueResponse, FinanceSummaryResponse } from "@academic-precision/contracts";
+import type { CollectionQueueResponse, FinanceSummaryResponse, PaymentLedgerResponse } from "@academic-precision/contracts";
 import { FinanceService } from "../application/finance.service";
 
 /**
@@ -35,6 +35,25 @@ export class FinanceController {
     @Query("cursor") cursor?: string,
   ): Promise<CollectionQueueResponse> {
     return this.financeService.getCollectionQueue(user, workspaceContext, { cursor });
+  }
+
+  @Get("payments")
+  @ApiOperation({ summary: "Payment ledger, newest first, filterable (GET /api/v1/finance/payments)" })
+  @ApiQuery({ name: "cursor", required: false })
+  @ApiQuery({ name: "from", required: false })
+  @ApiQuery({ name: "to", required: false })
+  @ApiQuery({ name: "method", required: false })
+  @ApiQuery({ name: "status", required: false })
+  paymentLedger(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Query("cursor") cursor?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("method") method?: string,
+    @Query("status") status?: string,
+  ): Promise<PaymentLedgerResponse> {
+    return this.financeService.getPaymentLedger(user, workspaceContext, { cursor, from, to, method, status });
   }
 
   @Get("summary")

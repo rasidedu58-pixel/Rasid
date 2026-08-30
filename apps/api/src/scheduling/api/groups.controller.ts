@@ -13,10 +13,13 @@ import { EntitlementGuard } from "../../billing/api/guards/entitlement.guard";
 import { RequireEntitlement } from "../../billing/api/decorators/require-entitlement.decorator";
 import {
   createGroupRequestSchema,
+  prepareGroupCurrentMonthRequestSchema,
   updateGroupRequestSchema,
   type CreateGroupRequest,
   type Group,
   type ListGroupsResponse,
+  type PrepareGroupCurrentMonthRequest,
+  type PrepareGroupCurrentMonthResponse,
   type UpdateGroupRequest,
 } from "@academic-precision/contracts";
 import { ValidationApiException } from "../../common/exceptions/api.exception";
@@ -61,6 +64,29 @@ export class GroupsController {
       user,
       workspaceContext,
       parsed.data as CreateGroupRequest,
+      extractHeader(request, REQUEST_ID_HEADER),
+    );
+  }
+
+  @Post(":id/prepare-current-month")
+  @RequirePermission("groups.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
+  @ApiOperation({ summary: "Prepare a group for the current month — GroupMonth + schedule + remaining sessions (POST /api/v1/groups/:id/prepare-current-month)" })
+  prepareCurrentMonth(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<PrepareGroupCurrentMonthResponse> {
+    const parsed = prepareGroupCurrentMonthRequestSchema.safeParse(body);
+    if (!parsed.success) throw new ValidationApiException(toFieldErrors(parsed.error));
+    return this.schedulingService.prepareGroupForCurrentMonth(
+      user,
+      workspaceContext,
+      id,
+      parsed.data as PrepareGroupCurrentMonthRequest,
       extractHeader(request, REQUEST_ID_HEADER),
     );
   }

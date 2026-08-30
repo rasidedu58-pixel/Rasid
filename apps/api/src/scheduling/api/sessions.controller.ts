@@ -15,6 +15,7 @@ import {
   sessionRescheduleRequestSchema,
   sessionReschedulePreviewRequestSchema,
   type ListSessionsResponse,
+  type ListSessionsCalendarResponse,
   type Session,
   type SessionCancelResponse,
   type SessionReschedulePreviewRequest,
@@ -60,6 +61,18 @@ export class SessionsController {
       cursor,
       limit: limit ? Number(limit) : undefined,
     });
+  }
+
+  @Get("calendar")
+  @RequirePermission("groups.view")
+  @ApiOperation({ summary: "Enriched sessions in a date range for the calendar (GET /api/v1/sessions/calendar)" })
+  listSessionsCalendar(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<ListSessionsCalendarResponse> {
+    return this.schedulingService.listSessionsCalendar(user, workspaceContext, { from, to });
   }
 
   @Get(":id")

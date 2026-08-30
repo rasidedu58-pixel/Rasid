@@ -8,7 +8,7 @@ import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
 import { fetchGroups } from "../../../lib/api/scheduling";
-import { CreateGroupDialog } from "./create-group-dialog";
+import { CreateGroupWizard } from "./create-group-wizard";
 
 export default function GroupsPage() {
   const { workspaceId } = useWorkspace();
@@ -20,7 +20,7 @@ export default function GroupsPage() {
 
   return (
     <>
-      <PageHeader title="المجموعات" description="المجموعات الدائمة — الجدول والرسوم الشهرية تُدار من داخل كل مجموعة." actions={<CreateGroupDialog />} />
+      <PageHeader title="المجموعات" description="المجموعات الدائمة — الجدول والرسوم الشهرية تُدار من داخل كل مجموعة." actions={<CreateGroupWizard />} />
 
       {query.isLoading ? (
         <LoadingRegion />

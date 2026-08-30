@@ -75,6 +75,19 @@ export class OwnerMembershipProtectedException extends ApiException {
   }
 }
 
+/**
+ * 409 — the Group Wizard's "prepare current month" step ran while the
+ * workspace has no CURRENT operating month. We never auto-create a month from
+ * the wizard; the caller must prepare one first via the existing month-prep
+ * flow. Distinct code so the UI can route to that flow rather than show a
+ * generic error.
+ */
+export class NoCurrentMonthException extends ApiException {
+  constructor(message = "لا يوجد شهر تشغيلي حالي. جهّز الشهر أولًا ثم أضف المجموعة.", details?: Record<string, unknown>) {
+    super(409, "NO_CURRENT_MONTH", message, details);
+  }
+}
+
 /** 409 — Database Schema INT-01: a (workspace, year, month) OperatingMonth already exists. */
 export class MonthAlreadyExistsException extends ApiException {
   constructor(message = "يوجد شهر تشغيلي بنفس السنة والشهر بالفعل.", details?: Record<string, unknown>) {

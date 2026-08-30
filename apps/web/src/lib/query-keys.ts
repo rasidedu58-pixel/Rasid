@@ -12,6 +12,7 @@ export const qk = {
     list: (ws: string, params?: Record<string, unknown>) => ["students", ws, "list", params] as const,
     detail: (ws: string, id: string) => ["students", ws, "detail", id] as const,
     obligations: (ws: string, id: string) => ["students", ws, id, "obligations"] as const,
+    enrollments: (ws: string, id: string) => ["students", ws, id, "enrollments"] as const,
   },
   groups: {
     list: (ws: string) => ["groups", ws, "list"] as const,
@@ -26,6 +27,7 @@ export const qk = {
   },
   sessions: {
     list: (ws: string, params?: Record<string, unknown>) => ["sessions", ws, "list", params] as const,
+    calendar: (ws: string, from: string, to: string) => ["sessions", ws, "calendar", from, to] as const,
     detail: (ws: string, id: string) => ["sessions", ws, "detail", id] as const,
     roster: (ws: string, id: string) => ["sessions", ws, id, "roster"] as const,
     review: (ws: string, id: string) => ["sessions", ws, id, "review"] as const,
@@ -33,6 +35,7 @@ export const qk = {
   finance: {
     collectionQueue: (ws: string) => ["finance", ws, "collection-queue"] as const,
     summary: (ws: string) => ["finance", ws, "summary"] as const,
+    ledger: (ws: string, filters?: Record<string, unknown>) => ["finance", ws, "ledger", filters] as const,
   },
   attention: {
     cases: (ws: string, params?: Record<string, unknown>) => ["attention-cases", ws, "list", params] as const,

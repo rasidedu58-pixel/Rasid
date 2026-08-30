@@ -268,3 +268,29 @@ export const enrollmentTransferResponseSchema = z.object({
   obligation: obligationSchema,
 });
 export type EnrollmentTransferResponse = z.infer<typeof enrollmentTransferResponseSchema>;
+
+/**
+ * `GET /students/:id/enrollments` — a student's full enrollment history, newest
+ * first: each enrollment's group, operating month, status, and (when actually
+ * stored) end date + reason. The student is permanent; this is the record of
+ * their group memberships over time (join → withdraw/transfer preserved).
+ */
+export const studentEnrollmentHistoryItemSchema = z.object({
+  id: z.string().uuid(),
+  groupId: z.string().uuid(),
+  groupName: z.string(),
+  groupMonthId: z.string().uuid(),
+  year: z.number().int(),
+  month: z.number().int(),
+  status: enrollmentStatusSchema,
+  joinDate: z.string(),
+  endedAt: z.string().nullable(),
+  endReason: z.string().nullable(),
+  feeMethod: feeMethodSchema,
+});
+export type StudentEnrollmentHistoryItem = z.infer<typeof studentEnrollmentHistoryItemSchema>;
+
+export const listStudentEnrollmentsResponseSchema = z.object({
+  enrollments: z.array(studentEnrollmentHistoryItemSchema),
+});
+export type ListStudentEnrollmentsResponse = z.infer<typeof listStudentEnrollmentsResponseSchema>;

@@ -1,4 +1,5 @@
 import type {
+  CalendarSessionRow,
   CarryForwardStats,
   CreateMonthTransactionInput,
   CreateMonthTransactionResult,
@@ -8,6 +9,8 @@ import type {
   InsertGroupInput,
   ListSessionsFilter,
   OperatingMonthRow,
+  PrepareGroupForCurrentMonthInput,
+  PrepareGroupForCurrentMonthResult,
   RescheduleInput,
   ScheduleApplyInput,
   ScheduleApplyResult,
@@ -61,10 +64,19 @@ export interface SchedulingRepositoryPort {
     }>,
   ): Promise<GroupMonthRow | undefined>;
   applyScheduleChangeTransaction(input: ScheduleApplyInput): Promise<ScheduleApplyResult>;
+  /** Attach a group to the CURRENT operating month (GroupMonth + schedule + remaining sessions). Idempotent. */
+  prepareGroupForCurrentMonth(input: PrepareGroupForCurrentMonthInput): Promise<PrepareGroupForCurrentMonthResult>;
 
   // Sessions
   findSessionById(id: string): Promise<SessionRow | undefined>;
   listSessions(filter: ListSessionsFilter): Promise<SessionRow[]>;
+  /** Enriched, group-scope-resolved, date-range read for the calendar. */
+  listSessionsInRangeWithGroup(filter: {
+    workspaceId: string;
+    scheduledFrom: Date;
+    scheduledTo: Date;
+    restrictToGroupIds?: string[];
+  }): Promise<CalendarSessionRow[]>;
   cancelSessionIfScheduled(sessionId: string): Promise<SessionRow | undefined>;
   rescheduleSessionTransaction(
     input: RescheduleInput,

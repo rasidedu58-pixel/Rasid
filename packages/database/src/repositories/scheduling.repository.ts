@@ -284,6 +284,74 @@ export async function listSessions(db: Db, filter: ListSessionsFilter): Promise<
     .limit(filter.limit);
 }
 
+/**
+ * One enriched row for the Session Operations calendar: the session plus its
+ * group identity (resolved through group_month → group) and a student count.
+ */
+export interface CalendarSessionRow {
+  session: SessionRow;
+  groupId: string;
+  groupName: string;
+  /** ACTIVE enrollments in the session's group_month — "students in this group this month". */
+  studentCount: number;
+}
+
+export interface ListCalendarSessionsFilter {
+  workspaceId: string;
+  scheduledFrom: Date;
+  scheduledTo: Date;
+  /**
+   * `undefined` = all groups (Owner / ALL_GROUPS grant); a list restricts to
+   * those group ids (SELECTED_GROUPS); `[]` = deny-all (returns nothing).
+   */
+  restrictToGroupIds?: string[];
+}
+
+/** Date-range-bounded safety cap — a single month across all groups is far below this. */
+const CALENDAR_RANGE_MAX = 2000;
+
+/**
+ * Calendar read: every session in `[scheduledFrom, scheduledTo]`, joined to
+ * its group (name) and counted students, in ONE query (no N+1). Group scope
+ * is applied in-SQL via `restrictToGroupIds`, so a SELECTED_GROUPS assistant
+ * gets exactly their groups' sessions WITHOUT needing a groupMonthId filter.
+ * RLS (app.workspace_id) already isolates the tenant; this adds group scope.
+ */
+export async function listSessionsInRangeWithGroup(
+  db: Db,
+  filter: ListCalendarSessionsFilter,
+): Promise<CalendarSessionRow[]> {
+  if (filter.restrictToGroupIds && filter.restrictToGroupIds.length === 0) return [];
+
+  const conditions = [
+    eq(sessions.workspaceId, filter.workspaceId),
+    gte(sessions.scheduledAt, filter.scheduledFrom),
+    lte(sessions.scheduledAt, filter.scheduledTo),
+  ];
+  if (filter.restrictToGroupIds) conditions.push(inArray(groups.id, filter.restrictToGroupIds));
+
+  const rows = await db
+    .select({
+      session: sessions,
+      groupId: groups.id,
+      groupName: groups.name,
+      studentCount: rawSql<number>`(SELECT count(*)::int FROM ${enrollments} WHERE ${enrollments.groupMonthId} = ${sessions.groupMonthId} AND ${enrollments.status} = 'ACTIVE')`,
+    })
+    .from(sessions)
+    .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
+    .innerJoin(groups, eq(groups.id, groupMonths.groupId))
+    .where(and(...conditions))
+    .orderBy(asc(sessions.scheduledAt), asc(sessions.id))
+    .limit(CALENDAR_RANGE_MAX);
+
+  return rows.map((r) => ({
+    session: r.session,
+    groupId: r.groupId,
+    groupName: r.groupName,
+    studentCount: Number(r.studentCount ?? 0),
+  }));
+}
+
 export async function cancelSessionIfScheduled(db: Db, sessionId: string): Promise<SessionRow | undefined> {
   const now = new Date();
   const [updated] = await db
@@ -572,6 +640,197 @@ export interface CreateMonthTransactionResult {
   enrollmentCount: number;
 }
 
+/**
+ * Shared creation primitive: insert a GroupMonth, its schedule_rules, and the
+ * generated sessions for a target month — the EXACT logic used inside
+ * `runCreateMonthTransaction` (extracted so both the month-create path and the
+ * single-group `prepareGroupForCurrentMonthTransaction` path use ONE
+ * implementation, never a parallel copy). Must be called INSIDE a transaction.
+ *
+ * `generateFrom`, when set, skips any occurrence strictly before that instant —
+ * so preparing a group mid-month generates only the REMAINING sessions, never a
+ * session in the past. Month-create omits it (whole month, unchanged behaviour).
+ * Creates NO enrollments/obligations — carry-forward stays in the caller.
+ */
+export interface GroupMonthScheduleSpec {
+  workspaceId: string;
+  operatingMonthId: string;
+  targetYear: number;
+  targetMonth: number;
+  workspaceTimezone: string;
+  createdByUserId: string;
+  groupId: string;
+  locationId: string | null;
+  baseFeeMinor: number;
+  currencyCode: string;
+  duePolicy: string;
+  dueDay: number | null;
+  joinFeePolicy: string;
+  scheduleRules: ScheduleRuleInput[];
+  generateFrom?: Date;
+}
+
+async function insertGroupMonthWithScheduleAndSessions(
+  tx: Db,
+  spec: GroupMonthScheduleSpec,
+): Promise<{ groupMonth: GroupMonthRow; sessionCount: number }> {
+  const [groupMonth] = await tx
+    .insert(groupMonths)
+    .values({
+      workspaceId: spec.workspaceId,
+      groupId: spec.groupId,
+      operatingMonthId: spec.operatingMonthId,
+      locationId: spec.locationId,
+      baseFeeMinor: spec.baseFeeMinor,
+      currencyCode: spec.currencyCode,
+      duePolicy: spec.duePolicy,
+      dueDay: spec.dueDay,
+      joinFeePolicy: spec.joinFeePolicy,
+    })
+    .returning();
+  if (!groupMonth) throw new Error("Failed to insert group_months row.");
+
+  for (const rule of spec.scheduleRules) {
+    await tx.insert(scheduleRules).values({
+      workspaceId: spec.workspaceId,
+      groupMonthId: groupMonth.id,
+      weekday: rule.weekday,
+      startTime: rule.startTime,
+      durationMinutes: rule.durationMinutes,
+      effectiveFrom: rule.effectiveFrom ?? null,
+      effectiveTo: rule.effectiveTo ?? null,
+    });
+  }
+
+  const occurrences = generateSessionOccurrencesForRules({
+    workspaceTimezone: spec.workspaceTimezone,
+    year: spec.targetYear,
+    month: spec.targetMonth,
+    rules: spec.scheduleRules,
+  });
+
+  let sessionCount = 0;
+  for (const occurrence of occurrences) {
+    if (spec.generateFrom && occurrence.scheduledAt < spec.generateFrom) continue;
+    await tx.insert(sessions).values({
+      workspaceId: spec.workspaceId,
+      groupMonthId: groupMonth.id,
+      scheduledAt: occurrence.scheduledAt,
+      durationMinutes: occurrence.durationMinutes,
+      status: SCHEDULED_SESSION_STATUS,
+      origin: GENERATED_ORIGIN,
+      billableForProration: true,
+      createdByUserId: spec.createdByUserId,
+    });
+    sessionCount += 1;
+  }
+
+  return { groupMonth, sessionCount };
+}
+
+export interface PrepareGroupForCurrentMonthInput {
+  workspaceId: string;
+  groupId: string;
+  createdByUserId: string;
+  createdByMembershipId: string | null;
+  correlationId?: string | null;
+  workspaceTimezone: string;
+  /** "Now" — occurrences before this are skipped (no past sessions). */
+  now: Date;
+  locationId: string | null;
+  baseFeeMinor: number;
+  currencyCode: string;
+  duePolicy: string;
+  dueDay: number | null;
+  joinFeePolicy: string;
+  scheduleRules: ScheduleRuleInput[];
+}
+
+export type PrepareGroupForCurrentMonthResult =
+  | { status: "NO_CURRENT_MONTH" }
+  | { status: "ALREADY_PREPARED"; groupMonth: GroupMonthRow; generatedSessionCount: number }
+  | { status: "PREPARED"; operatingMonth: OperatingMonthRow; groupMonth: GroupMonthRow; generatedSessionCount: number };
+
+/**
+ * Prepares a single group for the workspace's CURRENT operating month — the
+ * missing primitive that lets a group created mid-month get a GroupMonth
+ * (fee/policy) + weekly schedule + the remaining sessions this month, WITHOUT
+ * re-running month creation. All in ONE transaction. Idempotent: if the group
+ * already has a GroupMonth this month it returns ALREADY_PREPARED (no
+ * duplicates — also hard-backstopped by the unique(group_id, operating_month_id)
+ * constraint against a concurrent race). Never auto-creates an operating month:
+ * with none CURRENT it returns NO_CURRENT_MONTH for the caller to surface.
+ * Creates NO financial obligations (a brand-new group has no enrollments yet).
+ */
+export async function prepareGroupForCurrentMonthTransaction(
+  db: Db,
+  input: PrepareGroupForCurrentMonthInput,
+): Promise<PrepareGroupForCurrentMonthResult> {
+  return db.transaction(async (tx) => {
+    const [currentMonth] = await tx
+      .select()
+      .from(operatingMonths)
+      .where(and(eq(operatingMonths.workspaceId, input.workspaceId), eq(operatingMonths.status, CURRENT_MONTH_STATUS)))
+      .limit(1);
+    if (!currentMonth) return { status: "NO_CURRENT_MONTH" } as const;
+
+    const [existing] = await tx
+      .select()
+      .from(groupMonths)
+      .where(
+        and(
+          eq(groupMonths.workspaceId, input.workspaceId),
+          eq(groupMonths.groupId, input.groupId),
+          eq(groupMonths.operatingMonthId, currentMonth.id),
+        ),
+      )
+      .limit(1);
+    if (existing) {
+      const [countRow] = await tx
+        .select({ count: rawSql<number>`count(*)::int` })
+        .from(sessions)
+        .where(eq(sessions.groupMonthId, existing.id));
+      return { status: "ALREADY_PREPARED", groupMonth: existing, generatedSessionCount: Number(countRow?.count ?? 0) } as const;
+    }
+
+    const { groupMonth, sessionCount } = await insertGroupMonthWithScheduleAndSessions(tx, {
+      workspaceId: input.workspaceId,
+      operatingMonthId: currentMonth.id,
+      targetYear: currentMonth.year,
+      targetMonth: currentMonth.month,
+      workspaceTimezone: input.workspaceTimezone,
+      createdByUserId: input.createdByUserId,
+      groupId: input.groupId,
+      locationId: input.locationId,
+      baseFeeMinor: input.baseFeeMinor,
+      currencyCode: input.currencyCode,
+      duePolicy: input.duePolicy,
+      dueDay: input.dueDay,
+      joinFeePolicy: input.joinFeePolicy,
+      scheduleRules: input.scheduleRules,
+      generateFrom: input.now,
+    });
+
+    await tx.insert(auditEvents).values({
+      workspaceId: input.workspaceId,
+      actorUserId: input.createdByUserId,
+      actorMembershipId: input.createdByMembershipId,
+      action: "group.prepared_current_month",
+      entityType: "group_month",
+      entityId: groupMonth.id,
+      afterJson: {
+        groupId: input.groupId,
+        operatingMonthId: currentMonth.id,
+        generatedSessionCount: sessionCount,
+        scheduleRuleCount: input.scheduleRules.length,
+      },
+      correlationId: input.correlationId ?? null,
+    });
+
+    return { status: "PREPARED", operatingMonth: currentMonth, groupMonth, generatedSessionCount: sessionCount } as const;
+  });
+}
+
 export const CARRY_FORWARD_DUE_DAY_UNRESOLVED = "CARRY_FORWARD_DUE_DAY_UNRESOLVED" as const;
 
 /**
@@ -707,55 +966,26 @@ async function runCreateMonthTransactionInner(
     const firstOfMonthIso = `${input.targetYear}-${String(input.targetMonth).padStart(2, "0")}-01`;
 
     for (const spec of input.groupSpecs) {
-      const [groupMonth] = await tx
-        .insert(groupMonths)
-        .values({
-          workspaceId: input.workspaceId,
-          groupId: spec.groupId,
-          operatingMonthId: operatingMonth.id,
-          locationId: spec.locationId,
-          baseFeeMinor: spec.baseFeeMinor,
-          currencyCode: spec.currencyCode,
-          duePolicy: spec.duePolicy,
-          dueDay: spec.dueDay,
-          joinFeePolicy: spec.joinFeePolicy,
-        })
-        .returning();
-      if (!groupMonth) throw new Error("Failed to insert group_months row.");
-      createdGroupMonths.push(groupMonth);
-
-      for (const rule of spec.scheduleRules) {
-        await tx.insert(scheduleRules).values({
-          workspaceId: input.workspaceId,
-          groupMonthId: groupMonth.id,
-          weekday: rule.weekday,
-          startTime: rule.startTime,
-          durationMinutes: rule.durationMinutes,
-          effectiveFrom: rule.effectiveFrom ?? null,
-          effectiveTo: rule.effectiveTo ?? null,
-        });
-      }
-
-      const occurrences = generateSessionOccurrencesForRules({
+      // Same creation primitive the single-group prepare path uses (no
+      // parallel copy). `generateFrom` omitted → whole target month.
+      const { groupMonth, sessionCount: createdCount } = await insertGroupMonthWithScheduleAndSessions(tx, {
+        workspaceId: input.workspaceId,
+        operatingMonthId: operatingMonth.id,
+        targetYear: input.targetYear,
+        targetMonth: input.targetMonth,
         workspaceTimezone: input.workspaceTimezone,
-        year: input.targetYear,
-        month: input.targetMonth,
-        rules: spec.scheduleRules,
+        createdByUserId: input.createdByUserId,
+        groupId: spec.groupId,
+        locationId: spec.locationId,
+        baseFeeMinor: spec.baseFeeMinor,
+        currencyCode: spec.currencyCode,
+        duePolicy: spec.duePolicy,
+        dueDay: spec.dueDay,
+        joinFeePolicy: spec.joinFeePolicy,
+        scheduleRules: spec.scheduleRules,
       });
-
-      for (const occurrence of occurrences) {
-        await tx.insert(sessions).values({
-          workspaceId: input.workspaceId,
-          groupMonthId: groupMonth.id,
-          scheduledAt: occurrence.scheduledAt,
-          durationMinutes: occurrence.durationMinutes,
-          status: SCHEDULED_SESSION_STATUS,
-          origin: GENERATED_ORIGIN,
-          billableForProration: true,
-          createdByUserId: input.createdByUserId,
-        });
-        sessionCount += 1;
-      }
+      createdGroupMonths.push(groupMonth);
+      sessionCount += createdCount;
 
       if (spec.sourceGroupMonthId) {
         const sourceEnrollments = await tx
