@@ -6,6 +6,7 @@ import { cn } from "@academic-precision/ui";
 import { useWorkspace } from "../../lib/workspace-provider";
 import { useVisibleNavItems } from "./use-visible-nav-items";
 import { NAV_SECTION_LABEL, NAV_SECTION_ORDER, type NavItem, type NavSection } from "./nav-config";
+import { BrandMark } from "../brand-mark";
 
 /**
  * The Teacher App shell (Phase 13 → refined Phase UI-1). A deep, confident
@@ -29,15 +30,7 @@ export function Sidebar() {
     <aside className="hidden w-64 shrink-0 flex-col bg-shell md:flex">
       {/* Brand + workspace context */}
       <div className="flex flex-col gap-3 px-4 pb-4 pt-5">
-        <div className="flex items-center gap-2.5">
-          <span
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-cta text-[15px] font-bold text-white shadow-glow"
-            aria-hidden
-          >
-            ر
-          </span>
-          <span className="text-lg font-bold tracking-tight text-white">راصد</span>
-        </div>
+        <BrandMark tone="onDark" size="md" />
         {workspaceName ? (
           <div className="truncate rounded-md bg-shell-hover px-2.5 py-1.5 text-xs font-medium text-shell-text" title={workspaceName}>
             {workspaceName}

@@ -388,72 +388,162 @@ body * {
   overflow: hidden;
 }
 
-/* ---- Splash screen ---- */
-.rasid-splash {
+/* ---- Splash screen (Brand Motion Sequence, ~2.1s) ---- */
+.rasid-splash2 {
   position: fixed;
   inset: 0;
   z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: hsl(var(--background));
-  transition: opacity 0.5s ease;
+  display: grid;
+  place-items: center;
+  background-color: #08090e; /* deep near-black — matches the landing beneath, no white flash */
+  animation: rs-cover 2.15s linear both;
 }
-.rasid-splash[data-leaving="true"] {
-  opacity: 0;
-}
-@keyframes rasid-splash-glyph {
-  from {
-    opacity: 0;
-    transform: scale(0.94);
-    filter: blur(6px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-    filter: blur(0);
-  }
-}
-@keyframes rasid-splash-word {
-  from {
-    opacity: 0;
-    transform: translateY(7px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes rasid-radar {
-  0% {
-    transform: scale(0.7);
-    opacity: 0.55;
-  }
-  70% {
-    opacity: 0;
-  }
-  100% {
-    transform: scale(2);
-    opacity: 0;
-  }
-}
-.rasid-splash-glyph {
-  animation: rasid-splash-glyph 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.rasid-splash-word {
-  animation: rasid-splash-word 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.35s both;
-}
-.rasid-splash-radar::before,
-.rasid-splash-radar::after {
-  content: "";
+.rasid-splash2-glow {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  border: 2px solid hsl(var(--brand) / 0.5);
-  animation: rasid-radar 2s ease-out infinite;
+  width: 60vmin;
+  height: 60vmin;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.16), rgba(13, 148, 136, 0.05) 45%, transparent 70%);
+  filter: blur(6px);
+  animation: rs-glow 2.15s ease-out both;
 }
-.rasid-splash-radar::after {
-  animation-delay: 1s;
+.rasid-splash2-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  animation: rs-stage-exit 2.15s cubic-bezier(0.5, 0, 0.2, 1) both;
+}
+.rs-svg {
+  overflow: visible;
+}
+/* SVG groups animate in the view-box coordinate space around the mark centre. */
+.rs-rings,
+.rs-seg,
+.rs-center,
+.rs-flash,
+.rs-wave,
+.rs-particle {
+  transform-box: view-box;
+  transform-origin: 32px 32px;
+}
+.rs-rings { animation: rs-rings 2.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rs-seg { animation: rs-fracture 2.15s cubic-bezier(0.34, 1.4, 0.5, 1) both; }
+.rs-center { animation: rs-center 2.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rs-flash { animation: rs-flash 2.15s ease-out both; }
+.rs-wave { animation: rs-wave 2.15s ease-out both; opacity: 0; }
+.rs-particle { animation: rs-particle 2.15s ease-out both; opacity: 0; }
+.rs-arrow {
+  animation: rs-arrow 2.15s cubic-bezier(0.5, 0, 0.85, 0.4) both;
+  filter: drop-shadow(0 0 2px rgba(103, 232, 249, 0.55));
+}
+.rs-word {
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.5px;
+  color: #f8fafc;
+  animation: rs-word 2.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes rs-cover {
+  0%, 76.7% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes rs-glow {
+  0% { opacity: 0; transform: scale(0.6); }
+  12%, 55% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0.4; transform: scale(1.1); }
+}
+@keyframes rs-stage-exit {
+  0%, 76.7% { transform: scale(1); }
+  100% { transform: scale(1.06); }
+}
+@keyframes rs-rings {
+  0% { opacity: 0; transform: scale(0.55); }
+  11.6% { opacity: 1; transform: scale(1); }
+  33.5% { transform: scale(1); }
+  35.5% { transform: scale(1.035); } /* lock pulse */
+  37.2% { transform: scale(1); }     /* impact */
+  39.1% { transform: scale(0.975); } /* recoil */
+  41.9% { transform: scale(1.015); }
+  46% { transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes rs-fracture {
+  0%, 37.2% { transform: translate(0, 0) rotate(0); }
+  41.9% { transform: translate(var(--fx), var(--fy)) rotate(var(--fr)); } /* strike scatters segments */
+  65.1% { transform: translate(0, 0) rotate(0); }                          /* pulled back into place */
+  100% { transform: translate(0, 0) rotate(0); }
+}
+@keyframes rs-center {
+  0% { opacity: 0; transform: scale(0.35); }
+  11.6% { opacity: 1; transform: scale(1); }
+  37.2% { transform: scale(1); }
+  39.1% { transform: scale(1.2); } /* impact bump */
+  44% { transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes rs-flash {
+  0%, 37.2% { opacity: 0; transform: scale(0.2); }
+  39.1% { opacity: 0.9; transform: scale(1.3); }
+  48.8% { opacity: 0; transform: scale(2.6); }
+  100% { opacity: 0; }
+}
+@keyframes rs-wave {
+  0%, 37.2% { opacity: 0; transform: scale(0.2); }
+  39.5% { opacity: 0.85; transform: scale(0.7); }
+  50% { opacity: 0; transform: scale(4.4); }
+  100% { opacity: 0; }
+}
+@keyframes rs-particle {
+  0%, 37.2% { opacity: 0; transform: translate(0, 0); }
+  40% { opacity: 1; }
+  48% { opacity: 0; transform: translate(var(--px), var(--py)); }
+  100% { opacity: 0; transform: translate(var(--px), var(--py)); }
+}
+@keyframes rs-arrow {
+  0% { opacity: 0; transform: translate(46px, 46px); }
+  5% { opacity: 1; transform: translate(44px, 44px); }
+  20% { transform: translate(34px, 34px); }
+  30% { transform: translate(22px, 22px); }
+  35% { transform: translate(9px, 9px); }
+  37.2% { transform: translate(0, 0); }       /* impact — stops at the centre */
+  39% { transform: translate(-1.4px, -1.4px); } /* drives slightly in */
+  43% { transform: translate(0, 0); }
+  100% { opacity: 1; transform: translate(0, 0); }
+}
+@keyframes rs-word {
+  0%, 60.5% { opacity: 0; transform: translateY(6px); }
+  76.7% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Reduced motion — collapse the whole sequence to a calm logo fade. */
+.rasid-splash2[data-reduced] .rasid-splash2-stage,
+.rasid-splash2[data-reduced] .rs-rings,
+.rasid-splash2[data-reduced] .rs-seg,
+.rasid-splash2[data-reduced] .rs-center,
+.rasid-splash2[data-reduced] .rs-arrow,
+.rasid-splash2[data-reduced] .rs-word,
+.rasid-splash2[data-reduced] .rasid-splash2-glow {
+  animation: none;
+}
+.rasid-splash2[data-reduced] .rs-flash,
+.rasid-splash2[data-reduced] .rs-wave,
+.rasid-splash2[data-reduced] .rs-particle {
+  display: none;
+}
+.rasid-splash2[data-reduced] .rasid-splash2-stage {
+  animation: rs-reduced 0.35s ease both;
+}
+@keyframes rs-reduced {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+@media (max-width: 640px) {
+  .rs-svg { width: 150px; height: 150px; }
+  .rs-word { font-size: 19px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -463,10 +553,17 @@ body * {
     transition: none !important;
   }
   .rasid-float,
-  .rasid-splash-glyph,
-  .rasid-splash-word,
-  .rasid-splash-radar::before,
-  .rasid-splash-radar::after {
+  .rs-rings,
+  .rs-seg,
+  .rs-center,
+  .rs-flash,
+  .rs-wave,
+  .rs-particle,
+  .rs-arrow,
+  .rs-word,
+  .rasid-splash2,
+  .rasid-splash2-glow,
+  .rasid-splash2-stage {
     animation: none !important;
   }
   .rasid-accordion-panel {

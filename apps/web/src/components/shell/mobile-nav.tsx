@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, cn } from "@academic-precision/ui";
 import { useVisibleNavItems } from "./use-visible-nav-items";
+import { RasidMark } from "../brand/rasid-mark";
 
 export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const pathname = usePathname();
@@ -13,7 +14,10 @@ export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange:
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="end" className="w-72 max-w-[85vw] border-shell-border bg-shell" closeClassName="text-shell-text-muted hover:text-shell-text">
         <SheetHeader>
-          <SheetTitle className="text-white">راصد</SheetTitle>
+          <SheetTitle className="flex items-center gap-2.5 text-white">
+            <RasidMark size={28} />
+            راصد
+          </SheetTitle>
         </SheetHeader>
         <nav className="flex flex-col gap-1">
           {items.map((item) => {

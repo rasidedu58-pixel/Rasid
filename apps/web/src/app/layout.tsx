@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { IBM_Plex_Sans_Arabic } from "next/font/google";
 import { GeistSans } from "geist/font/sans";
@@ -38,10 +38,14 @@ export const metadata: Metadata = {
     description: "سجّل → افهم → اتخذ إجراء → تابع. تجربة مجانية 14 يومًا بدون بطاقة.",
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "راصد — نظام تشغيل ومتابعة للمدرسين",
     description: "سجّل → افهم → اتخذ إجراء → تابع. تجربة مجانية 14 يومًا بدون بطاقة.",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#08090e",
 };
 
 /** Root layout — Arabic-first/RTL. Providers are ordered so WorkspaceProvider can read SessionProvider's state, and AppQueryProvider wraps both (both use TanStack Query). */

@@ -1,15 +1,19 @@
 import { cn } from "@academic-precision/ui";
+import { RasidMark } from "./brand/rasid-mark";
 
 /**
- * The one canonical Rasid brand lockup: the "ر" glyph chip + "راصد"
- * wordmark, identical in language to the authenticated shell's sidebar
- * lockup (see components/shell/sidebar.tsx) so marketing, auth, and the app
- * read as one product (UI-6 §17). Two tones:
- *   - "brand" (default): teal chip on a light surface — marketing header, auth form pane.
- *   - "onDark": the exact shell treatment — for use on a navy `bg-shell` surface.
- * `glyphOnly` renders just the chip (compact contexts). Sizes scale the chip
- * and wordmark together.
+ * The one canonical Rasid brand lockup: the RasidMark (radar rings + inbound
+ * arrow) + the "راصد" wordmark, identical across marketing, auth, and the app
+ * shell so the whole product reads as one brand (UI-6 §17). Two tones:
+ *   - "brand" (default): wordmark in text-primary — marketing header, auth form pane.
+ *   - "onDark": wordmark in white — for use on a navy `bg-shell` surface.
+ * `glyphOnly` renders just the mark. Sizes scale the mark + wordmark together.
+ *
+ * This is a thin wrapper over <RasidMark>: the mark's own colors (deep-blue →
+ * teal/cyan) are tone-independent, so only the wordmark color follows `tone`.
  */
+const MARK_PX = { sm: 28, md: 32, lg: 44 } as const;
+
 export function BrandMark({
   tone = "brand",
   size = "md",
@@ -21,32 +25,18 @@ export function BrandMark({
   glyphOnly?: boolean;
   className?: string;
 }) {
-  const chip = {
-    sm: "h-7 w-7 rounded-md text-[13px]",
-    md: "h-8 w-8 rounded-lg text-[15px]",
-    lg: "h-11 w-11 rounded-xl text-xl",
-  }[size];
-  const word = {
-    sm: "text-base",
-    md: "text-lg",
-    lg: "text-2xl",
-  }[size];
+  const word = { sm: "text-base", md: "text-lg", lg: "text-2xl" }[size];
+
+  if (glyphOnly) {
+    return <RasidMark size={MARK_PX[size]} className={className} title="راصد" />;
+  }
 
   return (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <span
-        className={cn(
-          "flex shrink-0 items-center justify-center font-bold",
-          chip,
-          tone === "onDark" ? "bg-shell-active text-shell-active-text" : "bg-brand text-brand-foreground",
-        )}
-        aria-hidden
-      >
-        ر
-      </span>
-      {glyphOnly ? null : (
-        <span className={cn("font-bold tracking-tight", word, tone === "onDark" ? "text-white" : "text-text-primary")}>راصد</span>
-      )}
-    </span>
+    <RasidMark
+      variant="lockup"
+      size={MARK_PX[size]}
+      className={cn(className)}
+      wordClassName={cn(word, tone === "onDark" ? "text-white" : "text-text-primary")}
+    />
   );
 }

@@ -31,6 +31,7 @@ import { AuthenticatedRedirect } from "../../components/marketing/authenticated-
 import { PricingTable } from "../../components/marketing/pricing-table";
 import { PricingCalculator } from "../../components/marketing/pricing-calculator";
 import { SplashScreen } from "../../components/marketing/splash-screen";
+import { RasidMark } from "../../components/brand/rasid-mark";
 import { MotionRoot, Reveal } from "../../components/marketing/motion";
 import { TiltCard } from "../../components/marketing/anim";
 import { FaqSearch } from "../../components/marketing/faq-search";
@@ -560,7 +561,7 @@ function HeroProductPreview() {
         <Card className="overflow-hidden rounded-2xl border-border/80 shadow-floating">
           <div className="flex">
             <div className="hidden w-14 shrink-0 flex-col items-center gap-3 bg-shell py-4 sm:flex">
-              <span className="text-sm font-bold text-white">ر</span>
+              <RasidMark size={24} />
               <span className="h-8 w-8 rounded-md bg-shell-active" />
               {[Users, Layers, CalendarRange, Wallet].map((Icon, i) => (
                 <Icon key={i} className="h-4 w-4 text-shell-text-muted" aria-hidden />
@@ -633,6 +634,7 @@ function StructuredData() {
     "@type": "Organization",
     name: "راصد",
     url: "https://rasid-web.vercel.app",
+    logo: "https://rasid-web.vercel.app/icon-any.svg",
   };
   const faqPage = {
     "@context": "https://schema.org",
