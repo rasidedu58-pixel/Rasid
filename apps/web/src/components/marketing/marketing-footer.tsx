@@ -17,7 +17,7 @@ export function MarketingFooter() {
           <div>
             <BrandMark size="sm" />
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-text-secondary">
-              نظام تشغيل ومتابعة للمدرسين وأصحاب المجموعات التعليمية.
+              راصد يمسك تشغيل مجموعاتك، ويُظهر لك ما يحتاج متابعة قبل أن يفوتك.
             </p>
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-3">

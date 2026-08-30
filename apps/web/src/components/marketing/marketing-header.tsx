@@ -85,7 +85,7 @@ export function MarketingHeader() {
             <Link href="/login">تسجيل الدخول</Link>
           </Button>
           <Button asChild size="sm">
-            <Link href="/signup">ابدأ تجربتك المجانية</Link>
+            <Link href="/signup">ابدأ مجانًا</Link>
           </Button>
         </div>
 
@@ -125,7 +125,7 @@ export function MarketingHeader() {
               </Button>
               <Button asChild size="sm" className="justify-center">
                 <Link href="/signup" onClick={() => setOpen(false)}>
-                  ابدأ تجربتك المجانية
+                  ابدأ مجانًا
                 </Link>
               </Button>
             </div>

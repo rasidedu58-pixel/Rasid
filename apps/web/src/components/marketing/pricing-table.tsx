@@ -46,12 +46,15 @@ export function PricingTable() {
               )}
             </div>
 
-            <ul className="mt-5 flex flex-1 flex-col gap-2.5 text-sm text-text-secondary">
-              <PlanFeature label="كل مزايا راصد الأساسية بلا استثناء" />
-              <PlanFeature label="مجموعات وأشهر تشغيلية غير محدودة" />
-              <PlanFeature label="تقارير ومتابعة مالية كاملة" />
-              <PlanFeature label={`تجربة مجانية ${TRIAL_DAYS} يومًا بدون بطاقة`} />
-            </ul>
+            {/* Every plan includes all features (stated once above the grid);
+                the only differentiator is capacity — so no repeated list here. */}
+            <div className="mt-4 flex flex-1 flex-col gap-2">
+              <p className="flex items-start gap-2 text-sm text-text-secondary">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />
+                <span>كل مزايا راصد • تجربة {TRIAL_DAYS} يومًا مجانًا</span>
+              </p>
+              {highlighted ? <p className="text-xs font-medium text-brand">الأنسب لأغلب المدرّسين</p> : null}
+            </div>
 
             <Link
               href={plan.isCustom ? "/support" : "/signup"}
@@ -67,14 +70,5 @@ export function PricingTable() {
         );
       })}
     </div>
-  );
-}
-
-function PlanFeature({ label }: { label: string }) {
-  return (
-    <li className="flex items-start gap-2">
-      <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />
-      <span>{label}</span>
-    </li>
   );
 }

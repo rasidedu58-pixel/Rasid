@@ -223,6 +223,28 @@ body * {
   font-weight: 600;
 }
 
+/* ---- Marketing site typography — Alexandria display headings, scoped to
+   the marketing shell only (the authenticated app stays on IBM Plex). Arabic
+   is a connected script: negative tracking hurts it, so headings here reset
+   letter-spacing to 0 and get a touch more line-height to breathe. ---- */
+.marketing-scope :is(h1, h2, h3),
+.marketing-scope .text-display,
+.marketing-scope .text-h1,
+.marketing-scope .text-h2,
+.marketing-scope .text-h3 {
+  font-family: var(--font-alexandria), var(--font-plex-arabic), system-ui, sans-serif;
+  letter-spacing: 0;
+}
+.marketing-scope .text-display {
+  line-height: 1.14;
+}
+.marketing-scope .text-h1 {
+  line-height: 1.18;
+}
+.marketing-scope .text-h2 {
+  line-height: 1.28;
+}
+
 /* ---- Hero atmosphere: theme-aware gradient mesh + faint grid ---- */
 .hero-mesh {
   background:

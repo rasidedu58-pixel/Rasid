@@ -41,7 +41,7 @@ import { TRIAL_DAYS } from "../../lib/marketing/pricing-config";
 export const metadata: Metadata = {
   title: "راصد — نظام تشغيل ومتابعة للمدرسين وأصحاب المجموعات التعليمية",
   description:
-    "راصد يجمع تسجيل الحضور والواجبات والمتابعة والتحصيل المالي لمجموعاتك التعليمية في مكان واحد. جرّبه مجانًا 14 يومًا بدون بطاقة.",
+    "شغّل مجموعاتك التعليمية دون أن يضيع منك شيء: الحضور والواجبات والتحصيل والمتابعة في مكان واحد، وراصد يُظهر لك ما يحتاج تدخّلك الآن. جرّبه مجانًا 14 يومًا بدون بطاقة.",
   alternates: { canonical: "/" },
 };
 
@@ -50,18 +50,18 @@ export const metadata: Metadata = {
 const HOW_IT_WORKS = [
   {
     step: "١",
-    title: "أنشئ حسابك وجهّز مجموعاتك",
-    description: "تسجيل مباشر بالبريد مع تحقق سريع، ثم حدّد مجموعاتك النشطة هذا الشهر ورسومها وجدولها.",
+    title: "سجّل ما يحدث في الحصة",
+    description: "الحضور والواجب والدرجة من هاتفك أثناء الحصة نفسها — بلا دفاتر ولا رسائل متفرقة.",
   },
   {
     step: "٢",
-    title: "سجّل الحضور والواجبات والنتائج",
-    description: "كل ذلك من هاتفك أثناء الحصة نفسها — بلا دفاتر ولا رسائل متفرقة.",
+    title: "راصد يرتّب الصورة",
+    description: "يجمع تسجيلاتك ويُبرز ما يحتاج انتباهك — بسببه ودليله — دون أن تبحث عنه بنفسك.",
   },
   {
     step: "٣",
-    title: "راصد يجمع ما يحتاج متابعة",
-    description: "مركز الإجراءات يعرض لك كل ما يستحق قرارًا الآن، بسببه ودليله، دون أن تبحث عنه.",
+    title: "تصرّف وتابع… حتى تُغلق الحالة",
+    description: "ذكّر بدفعة، تابِع حالة، أكمِل سجلًا ناقصًا — راصد يبقيها أمامك حتى تنتهي منها فعلًا.",
   },
 ];
 
@@ -72,42 +72,42 @@ const FEATURE_GROUPS = [
     icon: CalendarClock,
     wide: true,
     items: [
-      { icon: CalendarClock, label: "الحصص", description: "جدول حصص يتولّد تلقائيًا من مواعيدك الأسبوعية." },
-      { icon: ClipboardCheck, label: "الحضور", description: "تسجيل حضور سريع من الهاتف أثناء الحصة." },
-      { icon: NotebookPen, label: "الواجبات", description: "تابع من أنجز ومن لم يُسجَّل له شيء بعد." },
+      { icon: CalendarClock, label: "حصص تُجدوَل عنك", description: "جدول حصصك يتولّد من مواعيدك الأسبوعية — بلا إدخال يدوي متكرر." },
+      { icon: ClipboardCheck, label: "حضور في لحظته", description: "سجّله من هاتفك أثناء الحصة، واعرف من غاب فورًا." },
+      { icon: NotebookPen, label: "لا واجب يمرّ دون رصد", description: "من أنجز، ومن لم يُسجَّل له شيء بعد — أمامك." },
     ],
   },
   {
-    title: "إدارة الطلاب",
+    title: "الطالب وتاريخه",
     tone: "neutral" as const,
     icon: Users,
     wide: false,
     items: [
-      { icon: Users, label: "ملفات الطلاب", description: "بيانات كل طالب وأولياء أموره وسجله." },
-      { icon: Layers, label: "المجموعات", description: "مجموعاتك الدائمة بجدولها ورسومها." },
-      { icon: GraduationCap, label: "الاختبارات", description: "رصد الدرجات وربطها بملف كل طالب." },
+      { icon: Users, label: "ملف يتبع الطالب", description: "بياناته وأولياء أموره وسجله في مكان واحد، ولو انتقل بين مجموعاتك." },
+      { icon: Layers, label: "مجموعات تحفظ التاريخ", description: "كل مجموعة بجدولها ورسومها — دون أن يضيع سجل طالب." },
+      { icon: GraduationCap, label: "درجات مربوطة بكل طالب", description: "ارصد النتيجة فتظهر في ملفه مباشرة." },
     ],
   },
   {
-    title: "القرارات والمتابعة",
+    title: "ما يحتاج تدخّلك",
     tone: "brand" as const,
     icon: Sparkles,
     wide: false,
     items: [
-      { icon: Sparkles, label: "مركز الإجراءات", description: "كل ما يحتاج قرارك الآن في شاشة واحدة." },
-      { icon: Bell, label: "التنبيهات", description: "تنبيهات بما يحتاج متابعة قبل أن يفوتك." },
-      { icon: FileBarChart, label: "التقارير", description: "تقارير جاهزة لكل طالب ومجموعة وشهر." },
+      { icon: Sparkles, label: "قرارك التالي في شاشة", description: "ما يستحق تدخّلك الآن مجموعًا أمامك — دون أن تبحث عنه." },
+      { icon: Bell, label: "لا تكتشف المشكلة متأخرًا", description: "تنبيه بما يحتاج متابعة قبل أن يفوتك." },
+      { icon: FileBarChart, label: "افهم دون أن تجمّع", description: "تقارير جاهزة لكل طالب ومجموعة وشهر، بلا حساب يدوي." },
     ],
   },
   {
-    title: "المالية",
+    title: "المالية بوضوح",
     tone: "neutral" as const,
     icon: Wallet,
     wide: true,
     items: [
-      { icon: Wallet, label: "المستحقات", description: "ما على كل طالب هذا الشهر، بوضوح." },
-      { icon: HeartHandshake, label: "المدفوعات", description: "سجّل الدفعات وهي مرتبطة بسجلها." },
-      { icon: CalendarRange, label: "المتأخرات", description: "من تأخّر، وكم، ومنذ متى — دون بحث." },
+      { icon: Wallet, label: "اعرف ما على كل طالب", description: "مستحقات هذا الشهر أمامك، دون ورقة رسوم منفصلة." },
+      { icon: HeartHandshake, label: "دفعة تُسجَّل وتبقى", description: "مرتبطة بسجلها، والتصحيح يُوثَّق دون أن يمحو التاريخ." },
+      { icon: CalendarRange, label: "من تأخّر… ومنذ متى", description: "المتأخرات واضحة، دون بحث في الأوراق." },
     ],
   },
 ];
@@ -121,31 +121,31 @@ const BEFORE = [
 ];
 
 const AFTER = [
-  "كل التشغيل في مكان واحد",
-  "الحالات المهمة تظهر تلقائيًا بدليلها",
-  "تسجيل حضور وواجبات ودرجات من الهاتف",
-  "متابعة مالية واضحة لكل طالب ومجموعة",
-  "تقارير جاهزة في أي لحظة",
+  "تشغيلك كله في مكان واحد تفتحه من الهاتف",
+  "ما يحتاج تدخّلك يأتيك — بسببه ودليله",
+  "الحضور والواجب والدرجة تُسجَّل أثناء الحصة",
+  "تعرف من دفع ومن تأخّر دون أن تبحث",
+  "صورة كل طالب وشهر جاهزة وقتما احتجتها",
 ];
 
 const PERSONAS = [
   {
     icon: UserRound,
-    title: "المدرس المستقل",
-    pain: "تدير كل شيء بنفسك، ويصعب أن تتذكر كل غياب ودفعة وواجب.",
-    help: "راصد يجمع التسجيل والتحصيل والمتابعة في مكان واحد تفتحه من الهاتف.",
+    title: "تدير مجموعاتك بنفسك؟",
+    pain: "كل غياب ودفعة وواجب يعتمد على ذاكرتك وحدها — وشيء ما يضيع دائمًا.",
+    help: "راصد يجمع التسجيل والتحصيل والمتابعة في مكان واحد، ويذكّرك بما تبقّى.",
   },
   {
     icon: Layers,
-    title: "صاحب عدة مجموعات",
-    pain: "عشرات الطلاب عبر مجموعات مختلفة، وأي تفصيل يسهل أن يضيع.",
-    help: "كل مجموعة بجدولها ورسومها وطلابها، ومركز إجراءات يجمع ما يحتاج قرارك.",
+    title: "كبرت مجموعاتك وبدأت التفاصيل تضيع؟",
+    pain: "عشرات الطلاب عبر مجموعات مختلفة، وأي تفصيل يسهل أن يسقط بينها.",
+    help: "كل مجموعة بجدولها ورسومها وطلابها، وشاشة واحدة تجمع ما يحتاج قرارك.",
   },
   {
     icon: UsersRound,
-    title: "المدرس مع مساعد أو فريق صغير",
-    pain: "تحتاج مساعدة في التسجيل دون أن تفتح كل شيء للجميع.",
-    help: "صلاحيات دقيقة تحدد من يرى ومن يعدّل ماذا، مجموعة بمجموعة.",
+    title: "تعمل مع مساعد أو فريق صغير؟",
+    pain: "تحتاج من يساعدك في التسجيل، دون أن تفتح كل شيء للجميع.",
+    help: "صلاحيات دقيقة تحدد من يرى ومن يعدّل ماذا — مجموعة بمجموعة.",
   },
 ];
 
@@ -183,30 +183,30 @@ export default function LandingPage() {
             <div className="flex flex-col items-start gap-6">
               <Reveal as="div" className="w-fit">
                 <Badge tone="brand" className="border border-brand/20 px-3 py-1">
-                  لأصحاب المجموعات التعليمية والمدرسين المستقلين
+                  نظام تشغيل مجموعاتك — لا مجرّد تسجيل بيانات
                 </Badge>
               </Reveal>
               <Reveal as="h1" delay={60} className="text-display text-text-primary">
-                شغّل مجموعاتك التعليمية
+                شغّل مجموعاتك
                 <br />
-                <span className="text-gradient">من مكان واحد</span>
+                <span className="text-gradient">دون أن يضيع منك شيء</span>
               </Reveal>
               <Reveal as="p" delay={120} className="max-w-xl text-lg leading-relaxed text-text-secondary sm:text-[1.125rem]">
-                الحضور، التحصيل، الواجبات، المتابعة والتقارير — بدون دفاتر متفرقة أو رسائل تضيع منك.
+                الحصص والحضور والواجبات والتحصيل والمتابعة في مكان واحد — وراصد يُظهر لك ما يحتاج تدخّلك الآن، قبل أن يفوتك.
               </Reveal>
               <Reveal as="div" delay={180}>
                 <OperatingRhythm />
               </Reveal>
               <Reveal as="div" delay={240} className="flex flex-col gap-3 pt-1 sm:flex-row">
                 <Button asChild size="lg">
-                  <Link href="/signup">ابدأ تجربتك المجانية</Link>
+                  <Link href="/signup">ابدأ {TRIAL_DAYS} يومًا مجانًا</Link>
                 </Button>
                 <Button asChild size="lg" variant="outline">
-                  <Link href="#how-it-works">شاهد كيف يعمل</Link>
+                  <Link href="#how-it-works">شاهد راصد أثناء العمل</Link>
                 </Button>
               </Reveal>
               <Reveal as="p" delay={300} className="text-sm text-text-tertiary">
-                {TRIAL_DAYS} يومًا مجانًا — بدون بطاقة ائتمان.
+                {TRIAL_DAYS} يومًا مجانًا • بدون بطاقة ائتمان.
               </Reveal>
             </div>
 
@@ -224,9 +224,9 @@ export default function LandingPage() {
       <section className="border-t border-border bg-surface-sunken py-20">
         <div className="mx-auto max-w-5xl px-4 sm:px-6">
           <Reveal as="div" className="mb-12 text-center">
-            <h2 className="text-h2 text-text-primary">من متابعة تتفكك، إلى تشغيل واضح</h2>
+            <h2 className="text-h2 text-text-primary">المشكلة ليست في البيانات… بل في أن المهم يضيع وسطها</h2>
             <p className="mx-auto mt-3 max-w-2xl text-text-secondary">
-              ليس لأنك مقصّر — بل لأن الأدوات مبعثرة. راصد يجمعها ويعرض لك ما يحتاج قرارك دون أن تبحث عنه.
+              ليس لأنك مقصّر — بل لأن كل شيء في مكان مختلف. راصد يجمعها، ويُبرز ما يحتاج قرارك دون أن تبحث عنه.
             </p>
           </Reveal>
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -244,7 +244,7 @@ export default function LandingPage() {
       <section id="how-it-works" className="mx-auto max-w-5xl px-4 py-20 sm:px-6">
         <Reveal as="div" className="mb-14 text-center">
           <SectionEyebrow>كيف يعمل</SectionEyebrow>
-          <h2 className="mt-3 text-h2 text-text-primary">ثلاث خطوات، لا أكثر</h2>
+          <h2 className="mt-3 text-h2 text-text-primary">من الحصة إلى القرار… في ثلاث خطوات</h2>
         </Reveal>
         <div className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
           <div aria-hidden className="absolute inset-x-[16%] top-9 hidden h-px bg-gradient-to-l from-transparent via-border-strong to-transparent md:block" />
@@ -261,7 +261,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <Reveal as="div" className="mb-12 text-center">
             <SectionEyebrow>المزايا</SectionEyebrow>
-            <h2 className="mt-3 text-h2 text-text-primary">كل ما تحتاجه لتشغيل مجموعاتك، جاهز اليوم</h2>
+            <h2 className="mt-3 text-h2 text-text-primary">ليست مجرد أدوات تسجيل — كل شيء يخدم قرارك التالي</h2>
           </Reveal>
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
             {FEATURE_GROUPS.map((group, i) => (
@@ -285,7 +285,7 @@ export default function LandingPage() {
       <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
         <Reveal as="div" className="mb-12 text-center">
           <SectionEyebrow>لمن هو راصد</SectionEyebrow>
-          <h2 className="mt-3 text-h2 text-text-primary">راصد مبني اليوم من أجل</h2>
+          <h2 className="mt-3 text-h2 text-text-primary">أيًّا كان حجم مجموعاتك… ستجد نفسك هنا</h2>
         </Reveal>
         <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           {PERSONAS.map((persona, i) => (
@@ -305,9 +305,9 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <Reveal as="div" className="mb-10 text-center">
             <SectionEyebrow>الأسعار</SectionEyebrow>
-            <h2 className="mt-3 text-h2 text-text-primary">باقات حسب سعة طلابك</h2>
+            <h2 className="mt-3 text-h2 text-text-primary">ادفع حسب عدد طلابك — لا أكثر</h2>
             <p className="mt-3 text-text-secondary">
-              تجربة مجانية {TRIAL_DAYS} يومًا في كل باقة — بدون بطاقة، وإلغاء في أي وقت.
+              كل الباقات تشمل مزايا راصد كاملة؛ الفرق الوحيد هو سعة الطلاب. جرّب {TRIAL_DAYS} يومًا مجانًا — بدون بطاقة، وألغِ وقت ما تشاء.
             </p>
           </Reveal>
 
@@ -334,7 +334,7 @@ export default function LandingPage() {
       <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
         <Reveal as="div" className="mb-12 text-center">
           <SectionEyebrow>الأمان والموثوقية</SectionEyebrow>
-          <h2 className="mt-3 text-h2 text-text-primary">بياناتك في مكان آمن</h2>
+          <h2 className="mt-3 text-h2 text-text-primary">بيانات مجموعاتك ليست شيئًا نتركه للصدفة</h2>
         </Reveal>
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {TRUST_POINTS.map((point, i) => (
@@ -350,7 +350,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-3xl px-4 sm:px-6">
           <Reveal as="div" className="mb-10 text-center">
             <SectionEyebrow>الأسئلة الشائعة</SectionEyebrow>
-            <h2 className="mt-3 text-h2 text-text-primary">أسئلة قد تدور في ذهنك</h2>
+            <h2 className="mt-3 text-h2 text-text-primary">قبل أن تبدأ… إليك ما يشغل بالك</h2>
           </Reveal>
           <Reveal as="div">
             <FaqSearch items={FAQ_ITEMS} />
@@ -371,19 +371,19 @@ export default function LandingPage() {
           <div className="hero-grid absolute inset-0 opacity-60" />
         </div>
         <Reveal as="div" className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
-          <h2 className="text-h1 text-text-primary">خلّي تشغيل مجموعاتك أوضح من أول يوم</h2>
+          <h2 className="text-h1 text-text-primary">دع راصد يمسك التفاصيل… وركّز أنت في طلابك</h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-text-secondary">
-            ابدأ تجربتك المجانية واكتشف كيف يجمع راصد كل ما تحتاجه في مكان واحد.
+            ابدأ اليوم، ونظّم مجموعاتك من الحصة القادمة — وستعرف ما يحتاج تدخّلك قبل أن تنساه.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg">
-              <Link href="/signup">ابدأ تجربتك المجانية</Link>
+              <Link href="/signup">ابدأ {TRIAL_DAYS} يومًا مجانًا</Link>
             </Button>
             <Button asChild size="lg" variant="ghost">
               <Link href="/login">تسجيل الدخول</Link>
             </Button>
           </div>
-          <p className="mt-5 text-sm text-text-tertiary">{TRIAL_DAYS} يومًا مجانًا — بدون بطاقة ائتمان.</p>
+          <p className="mt-5 text-sm text-text-tertiary">{TRIAL_DAYS} يومًا مجانًا • بدون بطاقة ائتمان.</p>
         </Reveal>
       </section>
     </>
