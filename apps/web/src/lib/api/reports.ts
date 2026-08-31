@@ -10,7 +10,7 @@ import type {
   MarkAllNotificationsReadResponse,
   ActionCenterResponse,
 } from "@academic-precision/contracts";
-import { apiRequest } from "./client";
+import { apiDownload, apiRequest } from "./client";
 
 export function fetchStudentReport(workspaceId: string, studentId: string): Promise<StudentReportResponse> {
   return apiRequest<StudentReportResponse>(`/reports/student/${studentId}`, { workspaceId });
@@ -32,9 +32,9 @@ export function fetchExportStatus(workspaceId: string, exportId: string): Promis
   return apiRequest<GetExportResponse>(`/exports/${exportId}`, { workspaceId });
 }
 
-/** Raw UTF-8 CSV text — no PDF/XLSX exists in this product; never invent one. */
-export function downloadExportCsv(workspaceId: string, exportId: string): Promise<string> {
-  return apiRequest<string>(`/exports/${exportId}/download`, { workspaceId, raw: true });
+/** Downloads a ready export (CSV / XLSX / PDF) as a Blob + server filename. */
+export function downloadExportFile(workspaceId: string, exportId: string): Promise<{ blob: Blob; filename: string | null }> {
+  return apiDownload(`/exports/${exportId}/download`, { workspaceId });
 }
 
 // --- Notifications ---------------------------------------------------------

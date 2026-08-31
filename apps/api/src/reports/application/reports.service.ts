@@ -5,6 +5,7 @@ import type {
   GetExportResponse,
   GroupReportResponse,
   MonthlyTeacherReportResponse,
+  ReportExportFormat,
   StudentReportResponse,
 } from "@academic-precision/contracts";
 import { ResourceNotFoundException, ValidationApiException } from "../../common/exceptions/api.exception";
@@ -13,10 +14,32 @@ import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { PermissionResolverService } from "../../team/application/permission-resolver.service";
 import { REPORTS_REPOSITORY, type ReportsRepositoryPort } from "./ports/reports-repository.port";
 import { toCsv } from "./csv";
+import {
+  arabicMonth,
+  buildGroupDocument,
+  buildMonthlyDocument,
+  buildStudentDocument,
+  type ReportDocument,
+  type ReportDocumentMeta,
+} from "./report-document";
+import { renderReportXlsx } from "./xlsx.renderer";
+import { renderReportPdf } from "./pdf.renderer";
 
 const EXPORT_TTL_MS = 15 * 60 * 1000; // short-lived — see schema/reports.ts's own doc comment.
 const VIEW_PERMISSION = "reports.view";
 const EXPORT_PERMISSION = "reports.export";
+const FINANCE_PERMISSION = "finance.overview";
+
+/** Filesystem-safe name: keep Arabic letters/digits/space/dash, collapse the rest. */
+function sanitizeFilename(stem: string): string {
+  return stem.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, "-").slice(0, 120) || "تقرير";
+}
+
+const FORMAT_META: Record<ReportExportFormat, { ext: string; contentType: string }> = {
+  CSV: { ext: "csv", contentType: "text/csv; charset=utf-8" },
+  XLSX: { ext: "xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  PDF: { ext: "pdf", contentType: "application/pdf" },
+};
 
 /**
  * Application service for Phase 9 Reports endpoints. Controllers stay thin;
@@ -46,23 +69,38 @@ export class ReportsService {
 
   async getStudentReport(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, studentId: string): Promise<StudentReportResponse> {
     await this.assertStudentInScope(authUser, workspaceContext, studentId);
-    const result = await this.repository.getStudentReport(workspaceContext.workspaceId, studentId);
+    const [result, canFinance] = await Promise.all([
+      this.repository.getStudentReport(workspaceContext.workspaceId, studentId),
+      this.canViewFinance(authUser, workspaceContext),
+    ]);
     if (!result) throw new ResourceNotFoundException();
-    return this.toStudentReportDto(result);
+    return this.toStudentReportDto(result, canFinance);
   }
 
   async getGroupReport(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, groupId: string): Promise<GroupReportResponse> {
     await this.assertGroupInScope(authUser, workspaceContext, groupId);
-    const result = await this.repository.getGroupReport(workspaceContext.workspaceId, groupId);
+    const [result, canFinance] = await Promise.all([
+      this.repository.getGroupReport(workspaceContext.workspaceId, groupId),
+      this.canViewFinance(authUser, workspaceContext),
+    ]);
     if (!result) throw new ResourceNotFoundException();
-    return this.toGroupReportDto(result);
+    return this.toGroupReportDto(result, canFinance);
   }
 
   async getMonthlyTeacherReport(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, monthId: string): Promise<MonthlyTeacherReportResponse> {
     const visibleGroupIds = await this.resolveVisibleGroupIds(authUser, workspaceContext, VIEW_PERMISSION);
-    const result = await this.repository.getMonthlyTeacherReport(workspaceContext.workspaceId, monthId, visibleGroupIds);
+    const [result, canFinance] = await Promise.all([
+      this.repository.getMonthlyTeacherReport(workspaceContext.workspaceId, monthId, visibleGroupIds),
+      this.canViewFinance(authUser, workspaceContext),
+    ]);
     if (!result) throw new ResourceNotFoundException();
-    return this.toMonthlyReportDto(result);
+    return this.toMonthlyReportDto(result, canFinance);
+  }
+
+  /** True iff the caller holds `finance.overview` — the ONLY gate for any money figure in a report/export (backend-enforced, never UI-hidden). */
+  private async canViewFinance(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<boolean> {
+    const grant = await this.permissionResolver.hasPermission(workspaceContext.workspaceId, authUser.id, FINANCE_PERMISSION);
+    return !!grant;
   }
 
   // ---------------------------------------------------------------------
@@ -78,7 +116,8 @@ export class ReportsService {
       workspaceId: workspaceContext.workspaceId,
       requestedByMembershipId: workspaceContext.membership.id,
       type: body.type,
-      params,
+      // Format travels in params (no schema column needed) so download picks the renderer.
+      params: { ...params, format: body.format },
       expiresAt: new Date(Date.now() + EXPORT_TTL_MS),
     });
     return { exportId: row.id, status: row.status };
@@ -100,8 +139,19 @@ export class ReportsService {
     };
   }
 
-  /** Returns the freshly-recomputed CSV text — the controller streams it. Re-checks Permission/Entitlement/Group-Scope at THIS exact moment (correction #4). */
-  async downloadExport(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, exportId: string): Promise<{ filename: string; csv: string }> {
+  /**
+   * Returns the freshly-recomputed export in the requested format (CSV / XLSX /
+   * PDF) — the controller sets the content-type and returns the body. Re-checks
+   * Permission/Entitlement/Group-Scope AND finance visibility at THIS moment
+   * (correction #4): a caller who lost access/finance since creation is blocked
+   * or gets a redacted document. XLSX/PDF reuse the SAME redacted DTO the
+   * preview shows (single source of truth), via the shared ReportDocument.
+   */
+  async downloadExport(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    exportId: string,
+  ): Promise<{ filename: string; contentType: string; body: string | Buffer }> {
     const row = await this.repository.findExport(workspaceContext.workspaceId, exportId);
     if (!row) throw new ResourceNotFoundException();
     if (row.expiresAt.getTime() < Date.now()) {
@@ -109,23 +159,45 @@ export class ReportsService {
     }
     await this.assertExportInScope(authUser, workspaceContext, row);
 
+    const format = (typeof row.params.format === "string" ? row.params.format : "CSV") as ReportExportFormat;
+    const [canFinance, workspaceName] = await Promise.all([
+      this.canViewFinance(authUser, workspaceContext),
+      this.repository.getWorkspaceName(workspaceContext.workspaceId).then((n) => n ?? "راصد"),
+    ]);
+    const exportedAt = new Date();
+
     if (row.type === "STUDENT") {
-      const studentId = row.params.studentId as string;
-      const result = await this.repository.getStudentReport(workspaceContext.workspaceId, studentId);
+      const result = await this.repository.getStudentReport(workspaceContext.workspaceId, row.params.studentId as string);
       if (!result) throw new ResourceNotFoundException();
-      return { filename: `student-report-${result.student.studentCode}.csv`, csv: this.studentReportToCsv(result) };
+      const dto = this.toStudentReportDto(result, canFinance);
+      const meta: ReportDocumentMeta = { workspaceName, period: dto.currentMonth ? arabicMonth(dto.currentMonth.year, dto.currentMonth.month) : "الحالية", exportedAt };
+      return this.renderByFormat(buildStudentDocument(dto, meta), format, () => this.studentObligationsToCsv(dto.obligationsByMonth));
     }
     if (row.type === "GROUP") {
-      const groupId = row.params.groupId as string;
-      const result = await this.repository.getGroupReport(workspaceContext.workspaceId, groupId);
+      const result = await this.repository.getGroupReport(workspaceContext.workspaceId, row.params.groupId as string);
       if (!result) throw new ResourceNotFoundException();
-      return { filename: `group-report-${result.group.name}.csv`, csv: this.groupReportToCsv(result) };
+      const dto = this.toGroupReportDto(result, canFinance);
+      const meta: ReportDocumentMeta = { workspaceName, period: dto.currentMonth ? arabicMonth(dto.currentMonth.year, dto.currentMonth.month) : "الحالية", exportedAt };
+      return this.renderByFormat(buildGroupDocument(dto, meta), format, () => this.groupRosterToCsv(dto.roster));
     }
-    const monthId = row.params.monthId as string;
     const visibleGroupIds = await this.resolveVisibleGroupIds(authUser, workspaceContext, EXPORT_PERMISSION);
-    const result = await this.repository.getMonthlyTeacherReport(workspaceContext.workspaceId, monthId, visibleGroupIds);
+    const result = await this.repository.getMonthlyTeacherReport(workspaceContext.workspaceId, row.params.monthId as string, visibleGroupIds);
     if (!result) throw new ResourceNotFoundException();
-    return { filename: `monthly-report-${result.month.year}-${result.month.month}.csv`, csv: this.monthlyReportToCsv(result) };
+    const dto = this.toMonthlyReportDto(result, canFinance);
+    const meta: ReportDocumentMeta = { workspaceName, period: arabicMonth(dto.month.year, dto.month.month), exportedAt };
+    return this.renderByFormat(buildMonthlyDocument(dto, meta), format, () => this.monthlyGroupsToCsv(dto.groups));
+  }
+
+  private async renderByFormat(
+    doc: ReportDocument,
+    format: ReportExportFormat,
+    csvFn: () => string,
+  ): Promise<{ filename: string; contentType: string; body: string | Buffer }> {
+    const fm = FORMAT_META[format];
+    const filename = `راصد-${sanitizeFilename(doc.fileStem)}.${fm.ext}`;
+    if (format === "XLSX") return { filename, contentType: fm.contentType, body: await renderReportXlsx(doc) };
+    if (format === "PDF") return { filename, contentType: fm.contentType, body: await renderReportPdf(doc) };
+    return { filename, contentType: fm.contentType, body: csvFn() };
   }
 
   // ---------------------------------------------------------------------
@@ -189,25 +261,29 @@ export class ReportsService {
   // DTO / CSV mapping
   // ---------------------------------------------------------------------
 
-  private toStudentReportDto(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getStudentReport"]>>>): StudentReportResponse {
+  private toStudentReportDto(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getStudentReport"]>>>, canFinance: boolean): StudentReportResponse {
     return {
       student: r.student,
       currentMonth: r.currentMonth,
       sessions: r.sessions,
       activeAttentionCase: r.activeAttentionCase ? { ...r.activeAttentionCase, openedAt: r.activeAttentionCase.openedAt.toISOString() } : null,
-      obligationsByMonth: r.obligationsByMonth,
+      // Finance redaction: no finance.overview → no money rows at all.
+      obligationsByMonth: canFinance ? r.obligationsByMonth : [],
     };
   }
 
-  private toGroupReportDto(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getGroupReport"]>>>): GroupReportResponse {
-    return r;
+  private toGroupReportDto(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getGroupReport"]>>>, canFinance: boolean): GroupReportResponse {
+    return { ...r, collection: canFinance ? r.collection : null };
   }
 
-  private toMonthlyReportDto(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getMonthlyTeacherReport"]>>>): MonthlyTeacherReportResponse {
-    return r;
+  private toMonthlyReportDto(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getMonthlyTeacherReport"]>>>, canFinance: boolean): MonthlyTeacherReportResponse {
+    return {
+      ...r,
+      totals: { ...r.totals, collection: canFinance ? r.totals.collection : null, overdueCount: canFinance ? r.totals.overdueCount : null },
+    };
   }
 
-  private studentReportToCsv(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getStudentReport"]>>>): string {
+  private studentObligationsToCsv(obligations: StudentReportResponse["obligationsByMonth"]): string {
     return toCsv(
       [
         { key: "monthLabel", label: "الشهر" },
@@ -217,28 +293,28 @@ export class ReportsService {
         { key: "remainingMinor", label: "المتبقي (قرش)" },
         { key: "status", label: "الحالة" },
       ],
-      r.obligationsByMonth.map((o) => ({ ...o, monthLabel: `${o.year}-${String(o.month).padStart(2, "0")}` })),
+      obligations.map((o) => ({ ...o, monthLabel: `${o.year}-${String(o.month).padStart(2, "0")}` })),
     );
   }
 
-  private groupReportToCsv(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getGroupReport"]>>>): string {
+  private groupRosterToCsv(roster: GroupReportResponse["roster"]): string {
     return toCsv(
       [
         { key: "studentName", label: "الطالب" },
         { key: "status", label: "حالة القيد" },
       ],
-      r.roster,
+      roster,
     );
   }
 
-  private monthlyReportToCsv(r: NonNullable<Awaited<ReturnType<ReportsRepositoryPort["getMonthlyTeacherReport"]>>>): string {
+  private monthlyGroupsToCsv(groups: MonthlyTeacherReportResponse["groups"]): string {
     return toCsv(
       [
         { key: "groupName", label: "المجموعة" },
         { key: "studentsCount", label: "عدد الطلاب" },
         { key: "sessionsCount", label: "عدد الحصص" },
       ],
-      r.groups,
+      groups,
     );
   }
 }

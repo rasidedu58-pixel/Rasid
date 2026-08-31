@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingRegion, MetricCell, MetricStrip, SectionCard, StatusDot, formatMoney, formatMonthLabel } from "@academic-precision/ui";
 import { UserPlus } from "lucide-react";
 import { PageHeader } from "../../../../components/shell/page-header";
-import { ExportCsvButton } from "../../../../components/reports/export-csv-button";
+import { ReportExportButtons } from "../../../../components/reports/report-export-buttons";
 import { AddStudentsToGroupSheet } from "../../../../components/enrollment/add-students-to-group-sheet";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
@@ -56,7 +56,7 @@ export default function GroupDetailPage() {
         description={[group.subject, group.grade].filter(Boolean).join(" · ") || undefined}
         actions={
           <div className="flex items-center gap-2">
-            <ExportCsvButton type="GROUP" groupId={groupId} filename={`${group.name}.csv`} />
+            <ReportExportButtons type="GROUP" groupId={groupId} fallbackName={`تقرير-${group.name}`} />
             <Badge tone={group.status === "ACTIVE" ? "success" : "neutral"}>{group.status === "ACTIVE" ? "نشطة" : "مؤرشفة"}</Badge>
           </div>
         }
@@ -73,15 +73,17 @@ export default function GroupDetailPage() {
             <MetricCell label="سجلات ناقصة" value={report.missingRecordsCount} tone={report.missingRecordsCount > 0 ? "warning" : "default"} />
           </MetricStrip>
 
-          <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold text-text-secondary">التحصيل المالي هذا الشهر</h2>
-            <MetricStrip>
-              <MetricCell label="الإجمالي المستحق" value={formatMoney(report.collection.totalDueMinor)} />
-              <MetricCell label="المحصّل" value={formatMoney(report.collection.totalPaidMinor)} tone="success" />
-              <MetricCell label="المتبقّي" value={formatMoney(report.collection.totalRemainingMinor)} tone={report.collection.totalRemainingMinor > 0 ? "danger" : "default"} />
-              <MetricCell label="متأخرات" value={report.collection.overdueCount} tone={report.collection.overdueCount > 0 ? "danger" : "default"} />
-            </MetricStrip>
-          </section>
+          {report.collection ? (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-sm font-semibold text-text-secondary">التحصيل المالي هذا الشهر</h2>
+              <MetricStrip>
+                <MetricCell label="الإجمالي المستحق" value={formatMoney(report.collection.totalDueMinor)} />
+                <MetricCell label="المحصّل" value={formatMoney(report.collection.totalPaidMinor)} tone="success" />
+                <MetricCell label="المتبقّي" value={formatMoney(report.collection.totalRemainingMinor)} tone={report.collection.totalRemainingMinor > 0 ? "danger" : "default"} />
+                <MetricCell label="متأخرات" value={report.collection.overdueCount} tone={report.collection.overdueCount > 0 ? "danger" : "default"} />
+              </MetricStrip>
+            </section>
+          ) : null}
 
           <SectionCard
             title="الطلاب المسجّلون"

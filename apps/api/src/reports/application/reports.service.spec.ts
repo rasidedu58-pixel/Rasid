@@ -109,6 +109,64 @@ describe("ReportsService", () => {
     expect(result.groups[0]!.groupId).toBe(GROUP_A);
     // No aggregate hints at Group B's existence — the repository was called with the SELECTED scope, never "ALL".
     expect(result.totals.studentsCount).toBe(3);
+    // Finance redaction: this assistant has reports.view but NOT finance.overview,
+    // so every money figure is nulled server-side (never merely UI-hidden).
+    expect(result.totals.collection).toBeNull();
+    expect(result.totals.overdueCount).toBeNull();
+  });
+
+  it("Empty month returns a valid zeroed report (200), never an error", async () => {
+    const monthId = "month-empty";
+    reportsRepo.seedMonthlyReport(WORKSPACE_A, monthId, "ALL", {
+      month: { id: monthId, year: 2026, month: 8, status: "CURRENT" },
+      groups: [],
+      totals: { studentsCount: 0, sessionsCount: 0, collection: { totalDueMinor: 0, totalPaidMinor: 0, totalRemainingMinor: 0 }, overdueCount: 0, openAttentionCount: 0, openFollowupsCount: 0 },
+    });
+    const result = await service.getMonthlyTeacherReport(owner, ownerContext, monthId);
+    expect(result.groups).toHaveLength(0);
+    expect(result.totals.studentsCount).toBe(0);
+  });
+
+  it("An unknown/stale monthId is a safe 404, never a 500", async () => {
+    await expect(service.getMonthlyTeacherReport(owner, ownerContext, "does-not-exist")).rejects.toBeInstanceOf(ResourceNotFoundException);
+  });
+
+  it("Finance redaction: an Owner (holds finance.overview) DOES receive the money figures", async () => {
+    const monthId = "month-fin";
+    reportsRepo.seedMonthlyReport(WORKSPACE_A, monthId, "ALL", {
+      month: { id: monthId, year: 2026, month: 8, status: "CURRENT" },
+      groups: [{ groupId: GROUP_A, groupName: "المجموعة أ", studentsCount: 3, sessionsCount: 4 }],
+      totals: { studentsCount: 3, sessionsCount: 4, collection: { totalDueMinor: 30000, totalPaidMinor: 10000, totalRemainingMinor: 20000 }, overdueCount: 1, openAttentionCount: 0, openFollowupsCount: 0 },
+    });
+    const result = await service.getMonthlyTeacherReport(owner, ownerContext, monthId);
+    expect(result.totals.collection).toEqual({ totalDueMinor: 30000, totalPaidMinor: 10000, totalRemainingMinor: 20000 });
+    expect(result.totals.overdueCount).toBe(1);
+  });
+
+  it("Finance redaction: a Group report loses its collection for a non-finance caller", async () => {
+    const assistant: VerifiedSupabaseToken = { id: "u-assistant", email: "assistant@example.com" };
+    const assistantMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: assistant.id, roleLabel: "ASSISTANT" });
+    await teamRepo.replaceMembershipGrants({
+      workspaceId: WORKSPACE_A,
+      membershipId: assistantMembership.id,
+      createdByUserId: owner.id,
+      desiredGrants: [{ permissionKey: "reports.view", scopeType: "SELECTED_GROUPS", groupIds: [GROUP_A] }],
+    });
+    const assistantContext: WorkspaceContext = { workspaceId: WORKSPACE_A, membership: assistantMembership };
+    const groupResult: GroupReportResult = {
+      group: { id: GROUP_A, name: "المجموعة أ", status: "ACTIVE" },
+      currentMonth: { id: "month-1", year: 2026, month: 8 },
+      roster: [{ enrollmentId: randomUUID(), studentId: randomUUID(), studentName: "طالب", status: "ACTIVE" }],
+      sessions: { total: 4, completed: 3 },
+      attendance: { present: 3, absent: 1, late: 0, missing: 0 },
+      homework: { done: 3, partial: 0, notDone: 1, noHomework: 0, missing: 0 },
+      missingRecordsCount: 0,
+      collection: { totalDueMinor: 30000, totalPaidMinor: 10000, totalRemainingMinor: 20000, overdueCount: 1 },
+    };
+    reportsRepo.seedGroupReport(WORKSPACE_A, GROUP_A, groupResult);
+    const result = await service.getGroupReport(assistant, assistantContext, GROUP_A);
+    expect(result.collection).toBeNull();
+    expect(result.roster).toHaveLength(1); // non-finance data still present
   });
 
   it("Group Report: an Assistant with no scope at all for Group B gets a safe 404, never a 403 that confirms the group exists", async () => {

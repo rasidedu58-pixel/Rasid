@@ -30,6 +30,8 @@ export interface ReportsRepositoryPort {
   listGroupIdsForStudent(studentId: string): Promise<string[]>;
   createExport(input: CreateExportInput): Promise<ExportRow>;
   findExport(workspaceId: string, exportId: string): Promise<ExportRow | undefined>;
+  /** Workspace display name for the export document header. */
+  getWorkspaceName(workspaceId: string): Promise<string | undefined>;
 }
 
 export const REPORTS_REPOSITORY = Symbol("REPORTS_REPOSITORY");

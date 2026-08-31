@@ -42,6 +42,11 @@ export class InMemoryReportsRepository implements ReportsRepositoryPort {
     return this.groupIdsByStudentId.get(studentId) ?? [];
   }
 
+  workspaceName = "مساحة اختبار";
+  async getWorkspaceName(): Promise<string | undefined> {
+    return this.workspaceName;
+  }
+
   async createExport(input: CreateExportInput): Promise<ExportRow> {
     const row: ExportRow = {
       id: randomUUID(),

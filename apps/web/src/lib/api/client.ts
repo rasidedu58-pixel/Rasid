@@ -160,6 +160,45 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   return body as T;
 }
 
+/**
+ * Downloads a binary/file response (XLSX/PDF/CSV export) with the same auth as
+ * apiRequest, returning the Blob plus the server-suggested filename (parsed
+ * from `Content-Disposition: filename*=UTF-8''…`). Used for report exports; the
+ * caller turns the Blob into a download.
+ */
+export async function apiDownload(path: string, options: { workspaceId?: string } = {}): Promise<{ blob: Blob; filename: string | null }> {
+  const supabase = getSupabaseClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
+    if (typeof window !== "undefined") window.location.assign("/login?expired=1");
+    throw new ApiRequestError(401, "UNAUTHENTICATED", "لا توجد جلسة نشطة.");
+  }
+  const headers: Record<string, string> = { Authorization: `Bearer ${session.access_token}` };
+  if (options.workspaceId) headers["X-Workspace-Id"] = options.workspaceId;
+
+  const response = await fetch(`${apiBaseUrl()}${path}`, { headers });
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") window.location.assign("/login?expired=1");
+    const text = await response.text().catch(() => "");
+    let code = "UNKNOWN_ERROR";
+    let message = "تعذّر تنفيذ الطلب.";
+    try {
+      const parsed = JSON.parse(text) as { error?: { code?: string; message?: string } };
+      code = parsed.error?.code ?? code;
+      message = parsed.error?.message ?? message;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiRequestError(response.status, code, message);
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition) ?? /filename="?([^";]+)"?/i.exec(disposition);
+  const filename = match ? decodeURIComponent(match[1]!) : null;
+  return { blob: await response.blob(), filename };
+}
+
 /** A fresh idempotency key per mutation attempt (NOT per component render) — pass the SAME key across retries of the SAME logical attempt, a new one for a genuinely new attempt. */
 export function newIdempotencyKey(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;

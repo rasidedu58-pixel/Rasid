@@ -56,7 +56,9 @@ export const groupReportResponseSchema = z.object({
   attendance: attendanceSummarySchema,
   homework: homeworkSummarySchema,
   missingRecordsCount: z.number().int(),
-  collection: z.object({ totalDueMinor: z.number().int(), totalPaidMinor: z.number().int(), totalRemainingMinor: z.number().int(), overdueCount: z.number().int() }),
+  // `null` when the caller lacks `finance.overview` — finance is redacted
+  // server-side (never merely hidden in the UI).
+  collection: z.object({ totalDueMinor: z.number().int(), totalPaidMinor: z.number().int(), totalRemainingMinor: z.number().int(), overdueCount: z.number().int() }).nullable(),
 });
 export type GroupReportResponse = z.infer<typeof groupReportResponseSchema>;
 
@@ -70,8 +72,10 @@ export const monthlyTeacherReportResponseSchema = z.object({
   totals: z.object({
     studentsCount: z.number().int(),
     sessionsCount: z.number().int(),
-    collection: z.object({ totalDueMinor: z.number().int(), totalPaidMinor: z.number().int(), totalRemainingMinor: z.number().int() }),
-    overdueCount: z.number().int(),
+    // `collection`/`overdueCount` are `null` when the caller lacks
+    // `finance.overview` — finance is redacted server-side, not UI-hidden.
+    collection: z.object({ totalDueMinor: z.number().int(), totalPaidMinor: z.number().int(), totalRemainingMinor: z.number().int() }).nullable(),
+    overdueCount: z.number().int().nullable(),
     openAttentionCount: z.number().int(),
     openFollowupsCount: z.number().int(),
   }),
@@ -85,9 +89,13 @@ export type MonthlyTeacherReportResponse = z.infer<typeof monthlyTeacherReportRe
 export const reportExportTypeSchema = z.enum(["STUDENT", "GROUP", "MONTHLY_TEACHER"]);
 export type ReportExportType = z.infer<typeof reportExportTypeSchema>;
 
+/** Export file formats. CSV stays for back-compat; XLSX/PDF are the premium renderers. */
+export const reportExportFormatSchema = z.enum(["CSV", "XLSX", "PDF"]);
+export type ReportExportFormat = z.infer<typeof reportExportFormatSchema>;
+
 export const createReportExportRequestSchema = z.object({
   type: reportExportTypeSchema,
-  format: z.literal("CSV"),
+  format: reportExportFormatSchema.default("CSV"),
   studentId: z.string().uuid().optional(),
   groupId: z.string().uuid().optional(),
   monthId: z.string().uuid().optional(),

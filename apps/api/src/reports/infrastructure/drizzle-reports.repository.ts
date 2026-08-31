@@ -4,6 +4,7 @@ import {
   findExport,
   getGroupReport,
   getMonthlyTeacherReport,
+  getReportWorkspaceName,
   getStudentReport,
   listGroupIdsForStudent,
   withRuntimeContext,
@@ -32,6 +33,10 @@ export class DrizzleReportsRepository implements ReportsRepositoryPort {
 
   listGroupIdsForStudent(studentId: string): Promise<string[]> {
     return withRuntimeContext(this.runtimeCtx(), (db) => listGroupIdsForStudent(db, studentId));
+  }
+
+  getWorkspaceName(workspaceId: string): Promise<string | undefined> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => getReportWorkspaceName(db, workspaceId));
   }
 
   async createExport(input: CreateExportInput): Promise<ExportRow> {

@@ -45,16 +45,17 @@ export class ExportsController {
   @Get(":id/download")
   @RequirePermission("reports.export")
   @RequireEntitlement("REPORT_EXPORT")
-  @ApiOperation({ summary: "Streams the CSV UTF-8 bytes, re-computed live (GET /api/v1/exports/:id/download)" })
+  @ApiOperation({ summary: "Returns the report bytes (CSV / XLSX / PDF), re-computed live (GET /api/v1/exports/:id/download)" })
   async download(
     @CurrentUser() user: VerifiedSupabaseToken,
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
     @Param("id") id: string,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<string> {
-    const { filename, csv } = await this.reportsService.downloadExport(user, workspaceContext, id);
-    reply.header("Content-Type", "text/csv; charset=utf-8");
-    reply.header("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
-    return csv;
+  ): Promise<string | Buffer> {
+    const { filename, contentType, body } = await this.reportsService.downloadExport(user, workspaceContext, id);
+    reply.header("Content-Type", contentType);
+    // RFC 5987 filename* carries the Arabic name safely across clients.
+    reply.header("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    return body;
   }
 }

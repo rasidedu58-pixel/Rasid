@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Badge, ErrorState, LoadingRegion, MetricCell, MetricStrip, Tabs, TabsContent, TabsList, TabsTrigger, formatMoney } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
-import { ExportCsvButton } from "../../../../components/reports/export-csv-button";
+import { ReportExportButtons } from "../../../../components/reports/report-export-buttons";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
 import { fetchStudentDetail } from "../../../../lib/api/students";
@@ -66,7 +66,7 @@ export default function StudentProfilePage() {
         description={[`كود: ${student.studentCode}`, groupNames.length > 0 ? `المجموعات: ${groupNames.join("، ")}` : null].filter(Boolean).join(" · ")}
         actions={
           <div className="flex items-center gap-2">
-            <ExportCsvButton type="STUDENT" studentId={studentId} filename={`${student.name}.csv`} />
+            <ReportExportButtons type="STUDENT" studentId={studentId} fallbackName={`تقرير-${student.name}`} />
             <Badge tone={student.status === "ACTIVE" ? "success" : "neutral"}>{student.status === "ACTIVE" ? "نشط" : "مؤرشف"}</Badge>
           </div>
         }

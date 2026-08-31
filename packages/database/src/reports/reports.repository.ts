@@ -36,6 +36,12 @@ import type { Db } from "../repositories/identity.repository";
 
 export type ExportRow = typeof reportExports.$inferSelect;
 
+/** The workspace's display name — used only for the export document header. Runs under the tenant's own RLS context. */
+export async function getReportWorkspaceName(db: Db, workspaceId: string): Promise<string | undefined> {
+  const [row] = await db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+  return row?.name;
+}
+
 export interface CreateExportInput {
   workspaceId: string;
   requestedByMembershipId: string;
