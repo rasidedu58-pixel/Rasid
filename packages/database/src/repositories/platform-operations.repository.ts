@@ -512,10 +512,13 @@ export async function setWorkspaceAccountStatus(params: {
   return db.transaction(async (tx) => {
     const [before] = await tx.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, params.workspaceId)).limit(1);
     if (!before) return null;
-    const nextStatus = params.action === "SUSPEND" ? "ARCHIVED" : "ACTIVE";
+    // SUSPENDED is a distinct, reversible operational hold — NOT ARCHIVED
+    // (archival = ended/hidden). Data is untouched; only access is blocked
+    // (enforced in PermissionGuard). archived_at is left alone.
+    const nextStatus = params.action === "SUSPEND" ? "SUSPENDED" : "ACTIVE";
     const [updated] = await tx
       .update(workspaces)
-      .set({ status: nextStatus, archivedAt: params.action === "SUSPEND" ? new Date() : null })
+      .set({ status: nextStatus })
       .where(eq(workspaces.id, params.workspaceId))
       .returning({ status: workspaces.status });
     if (!updated) return null;
@@ -570,7 +573,6 @@ export async function editCustomerFields(params: {
 // with a before/after platform_audit_event in ONE outer transaction (the reused
 // tx nests as a savepoint), so the state change and its audit are atomic.
 export type SubscriptionAdminAction = "EXTEND_DAYS" | "SET_END_DATE" | "SUSPEND" | "REACTIVATE";
-const REACTIVATE_DEFAULT_DAYS = 30;
 
 export async function applySubscriptionAdminAction(params: {
   workspaceId: string;
@@ -579,13 +581,15 @@ export async function applySubscriptionAdminAction(params: {
   days?: number;
   endDate?: Date;
   actorUserId: string;
-}): Promise<{ state: string; periodEnd: string | null } | "NO_SUBSCRIPTION" | "VERSION_CONFLICT"> {
+}): Promise<{ state: string; periodEnd: string | null } | "NO_SUBSCRIPTION" | "VERSION_CONFLICT" | "REACTIVATE_NEEDS_PERIOD"> {
   const db = getPlatformAdminDb();
   return db.transaction(async (tx) => {
     const [sub] = await tx.select().from(subscriptions).where(eq(subscriptions.workspaceId, params.workspaceId)).limit(1);
     if (!sub) return "NO_SUBSCRIPTION" as const;
 
     const now = new Date();
+    // EXTEND_DAYS / SET_END_DATE keep the CURRENT state (a Trial stays a Trial,
+    // a paid ACTIVE stays ACTIVE) — never an automatic Trial<->Paid conversion.
     let nextState = sub.state as SubscriptionState;
     let periodEnd: Date | undefined;
     switch (params.action) {
@@ -601,8 +605,12 @@ export async function applySubscriptionAdminAction(params: {
         nextState = "EXPIRED";
         break;
       case "REACTIVATE":
+        // NO implicit free time: reactivation only restores a still-future
+        // saved period. If it has already expired, staff must EXTEND_DAYS or
+        // SET_END_DATE first — we never silently grant days.
+        if (!sub.periodEnd || sub.periodEnd <= now) return "REACTIVATE_NEEDS_PERIOD" as const;
         nextState = "ACTIVE";
-        periodEnd = sub.periodEnd && sub.periodEnd > now ? sub.periodEnd : new Date(now.getTime() + REACTIVATE_DEFAULT_DAYS * 24 * 60 * 60 * 1000);
+        periodEnd = undefined; // keep the existing future periodEnd unchanged
         break;
     }
 

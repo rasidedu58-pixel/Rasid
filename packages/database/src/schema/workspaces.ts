@@ -32,7 +32,7 @@ export const workspaces = pgTable(
   },
   (table) => [
     check("workspaces_type_check", sql`${table.workspaceType} IN ('TEACHER', 'CENTER')`),
-    check("workspaces_status_check", sql`${table.status} IN ('ACTIVE', 'ARCHIVED')`),
+    check("workspaces_status_check", sql`${table.status} IN ('ACTIVE', 'ARCHIVED', 'SUSPENDED')`),
     check(
       "workspaces_due_date_policy_check",
       sql`(${table.dueDatePolicy} = 'UNIFIED' AND ${table.unifiedDueDay} BETWEEN 1 AND 28)

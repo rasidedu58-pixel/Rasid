@@ -19,6 +19,8 @@ export interface TeamRepositoryPort {
     userId: string,
     workspaceId: string,
   ): Promise<MembershipRow | undefined>;
+  /** The workspace's operational status (ACTIVE / SUSPENDED / ARCHIVED) — used by the guard to block a SUSPENDED customer. `undefined` if the workspace doesn't exist. */
+  findWorkspaceStatus(workspaceId: string): Promise<string | undefined>;
   listMembershipsForWorkspace(workspaceId: string): Promise<MembershipRow[]>;
   /** Backs the rich `GET /team` — memberships joined to member identity (0053 RLS). */
   listTeamMembersWithIdentity(workspaceId: string): Promise<TeamMemberIdentityRow[]>;

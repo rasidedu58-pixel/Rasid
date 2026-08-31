@@ -32,6 +32,19 @@ export class ForbiddenApiException extends ApiException {
 }
 
 /**
+ * The customer's workspace has been placed on a reversible operational hold
+ * (workspaces.status = 'SUSPENDED') by platform operations. All tenant-scoped
+ * operations are blocked while suspended; data is untouched and access is
+ * restored the moment the workspace is reactivated. Distinct 403 code so the
+ * client can show a suspension notice rather than a generic "forbidden".
+ */
+export class AccountSuspendedException extends ApiException {
+  constructor(message = "تم إيقاف حساب مؤسستك مؤقتًا. لا يمكن تنفيذ العمليات حتى تتم إعادة التفعيل. بياناتك محفوظة. للمساعدة تواصل مع الدعم.") {
+    super(403, "ACCOUNT_SUSPENDED", message);
+  }
+}
+
+/**
  * Safe no-leak 404 — used both for "does not exist" and "exists but the
  * caller has no membership", per API Contract §5.2/§12: existence of a
  * resource outside the caller's scope must never be confirmed.

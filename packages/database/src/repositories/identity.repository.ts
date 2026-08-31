@@ -276,3 +276,18 @@ export async function completeOnboarding(
   }
   return updated;
 }
+
+/**
+ * The workspace's operational status only (ACTIVE / SUSPENDED / ARCHIVED).
+ * Read on the per-request hot path by `PermissionGuard` to block a SUSPENDED
+ * customer from operating — kept as a single indexed PK lookup, no joins.
+ * Returns `undefined` if the workspace doesn't exist / isn't visible under RLS.
+ */
+export async function findWorkspaceStatus(db: Db, workspaceId: string): Promise<string | undefined> {
+  const [row] = await db
+    .select({ status: workspaces.status })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  return row?.status;
+}

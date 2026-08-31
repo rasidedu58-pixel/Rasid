@@ -158,6 +158,14 @@ export class PlatformOperationsService {
     });
     if (res === "NO_SUBSCRIPTION") throw new ResourceNotFoundException("لا يوجد اشتراك لهذه المساحة.");
     if (res === "VERSION_CONFLICT") throw new VersionConflictException();
+    if (res === "REACTIVATE_NEEDS_PERIOD") {
+      // Reactivate never grants time implicitly. An expired subscription has no
+      // future period to restore, so ops must set a concrete end date (or
+      // extend) first — surfaced as a field-level validation error on `action`.
+      throw new ValidationApiException({
+        action: ["لا يمكن إعادة التفعيل: انتهت فترة الاشتراك. مدِّد المدة أو حدِّد تاريخ انتهاء جديدًا أولًا."],
+      });
+    }
     return res;
   }
 

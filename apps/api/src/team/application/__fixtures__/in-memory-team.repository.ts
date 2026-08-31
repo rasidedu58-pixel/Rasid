@@ -64,6 +64,17 @@ export class InMemoryTeamRepository implements TeamRepositoryPort {
     return undefined;
   }
 
+  /** Workspace operational status by id; defaults to ACTIVE unless a test seeds otherwise. */
+  readonly workspaceStatusById = new Map<string, string>();
+
+  seedWorkspaceStatus(workspaceId: string, status: string): void {
+    this.workspaceStatusById.set(workspaceId, status);
+  }
+
+  async findWorkspaceStatus(workspaceId: string): Promise<string | undefined> {
+    return this.workspaceStatusById.get(workspaceId) ?? "ACTIVE";
+  }
+
   async listMembershipsForWorkspace(workspaceId: string): Promise<MembershipRow[]> {
     return [...this.membershipsById.values()].filter((m) => m.workspaceId === workspaceId);
   }

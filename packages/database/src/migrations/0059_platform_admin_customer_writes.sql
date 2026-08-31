@@ -13,7 +13,13 @@
 --
 -- NOT auto-applied to Production — apply via the safe preflight. Additive.
 
--- workspaces: suspend/reactivate + rename ---------------------------------------
+-- workspaces: add the reversible SUSPENDED operational state (distinct from
+-- ARCHIVED = ended/hidden), then suspend/reactivate + rename ------------------
+ALTER TABLE "workspaces" DROP CONSTRAINT IF EXISTS "workspaces_status_check";
+--> statement-breakpoint
+ALTER TABLE "workspaces" ADD CONSTRAINT "workspaces_status_check"
+  CHECK ("status" IN ('ACTIVE', 'ARCHIVED', 'SUSPENDED'));
+--> statement-breakpoint
 CREATE POLICY "workspaces_platform_admin_write" ON "workspaces"
   FOR UPDATE TO app_platform_admin USING (true) WITH CHECK (true);
 --> statement-breakpoint

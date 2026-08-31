@@ -3,6 +3,7 @@ import { Reflector } from "@nestjs/core";
 import type { PermissionKey } from "@academic-precision/contracts";
 import type { MembershipRow } from "@academic-precision/database";
 import {
+  AccountSuspendedException,
   ForbiddenApiException,
   ResourceNotFoundException,
   UnauthenticatedException,
@@ -83,6 +84,17 @@ export class PermissionGuard implements CanActivate {
       // Safe no-leak: identical response whether the workspace does not
       // exist or the caller has no membership in it.
       throw new ResourceNotFoundException();
+    }
+
+    // Account-level operational hold (real backend enforcement, not a UI
+    // badge): a SUSPENDED workspace can perform NO tenant operation — read or
+    // write — until platform ops reactivates it. Data is untouched, so this is
+    // fully reversible. Platform-admin routes are unaffected: they run behind
+    // PlatformAdminGuard, never this guard. The caller is a verified member
+    // (checked above), so revealing the suspension leaks nothing.
+    const workspaceStatus = await this.repository.findWorkspaceStatus(workspaceId);
+    if (workspaceStatus === "SUSPENDED") {
+      throw new AccountSuspendedException();
     }
 
     let grant: EffectiveGrant | undefined;

@@ -5,6 +5,7 @@ import {
   enableMembership,
   findActiveOrAnyMembership,
   findMembershipById,
+  findWorkspaceStatus,
   getDb,
   insertAuditEvent,
   listActiveGrantsForMembership,
@@ -63,6 +64,21 @@ export class DrizzleTeamRepository implements TeamRepositoryPort {
    */
   findMembershipByUserAndWorkspace(userId: string, workspaceId: string): Promise<MembershipRow | undefined> {
     return withRuntimeContext({ userId, workspaceId }, (db) => findActiveOrAnyMembership(db, workspaceId, userId));
+  }
+
+  /**
+   * Also called from `PermissionGuard.canActivate` (after the membership is
+   * resolved) — same pre-interceptor timing, so pass the explicit
+   * `userId`/`workspaceId` through `withRuntimeContext`. A member may read
+   * their own workspace row under RLS, so this returns the status even for a
+   * SUSPENDED workspace (which is exactly what the guard needs to block on).
+   */
+  findWorkspaceStatus(workspaceId: string): Promise<string | undefined> {
+    const ctx = getContext();
+    return withRuntimeContext(
+      { userId: ctx?.userId, workspaceId },
+      (db) => findWorkspaceStatus(db, workspaceId),
+    );
   }
 
   /** Backs `GET /team`; `workspaceId` is an explicit, guard-verified parameter — prefer it over ambient context. */

@@ -1,7 +1,11 @@
 import "reflect-metadata";
 import { Reflector } from "@nestjs/core";
 import type { ExecutionContext } from "@nestjs/common";
-import { ForbiddenApiException, ResourceNotFoundException } from "../../../common/exceptions/api.exception";
+import {
+  AccountSuspendedException,
+  ForbiddenApiException,
+  ResourceNotFoundException,
+} from "../../../common/exceptions/api.exception";
 import { AUTH_USER_REQUEST_KEY } from "../../../identity/api/guards/supabase-auth.guard";
 import { InMemoryTeamRepository } from "../../application/__fixtures__/in-memory-team.repository";
 import { PermissionResolverService } from "../../application/permission-resolver.service";
@@ -84,5 +88,46 @@ describe("PermissionGuard", () => {
     repository.seedMembership({ workspaceId: WORKSPACE_B, userId: "u-2", roleLabel: "OWNER" });
     const context = makeContext({ authUserId: "u-1", workspaceHeader: WORKSPACE_B });
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ResourceNotFoundException);
+  });
+
+  describe("account suspension — real backend enforcement", () => {
+    it("blocks a valid Owner from operating while the workspace is SUSPENDED (403 ACCOUNT_SUSPENDED, not a UI badge)", async () => {
+      repository.seedMembership({ workspaceId: WORKSPACE_A, userId: "u-owner", roleLabel: "OWNER" });
+      repository.seedWorkspaceStatus(WORKSPACE_A, "SUSPENDED");
+      const context = makeContext({
+        authUserId: "u-owner",
+        workspaceHeader: WORKSPACE_A,
+        requiredPermission: "team.manage",
+      });
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(AccountSuspendedException);
+    });
+
+    it("blocks even a read (no @RequirePermission) while SUSPENDED — the whole tenant is frozen", async () => {
+      repository.seedMembership({ workspaceId: WORKSPACE_A, userId: "u-1", roleLabel: "ASSISTANT" });
+      repository.seedWorkspaceStatus(WORKSPACE_A, "SUSPENDED");
+      const context = makeContext({ authUserId: "u-1", workspaceHeader: WORKSPACE_A });
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(AccountSuspendedException);
+    });
+
+    it("restores access with NO data change once the workspace is reactivated (status back to ACTIVE)", async () => {
+      repository.seedMembership({ workspaceId: WORKSPACE_A, userId: "u-owner", roleLabel: "OWNER" });
+      repository.seedWorkspaceStatus(WORKSPACE_A, "SUSPENDED");
+      const context = makeContext({
+        authUserId: "u-owner",
+        workspaceHeader: WORKSPACE_A,
+        requiredPermission: "team.manage",
+      });
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(AccountSuspendedException);
+      // reactivation flips only the status flag; the same membership/data stands.
+      repository.seedWorkspaceStatus(WORKSPACE_A, "ACTIVE");
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it("checks suspension AFTER membership, so a foreign caller still gets the no-leak 404 (no suspension disclosure)", async () => {
+      repository.seedMembership({ workspaceId: WORKSPACE_A, userId: "u-1", roleLabel: "ASSISTANT" });
+      repository.seedWorkspaceStatus(WORKSPACE_B, "SUSPENDED");
+      const context = makeContext({ authUserId: "u-1", workspaceHeader: WORKSPACE_B });
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ResourceNotFoundException);
+    });
   });
 });
