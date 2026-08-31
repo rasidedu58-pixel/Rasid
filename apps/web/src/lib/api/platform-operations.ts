@@ -1,13 +1,25 @@
 import type {
+  ChangePlatformStaffRoleRequest,
+  CreateCustomerInvitationRequest,
+  CreateCustomerInvitationResponse,
   CreateFollowUpRequest,
   CreateMonthOverrideRequest,
   CreatePlatformContactLogRequest,
+  CreatePlatformStaffInvitationRequest,
+  CreatePlatformStaffInvitationResponse,
   FollowUp,
+  ListCustomerInvitationsResponse,
   ListFollowUpsResponse,
   ListMonthOverridesResponse,
   ListPlatformContactLogsResponse,
+  ListPlatformStaffInvitationsResponse,
+  ListPlatformStaffMembersResponse,
   ListPlatformStaffResponse,
+  ListWorkspaceFeaturesResponse,
   PlatformContactLog,
+  PlatformStaffAccountActionRequest,
+  RevokeFeatureOverrideRequest,
+  SetFeatureOverrideRequest,
   UpdateFollowUpRequest,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
@@ -76,4 +88,55 @@ export function subscriptionAdminAction(
   body: { action: "EXTEND_DAYS" | "SET_END_DATE" | "SUSPEND" | "REACTIVATE"; reason: string; days?: number; endDate?: string },
 ): Promise<{ state: string; periodEnd: string | null }> {
   return apiRequest<{ state: string; periodEnd: string | null }>(`/platform-admin/workspaces/${workspaceId}/subscription-action`, { method: "POST", body });
+}
+
+// --- Platform Staff Management ("فريق راصد") --------------------------------
+export function fetchPlatformStaffMembers(): Promise<ListPlatformStaffMembersResponse> {
+  return apiRequest<ListPlatformStaffMembersResponse>("/platform-admin/staff-members");
+}
+
+export function fetchPlatformStaffInvitations(): Promise<ListPlatformStaffInvitationsResponse> {
+  return apiRequest<ListPlatformStaffInvitationsResponse>("/platform-admin/staff-invitations");
+}
+
+export function createPlatformStaffInvitation(body: CreatePlatformStaffInvitationRequest): Promise<CreatePlatformStaffInvitationResponse> {
+  return apiRequest<CreatePlatformStaffInvitationResponse>("/platform-admin/staff-invitations", { method: "POST", body });
+}
+
+export function revokePlatformStaffInvitation(id: string): Promise<{ id: string; status: "REVOKED" }> {
+  return apiRequest<{ id: string; status: "REVOKED" }>(`/platform-admin/staff-invitations/${id}/revoke`, { method: "POST" });
+}
+
+export function changePlatformStaffRole(userId: string, body: ChangePlatformStaffRoleRequest): Promise<{ userId: string; role: string }> {
+  return apiRequest<{ userId: string; role: string }>(`/platform-admin/staff-members/${userId}/role`, { method: "PATCH", body });
+}
+
+export function platformStaffAccountAction(userId: string, body: PlatformStaffAccountActionRequest): Promise<{ userId: string; status: string }> {
+  return apiRequest<{ userId: string; status: string }>(`/platform-admin/staff-members/${userId}/account-action`, { method: "POST", body });
+}
+
+// --- Customer Creation via Secure Invite ------------------------------------
+export function fetchCustomerInvitations(params: { cursor?: string; limit?: number } = {}): Promise<ListCustomerInvitationsResponse> {
+  return apiRequest<ListCustomerInvitationsResponse>("/platform-admin/customer-invitations", { query: params });
+}
+
+export function createCustomerInvitation(body: CreateCustomerInvitationRequest): Promise<CreateCustomerInvitationResponse> {
+  return apiRequest<CreateCustomerInvitationResponse>("/platform-admin/customer-invitations", { method: "POST", body });
+}
+
+export function revokeCustomerInvitation(id: string): Promise<{ id: string; status: "REVOKED" }> {
+  return apiRequest<{ id: string; status: "REVOKED" }>(`/platform-admin/customer-invitations/${id}/revoke`, { method: "POST" });
+}
+
+// --- Workspace Feature Overrides --------------------------------------------
+export function fetchWorkspaceFeatures(workspaceId: string): Promise<ListWorkspaceFeaturesResponse> {
+  return apiRequest<ListWorkspaceFeaturesResponse>(`/platform-admin/workspaces/${workspaceId}/features`);
+}
+
+export function setFeatureOverride(workspaceId: string, body: SetFeatureOverrideRequest): Promise<{ featureKey: string; state: string }> {
+  return apiRequest<{ featureKey: string; state: string }>(`/platform-admin/workspaces/${workspaceId}/feature-override`, { method: "POST", body });
+}
+
+export function revokeFeatureOverride(workspaceId: string, body: RevokeFeatureOverrideRequest): Promise<{ featureKey: string }> {
+  return apiRequest<{ featureKey: string }>(`/platform-admin/workspaces/${workspaceId}/feature-override/revoke`, { method: "POST", body });
 }

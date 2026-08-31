@@ -49,11 +49,104 @@ export const platformAdmins = pgTable(
     // this already-allowlisted staff member may take. A CHECK constraint in the
     // migration is the source of truth for the allowed values.
     role: text("role").notNull().default("SUPPORT_AGENT"),
+    // Reversible access hold (migration 0060). ACTIVE / DISABLED. A DISABLED
+    // staff member keeps their row + role but PlatformAdminGuard treats them as
+    // no-access — real backend enforcement, not just a UI badge.
+    status: text("status").notNull().default("ACTIVE"),
+    // Who invited this staff member (set on invite acceptance; null for the
+    // out-of-band-seeded founder). set null so the row survives their removal.
+    invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
     note: text("note"),
     grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
   (table) => [unique("platform_admins_user_id_unique").on(table.userId)],
 );
+
+/**
+ * Platform Staff invitations (migration 0060) — a secure, expiring, single-use
+ * link by which a new person becomes a `platform_admins` row. The admin never
+ * sets a password. Same token security as `workspace_invitations`: only the
+ * SHA-256 hex digest is stored (`token_hash`), never the raw token. Platform
+ * table (no tenant RLS); `app_platform_admin` manages it. No privilege is
+ * granted until the invite is accepted (acceptance INSERTs the platform_admins
+ * row atomically). `email` binds the invite to the intended recipient.
+ */
+export const platformStaffInvitations = pgTable(
+  "platform_staff_invitations",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    email: text("email").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    role: text("role").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    acceptedByUserId: uuid("accepted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => [unique("platform_staff_invitations_token_hash_unique").on(table.tokenHash)],
+);
+
+/**
+ * Customer onboarding invitations (migration 0060) — the platform records a
+ * customer's identity and mints a secure onboarding link. The customer opens
+ * it and authenticates through the normal Supabase Auth flow; the existing
+ * lazy provisioning creates their own workspace + trial. This invite is a
+ * tracked, single-use, expiring record claimed atomically on first arrival —
+ * it never provisions anything itself. Platform table; `app_platform_admin`
+ * manages it.
+ */
+export const platformCustomerInvitations = pgTable(
+  "platform_customer_invitations",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    tokenHash: text("token_hash").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    acceptedByUserId: uuid("accepted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    acceptedWorkspaceId: uuid("accepted_workspace_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => [unique("platform_customer_invitations_token_hash_unique").on(table.tokenHash)],
+);
+
+/**
+ * Workspace feature overrides (migration 0060) — a per-workspace ENABLE/DISABLE
+ * exception layered on top of the GLOBAL `feature_flags` availability. Only a
+ * feature key that exists in the code catalog may be targeted (validated in the
+ * service). NOT a billing entitlement and NOT an RBAC bypass. Append-only
+ * history: an override is revoked (revoked_at), never hard-deleted; the active
+ * one per (workspace, feature) is revoked_at IS NULL AND (expires_at IS NULL OR
+ * expires_at > now()). Tenant reads its own (app_runtime SELECT) so the runtime
+ * feature gate can honor it; `app_platform_admin` manages it.
+ */
+export const workspaceFeatureOverrides = pgTable("workspace_feature_overrides", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  workspaceId: uuid("workspace_id").notNull(),
+  featureKey: text("feature_key").notNull(),
+  state: text("state").notNull(),
+  reason: text("reason").notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+});
 
 /**
  * Unit 1 — Customer Communication. A company→customer contact record logged

@@ -18,6 +18,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { withRuntimeContext } from "../connection";
 import { users } from "../schema/identity";
 import { memberships } from "../schema/permissions";
 import { workspaces } from "../schema/workspaces";
@@ -283,6 +284,30 @@ export async function completeOnboarding(
  * customer from operating — kept as a single indexed PK lookup, no joins.
  * Returns `undefined` if the workspace doesn't exist / isn't visible under RLS.
  */
+/**
+ * Ensures ONLY the application `users` row exists for an already-authenticated
+ * identity — with NO tenant provisioning (no workspace, no owner membership, no
+ * trial/subscription). This is the minimal-footprint counterpart to
+ * {@link createUserWorkspaceMembership} for identities that must exist as an
+ * application user but are NOT tenants — specifically a person accepting a
+ * Platform Staff invitation, who may not be a teacher and must never get a
+ * teaching workspace or trial just by joining فريق راصد.
+ *
+ * Runs on the caller's OWN `app_runtime` context (the `users_self_insert` RLS
+ * policy admits `id = app.user_id`), reusing the same idempotent
+ * `ON CONFLICT (id) DO NOTHING` insert — so it is safe to call for a user who
+ * already exists (e.g. an existing teacher joining staff). Identity fields come
+ * from the verified JWT, never from client input.
+ */
+export async function ensureApplicationUser(input: { authUserId: string; email: string | null; fullName: string }): Promise<void> {
+  await withRuntimeContext({ userId: input.authUserId }, (db) =>
+    db
+      .insert(users)
+      .values({ id: input.authUserId, fullName: input.fullName, emailDisplay: input.email, status: ACTIVE_USER_STATUS })
+      .onConflictDoNothing({ target: users.id }),
+  );
+}
+
 export async function findWorkspaceStatus(db: Db, workspaceId: string): Promise<string | undefined> {
   const [row] = await db
     .select({ status: workspaces.status })

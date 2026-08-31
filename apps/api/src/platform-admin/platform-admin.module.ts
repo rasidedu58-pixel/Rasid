@@ -3,10 +3,14 @@ import { SupabaseAuthGuard } from "../identity/api/guards/supabase-auth.guard";
 import { JwtTokenVerifier, TOKEN_VERIFIER } from "../identity/infrastructure/jwt-token-verifier";
 import { PlatformAdminController } from "./api/platform-admin.controller";
 import { PlatformOperationsController } from "./api/platform-operations.controller";
+import { PlatformStaffController, PlatformStaffInviteController } from "./api/platform-staff.controller";
+import { PlatformCustomerFeatureController, PlatformOnboardingController } from "./api/platform-customer-feature.controller";
 import { PlatformAdminGuard } from "./api/guards/platform-admin.guard";
 import { PlatformPermissionGuard } from "./api/guards/platform-permission.guard";
 import { PlatformAdminService } from "./application/platform-admin.service";
 import { PlatformOperationsService } from "./application/platform-operations.service";
+import { PlatformStaffService } from "./application/platform-staff.service";
+import { PlatformCustomerFeatureService } from "./application/platform-customer-feature.service";
 import { PlatformStatusService } from "./application/platform-status.service";
 
 /**
@@ -21,10 +25,19 @@ import { PlatformStatusService } from "./application/platform-status.service";
  * module yet (deliberate V1 scope choice, see the closure report).
  */
 @Module({
-  controllers: [PlatformAdminController, PlatformOperationsController],
+  controllers: [
+    PlatformAdminController,
+    PlatformOperationsController,
+    PlatformStaffController,
+    PlatformStaffInviteController,
+    PlatformCustomerFeatureController,
+    PlatformOnboardingController,
+  ],
   providers: [
     PlatformAdminService,
     PlatformOperationsService,
+    PlatformStaffService,
+    PlatformCustomerFeatureService,
     PlatformStatusService,
     PlatformAdminGuard,
     PlatformPermissionGuard,

@@ -407,6 +407,13 @@
       "when": 1788700000000,
       "tag": "0059_platform_admin_customer_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1788800000000,
+      "tag": "0060_platform_staff_customers_features",
+      "breakpoints": true
     }
   ]
 }

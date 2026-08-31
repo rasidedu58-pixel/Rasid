@@ -36,12 +36,15 @@ function isPlatformRole(value: string): value is PlatformRole {
  */
 export async function getPlatformAdminRole(userId: string): Promise<PlatformRole | null> {
   const rows = await getDb()
-    .select({ role: platformAdmins.role })
+    .select({ role: platformAdmins.role, status: platformAdmins.status })
     .from(platformAdmins)
     .where(eq(platformAdmins.userId, userId))
     .limit(1);
-  const role = rows[0]?.role;
-  return role && isPlatformRole(role) ? role : role ? "SUPPORT_AGENT" : null;
+  const row = rows[0];
+  // A DISABLED staff member keeps their row but loses all access — real backend
+  // enforcement of Staff Management's "disable", not just a UI badge.
+  if (!row || row.status === "DISABLED") return null;
+  return isPlatformRole(row.role) ? row.role : "SUPPORT_AGENT";
 }
 
 const DEFAULT_LIMIT = 30;

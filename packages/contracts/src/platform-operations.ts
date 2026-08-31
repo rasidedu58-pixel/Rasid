@@ -37,9 +37,11 @@ export const PLATFORM_PERMISSIONS = [
   // --- Operating-Month Overrides ---
   "platform.operating_months.manage",
   // --- Customer & Subscription controls ---
-  "platform.customers.manage", // suspend / reactivate a customer account; edit operational fields
+  "platform.customers.manage", // suspend / reactivate a customer account; edit operational fields; create a customer via secure invite
   "platform.subscriptions.manage", // extend trial, set end date, suspend / reactivate a subscription
-  // --- Owner-only: platform staff / role management (reserved) ---
+  // --- Workspace feature overrides ---
+  "platform.features.manage", // enable / disable / revoke a per-workspace feature override
+  // --- Owner-only: platform staff / role management ---
   "platform.staff.manage",
 ] as const;
 export const platformPermissionSchema = z.enum(PLATFORM_PERMISSIONS);
@@ -68,6 +70,7 @@ export const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[
     "platform.health.view",
     "platform.health.details",
     "platform.operating_months.manage",
+    "platform.features.manage",
   ],
   SUPPORT_AGENT: ["platform.customers.view", "platform.support.view", "platform.support.manage", "platform.health.view"],
 };
@@ -227,3 +230,227 @@ export type PlatformStaffRef = z.infer<typeof platformStaffRefSchema>;
 
 export const listPlatformStaffResponseSchema = z.object({ items: z.array(platformStaffRefSchema) });
 export type ListPlatformStaffResponse = z.infer<typeof listPlatformStaffResponseSchema>;
+
+// ===========================================================================
+// Platform Staff Management ("فريق راصد") — OWNER-only (platform.staff.manage).
+// A platform staff member is a `platform_admins` row (company-level, NOT a
+// tenant membership). New staff join ONLY by accepting a secure invite — the
+// admin never sets a password. Disabling flips status to DISABLED, which the
+// PlatformAdminGuard treats as no-access (real backend enforcement).
+// ===========================================================================
+export const PLATFORM_STAFF_STATUSES = ["ACTIVE", "DISABLED"] as const;
+export const platformStaffStatusSchema = z.enum(PLATFORM_STAFF_STATUSES);
+export type PlatformStaffStatus = (typeof PLATFORM_STAFF_STATUSES)[number];
+
+export const platformStaffMemberSchema = z.object({
+  userId: z.string().uuid(),
+  fullName: z.string().nullable(),
+  email: z.string().nullable(),
+  role: platformRoleSchema,
+  status: platformStaffStatusSchema,
+  invitedByName: z.string().nullable(),
+  grantedAt: z.string(),
+  /** True for the caller's own row — the UI blocks self role-change / self-disable. */
+  isSelf: z.boolean(),
+});
+export type PlatformStaffMember = z.infer<typeof platformStaffMemberSchema>;
+
+export const listPlatformStaffMembersResponseSchema = z.object({ items: z.array(platformStaffMemberSchema) });
+export type ListPlatformStaffMembersResponse = z.infer<typeof listPlatformStaffMembersResponseSchema>;
+
+export const platformInvitationStatusSchema = z.enum(["PENDING", "ACCEPTED", "REVOKED"]);
+export type PlatformInvitationStatus = z.infer<typeof platformInvitationStatusSchema>;
+
+export const platformStaffInvitationSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string(),
+  role: platformRoleSchema,
+  status: platformInvitationStatusSchema,
+  invitedByName: z.string().nullable(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  acceptedAt: z.string().nullable(),
+  expired: z.boolean(),
+});
+export type PlatformStaffInvitation = z.infer<typeof platformStaffInvitationSchema>;
+
+export const listPlatformStaffInvitationsResponseSchema = z.object({ items: z.array(platformStaffInvitationSchema) });
+export type ListPlatformStaffInvitationsResponse = z.infer<typeof listPlatformStaffInvitationsResponseSchema>;
+
+export const createPlatformStaffInvitationRequestSchema = z.object({
+  email: z.string().trim().email("بريد غير صالح").max(320),
+  role: platformRoleSchema,
+});
+export type CreatePlatformStaffInvitationRequest = z.infer<typeof createPlatformStaffInvitationRequestSchema>;
+
+/** Returns the raw token ONCE (never stored/logged in raw form). */
+export const createPlatformStaffInvitationResponseSchema = z.object({
+  id: z.string().uuid(),
+  token: z.string(),
+  expiresAt: z.string(),
+});
+export type CreatePlatformStaffInvitationResponse = z.infer<typeof createPlatformStaffInvitationResponseSchema>;
+
+export const changePlatformStaffRoleRequestSchema = z.object({
+  role: platformRoleSchema,
+  reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+});
+export type ChangePlatformStaffRoleRequest = z.infer<typeof changePlatformStaffRoleRequestSchema>;
+
+export const platformStaffAccountActionRequestSchema = z.object({
+  action: z.enum(["DISABLE", "REACTIVATE"]),
+  reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+});
+export type PlatformStaffAccountActionRequest = z.infer<typeof platformStaffAccountActionRequestSchema>;
+
+/** Invitee-facing preview of a staff invite (token-authorized, pre-acceptance). */
+export const platformStaffInvitationPreviewSchema = z.object({
+  valid: z.boolean(),
+  status: platformInvitationStatusSchema,
+  email: z.string(),
+  role: platformRoleSchema,
+  invitedByName: z.string().nullable(),
+  expiresAt: z.string(),
+});
+export type PlatformStaffInvitationPreview = z.infer<typeof platformStaffInvitationPreviewSchema>;
+
+export const acceptPlatformStaffInvitationResponseSchema = z.object({
+  role: platformRoleSchema,
+  status: platformStaffStatusSchema,
+});
+export type AcceptPlatformStaffInvitationResponse = z.infer<typeof acceptPlatformStaffInvitationResponseSchema>;
+
+// ===========================================================================
+// Customer Creation via Secure Invite — platform.customers.manage.
+// The admin NEVER sets a password: they record the customer's identity and
+// mint a secure, expiring, single-use onboarding link. The customer opens it,
+// authenticates through the normal Supabase Auth (OTP) flow, and the existing
+// lazy provisioning creates their own workspace + trial per current Product
+// Rules. No new billing. The invite is a tracked, auditable onboarding record
+// claimed atomically on first authenticated arrival — it never provisions
+// anything itself before the customer accepts.
+// ===========================================================================
+export const customerInvitationSchema = z.object({
+  id: z.string().uuid(),
+  fullName: z.string(),
+  email: z.string(),
+  phone: z.string().nullable(),
+  status: platformInvitationStatusSchema,
+  invitedByName: z.string().nullable(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  acceptedAt: z.string().nullable(),
+  acceptedWorkspaceId: z.string().uuid().nullable(),
+  expired: z.boolean(),
+});
+export type CustomerInvitation = z.infer<typeof customerInvitationSchema>;
+
+export const listCustomerInvitationsResponseSchema = cursorPageSchema(customerInvitationSchema);
+export type ListCustomerInvitationsResponse = z.infer<typeof listCustomerInvitationsResponseSchema>;
+
+export const createCustomerInvitationRequestSchema = z.object({
+  fullName: z.string().trim().min(1, "الاسم مطلوب").max(200),
+  email: z.string().trim().email("بريد غير صالح").max(320),
+  phone: z.string().trim().max(40).optional(),
+});
+export type CreateCustomerInvitationRequest = z.infer<typeof createCustomerInvitationRequestSchema>;
+
+export const createCustomerInvitationResponseSchema = z.object({
+  id: z.string().uuid(),
+  token: z.string(),
+  expiresAt: z.string(),
+});
+export type CreateCustomerInvitationResponse = z.infer<typeof createCustomerInvitationResponseSchema>;
+
+export const customerInvitationPreviewSchema = z.object({
+  valid: z.boolean(),
+  status: platformInvitationStatusSchema,
+  fullName: z.string(),
+  email: z.string(),
+  expiresAt: z.string(),
+});
+export type CustomerInvitationPreview = z.infer<typeof customerInvitationPreviewSchema>;
+
+export const claimCustomerInvitationResponseSchema = z.object({
+  status: platformInvitationStatusSchema,
+  workspaceId: z.string().uuid().nullable(),
+});
+export type ClaimCustomerInvitationResponse = z.infer<typeof claimCustomerInvitationResponseSchema>;
+
+// ===========================================================================
+// Workspace Feature Overrides — platform.features.manage (OWNER + OPS).
+// Layering: Global Feature Availability -> (Entitlement/Plan if any) ->
+// Workspace Override. An override can ONLY target a feature key that exists in
+// the code catalog below (it can never switch on a feature the code does not
+// implement), and it is NOT a security bypass — feature access is separate
+// from RBAC/permissions and from billing entitlements.
+// ===========================================================================
+export const featureOverrideStateSchema = z.enum(["ENABLED", "DISABLED"]);
+export type FeatureOverrideState = z.infer<typeof featureOverrideStateSchema>;
+
+/**
+ * The allowlist of override-able product features — the ONLY keys a workspace
+ * override may target, and the SAFETY BOUNDARY of the whole override mechanism.
+ *
+ * Precedence at runtime: an active workspace override WINS over the global
+ * feature flag (ENABLE can turn a globally-off feature on for one customer;
+ * DISABLE can turn a globally-on feature off). That is safe ONLY because every
+ * key here is a "default rollout state" toggle. A HARD KILL SWITCH (a flag
+ * turned off for operational/security reasons that must stay off everywhere)
+ * must NOT be added to this catalog — leaving it out means no override can ever
+ * bypass its global OFF. Billing capabilities (REPORT_EXPORT, CREATE_MONTH, …)
+ * are likewise excluded: those are governed by entitlements, never by an
+ * override, so an override can bypass neither billing nor security/RBAC.
+ */
+export const PLATFORM_FEATURE_CATALOG = [
+  {
+    key: "complete_session_with_missing_records",
+    label: "إكمال الجلسة مع وجود نواقص",
+    description: "السماح بإنهاء جلسة رغم وجود سجلات غير مكتملة لبعض الطلاب.",
+  },
+] as const;
+export const PLATFORM_FEATURE_KEYS = PLATFORM_FEATURE_CATALOG.map((f) => f.key) as [string, ...string[]];
+export const platformFeatureKeySchema = z.enum(PLATFORM_FEATURE_KEYS);
+export type PlatformFeatureKey = (typeof PLATFORM_FEATURE_CATALOG)[number]["key"];
+
+export function isPlatformFeatureKey(key: string): key is PlatformFeatureKey {
+  return PLATFORM_FEATURE_CATALOG.some((f) => f.key === key);
+}
+
+export const workspaceFeatureSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  description: z.string(),
+  /** The product-wide default availability (global feature flag). */
+  globalEnabled: z.boolean(),
+  /** The effective state after applying any active override. */
+  effectiveEnabled: z.boolean(),
+  /** The active override for this workspace, if any. */
+  override: z
+    .object({
+      state: featureOverrideStateSchema,
+      reason: z.string(),
+      createdByName: z.string().nullable(),
+      createdAt: z.string(),
+      expiresAt: z.string().nullable(),
+    })
+    .nullable(),
+});
+export type WorkspaceFeature = z.infer<typeof workspaceFeatureSchema>;
+
+export const listWorkspaceFeaturesResponseSchema = z.object({ items: z.array(workspaceFeatureSchema) });
+export type ListWorkspaceFeaturesResponse = z.infer<typeof listWorkspaceFeaturesResponseSchema>;
+
+export const setFeatureOverrideRequestSchema = z.object({
+  featureKey: platformFeatureKeySchema,
+  state: featureOverrideStateSchema,
+  reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+  expiresAt: z.string().datetime().optional(),
+});
+export type SetFeatureOverrideRequest = z.infer<typeof setFeatureOverrideRequestSchema>;
+
+export const revokeFeatureOverrideRequestSchema = z.object({
+  featureKey: platformFeatureKeySchema,
+  reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+});
+export type RevokeFeatureOverrideRequest = z.infer<typeof revokeFeatureOverrideRequestSchema>;

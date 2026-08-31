@@ -45,6 +45,18 @@ export class AccountSuspendedException extends ApiException {
 }
 
 /**
+ * A platform Staff-Management action is refused because it would break an
+ * invariant: demoting/disabling the LAST active PLATFORM_OWNER (which would
+ * leave the platform ownerless), or an owner acting on their own row where the
+ * UI must route them through another owner. 409 with a distinct code.
+ */
+export class PlatformStaffProtectedException extends ApiException {
+  constructor(message = "لا يمكن تنفيذ هذا الإجراء: لا يجوز ترك المنصة بدون مالك نشِط.") {
+    super(409, "PLATFORM_STAFF_PROTECTED", message);
+  }
+}
+
+/**
  * Safe no-leak 404 — used both for "does not exist" and "exists but the
  * caller has no membership", per API Contract §5.2/§12: existence of a
  * resource outside the caller's scope must never be confirmed.

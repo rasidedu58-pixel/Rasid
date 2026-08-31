@@ -48,6 +48,7 @@ describe("PlatformPermissionGuard — RBAC matrix (reads + writes)", () => {
       deny("SUPPORT_AGENT", "platform.customers.manage");
       deny("SUPPORT_AGENT", "platform.subscriptions.manage");
     });
+    it("cannot manage feature overrides", () => deny("SUPPORT_AGENT", "platform.features.manage"));
   });
 
   describe("OPERATIONS_ADMIN — operations, but not owner-only security ops", () => {
@@ -63,6 +64,10 @@ describe("PlatformPermissionGuard — RBAC matrix (reads + writes)", () => {
       allow("OPERATIONS_ADMIN", "platform.customers.manage");
       allow("OPERATIONS_ADMIN", "platform.subscriptions.manage");
     });
+    it("can manage feature overrides but NOT staff (owner-only)", () => {
+      allow("OPERATIONS_ADMIN", "platform.features.manage");
+      deny("OPERATIONS_ADMIN", "platform.staff.manage");
+    });
   });
 
   describe("PLATFORM_OWNER — full surface", () => {
@@ -71,6 +76,7 @@ describe("PlatformPermissionGuard — RBAC matrix (reads + writes)", () => {
       allow("PLATFORM_OWNER", "platform.subscriptions.view");
       allow("PLATFORM_OWNER", "platform.support.manage");
       allow("PLATFORM_OWNER", "platform.operating_months.manage");
+      allow("PLATFORM_OWNER", "platform.features.manage");
       allow("PLATFORM_OWNER", "platform.staff.manage");
     });
   });

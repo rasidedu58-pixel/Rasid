@@ -7,6 +7,7 @@ import {
   completeSessionTransaction,
   failIdempotencyRecord,
   findFeatureFlagEnabled,
+  resolveActiveFeatureOverride,
   findGroupById,
   findGroupMonthById,
   findIdempotencyRecord,
@@ -34,6 +35,7 @@ import {
   type UpsertSessionExamInput,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
+import { isPlatformFeatureKey } from "@academic-precision/contracts";
 import type { SessionModeRepositoryPort } from "../application/ports/session-mode-repository.port";
 
 /**
@@ -121,9 +123,26 @@ export class DrizzleSessionModeRepository implements SessionModeRepositoryPort {
   }
 
   findFeatureFlagEnabled(key: string): Promise<boolean | undefined> {
-    // Global table (no workspace_id, no RLS) — a bare workspaceId-less
-    // runtime context is fine here.
-    return withRuntimeContext(this.runtimeCtx(), (db) => findFeatureFlagEnabled(db, key));
+    // Precedence: GLOBAL feature_flags value, then (for catalog features only) a
+    // per-workspace override WINS — ENABLE turns the feature on even when the
+    // global flag is false, DISABLE turns it off. This is intentional and safe:
+    // our global feature_flags are "default rollout state" toggles (a feature
+    // globally-off-by-default that Ops enables per customer), NOT hard kill
+    // switches. The SAFETY BOUNDARY is the catalog: only default-rollout-state
+    // features appear in PLATFORM_FEATURE_CATALOG, so only they are override-able
+    // at all — a hard kill switch would simply never be added to the catalog,
+    // and `isPlatformFeatureKey` below would reject it, leaving the global value
+    // as the final word. With no override present the result is exactly the
+    // global flag (today's behavior).
+    const ctx = this.runtimeCtx();
+    return withRuntimeContext(ctx, async (db) => {
+      const global = await findFeatureFlagEnabled(db, key);
+      if (ctx.workspaceId && isPlatformFeatureKey(key)) {
+        const override = await resolveActiveFeatureOverride(db, ctx.workspaceId, key);
+        if (override) return override === "ENABLED";
+      }
+      return global;
+    });
   }
 
   completeSessionTransaction(input: { sessionId: string; expectedVersion: number }) {

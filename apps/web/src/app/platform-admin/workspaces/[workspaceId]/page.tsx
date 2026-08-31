@@ -19,6 +19,7 @@ import { PageHeader } from "../../../../components/shell/page-header";
 import { CustomerCommunication } from "../../../../components/platform-admin/customer-communication";
 import { CustomerControls } from "../../../../components/platform-admin/customer-controls";
 import { OperatingMonthOverrides } from "../../../../components/platform-admin/operating-month-overrides";
+import { WorkspaceFeatures } from "../../../../components/platform-admin/workspace-features";
 import { PlatformStatusNotice } from "../../../../components/platform-admin/platform-status-widgets";
 import { qk } from "../../../../lib/query-keys";
 import { fetchPlatformAdminWorkspace, fetchPlatformWorkspaceOperational, fetchPlatformWorkspaceSubscription } from "../../../../lib/api/platform-admin";
@@ -136,6 +137,9 @@ export default function CustomerDetailPage() {
 
       {/* Customer & Subscription controls (platform.customers.manage / subscriptions.manage) */}
       <CustomerControls workspaceId={workspaceId} status={w.status} canViewSubscription={canViewSub} />
+
+      {/* Feature availability + per-workspace overrides (platform.features.manage) */}
+      <WorkspaceFeatures workspaceId={workspaceId} />
 
       {/* Account / workspace facts */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

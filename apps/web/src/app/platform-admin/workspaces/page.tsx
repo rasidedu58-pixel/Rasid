@@ -22,6 +22,7 @@ import {
   formatDate,
 } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
+import { CustomerCreate } from "../../../components/platform-admin/customer-create";
 import { useDebounce } from "../../../hooks/use-debounce";
 import { fetchPlatformAdminWorkspaces } from "../../../lib/api/platform-admin";
 import { isForbidden } from "../../../lib/api/client";
@@ -62,6 +63,8 @@ export default function PlatformAdminWorkspacesPage() {
   return (
     <>
       <PageHeader title="مساحات العمل" description="كل مساحات العمل عبر المنصة." />
+
+      <CustomerCreate />
 
       <div className="mb-4 flex flex-col gap-3">
         <div className="relative max-w-sm">
