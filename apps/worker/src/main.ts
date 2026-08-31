@@ -1,6 +1,6 @@
 import { createLogger, runWithContext, initErrorTracking, flushErrorTracking, captureException } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
-import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan } from "@academic-precision/database";
+import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan, WORKER_CONSUMED_EVENT_TYPES } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
 
 /**
@@ -24,7 +24,7 @@ import { registerGracefulShutdown } from "./shutdown";
  */
 const logger = createLogger("academic-precision-worker");
 
-const POLL_EVENT_TYPES = ["SessionCompleted"];
+const POLL_EVENT_TYPES = [...WORKER_CONSUMED_EVENT_TYPES];
 const IDLE_POLL_DELAY_MS = 5_000; // first empty poll — wait a bit before checking again.
 // Phase 15D — progressive backoff on CONSECUTIVE empty polls. The idle
 // outbox claim (`SELECT ... FOR UPDATE SKIP LOCKED`) is a real transaction on

@@ -5,9 +5,10 @@
  * degrade to `available:false` / UNKNOWN (never a 500). No persistence, no
  * incident system — the picture is recomputed from the live queue each call.
  */
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { getPlatformAdminDb } from "../connection";
 import { outboxEvents } from "../schema/outbox";
+import { WORKER_CONSUMED_EVENT_TYPES } from "../worker/outbox-dispatcher";
 
 const STALE_MINUTES = 10; // an unprocessed event older than this ⇒ the worker is behind
 const RECENT_PROCESS_HOURS = 2; // evidence the worker is actively draining the queue
@@ -37,6 +38,10 @@ const unavailable: WorkerHealthSnapshot = {
 export async function getWorkerHealthSnapshot(): Promise<WorkerHealthSnapshot> {
   const db = getPlatformAdminDb();
   try {
+    // Worker health is only meaningful for the event types the worker actually
+    // consumes (WORKER_CONSUMED_EVENT_TYPES). An unconsumed type (e.g.
+    // MonthCreated) sits PENDING forever by design and must not read as backlog.
+    const consumed = inArray(outboxEvents.eventType, [...WORKER_CONSUMED_EVENT_TYPES]);
     const [counts] = await db
       .select({
         pending: sql<number>`count(*) filter (where ${outboxEvents.status} = 'PENDING')`.mapWith(Number),
@@ -47,7 +52,8 @@ export async function getWorkerHealthSnapshot(): Promise<WorkerHealthSnapshot> {
         oldestUnprocessed: sql<Date | null>`min(${outboxEvents.availableAt}) filter (where ${outboxEvents.status} in ('PENDING','PROCESSING') and ${outboxEvents.availableAt} <= now())`,
         staleBacklog: sql<number>`count(*) filter (where ${outboxEvents.status} in ('PENDING','PROCESSING') and ${outboxEvents.availableAt} < now() - interval '${sql.raw(String(STALE_MINUTES))} minutes')`.mapWith(Number),
       })
-      .from(outboxEvents);
+      .from(outboxEvents)
+      .where(consumed);
 
     const pending = counts?.pending ?? 0;
     const processing = counts?.processing ?? 0;
@@ -78,7 +84,7 @@ export async function getWorkerHealthSnapshot(): Promise<WorkerHealthSnapshot> {
         status: outboxEvents.status,
       })
       .from(outboxEvents)
-      .where(sql`${outboxEvents.attemptCount} > 0 and ${outboxEvents.status} in ('DEAD','FAILED','PROCESSED')`)
+      .where(sql`${consumed} and ${outboxEvents.attemptCount} > 0 and ${outboxEvents.status} in ('DEAD','FAILED','PROCESSED')`)
       .orderBy(sql`coalesce(${outboxEvents.processedAt}, ${outboxEvents.availableAt}, ${outboxEvents.occurredAt}) desc`)
       .limit(15);
 

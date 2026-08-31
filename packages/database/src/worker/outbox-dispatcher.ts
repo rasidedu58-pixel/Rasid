@@ -71,6 +71,16 @@ const MAX_ATTEMPTS = 10;
 
 export type OutboxEventRow = typeof outboxEvents.$inferSelect;
 
+/**
+ * The outbox event types the worker actually consumes — the SINGLE source of
+ * truth. `apps/worker` polls exactly these, and any health/queue metric that
+ * asks "is the worker behind?" must scope to these too: an event type with no
+ * consumer (e.g. `MonthCreated`, produced for future use) sits PENDING forever
+ * by design and must NEVER be counted as a worker backlog. One list so the two
+ * consumers can never drift apart.
+ */
+export const WORKER_CONSUMED_EVENT_TYPES = ["SessionCompleted"] as const;
+
 function backoffMs(attemptCount: number): number {
   return Math.min(attemptCount * BASE_BACKOFF_MS, MAX_BACKOFF_MS);
 }
