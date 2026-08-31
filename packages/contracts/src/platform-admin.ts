@@ -136,8 +136,6 @@ export const platformOperationalSnapshotSchema = z.object({
   activeEnrollmentsCount: z.number().int().nullable(),
   sessionsThisMonth: z.object({ total: z.number().int(), completed: z.number().int() }).nullable(),
   lastActivityAt: z.string().nullable(),
-  // TEMP DIAGNOSTIC — the caught reason when available:false. Remove after root-cause.
-  debug: z.string().nullish(),
 });
 export type PlatformOperationalSnapshot = z.infer<typeof platformOperationalSnapshotSchema>;
 

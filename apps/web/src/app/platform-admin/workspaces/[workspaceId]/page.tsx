@@ -83,7 +83,7 @@ export default function CustomerDetailPage() {
               <Signal ok={(op.studentsCount ?? 0) > 0} label="الطلاب / المجموعات" value={`${op.studentsCount ?? 0} طالب · ${op.groupsCount ?? 0} مجموعة`} neutralWhenFalse />
             </>
           ) : (
-            <Signal state="unknown" label="اللقطة التشغيلية" value="تتطلب تفعيل صلاحيات القراءة (migration 0055)" />
+            <Signal state="unknown" label="اللقطة التشغيلية" value={opQuery.isError ? "تعذّر التحميل" : "غير متاحة حاليًا"} />
           )}
         </div>
       </SectionCard>
@@ -93,10 +93,10 @@ export default function CustomerDetailPage() {
         {opQuery.isLoading ? (
           <p className="text-sm text-text-tertiary">جارٍ التحميل…</p>
         ) : opQuery.isError ? (
-          <p className="text-sm text-danger">
-            تعذّر تحميل اللقطة التشغيلية (خطأ في الطلب).{" "}
-            <code className="text-xs">{String((opQuery.error as { code?: string })?.code ?? "")} {String((opQuery.error as Error)?.message ?? opQuery.error)}</code>
-          </p>
+          <div className="flex items-center gap-3 text-sm text-text-secondary">
+            <span>تعذّر تحميل اللقطة التشغيلية حاليًا.</span>
+            <button type="button" onClick={() => opQuery.refetch()} className="text-brand hover:underline">إعادة المحاولة</button>
+          </div>
         ) : op?.available ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
             <MiniStat label="الشهر الحالي" value={op.currentMonth ? monthLabel(op.currentMonth.year, op.currentMonth.month) : "—"} />
@@ -107,14 +107,7 @@ export default function CustomerDetailPage() {
             <MiniStat label="آخر نشاط" value={op.lastActivityAt ? formatDate(op.lastActivityAt) : "—"} />
           </div>
         ) : (
-          <div className="text-sm text-text-secondary">
-            بيانات التشغيل غير متاحة لدور القراءة بعد — تُفعَّل بتطبيق migration الصلاحيات <code className="text-xs">0055</code> (لم يُطبَّق على Production تلقائيًا).
-            {op?.debug ? (
-              <p className="mt-2 text-xs text-danger">
-                سبب تشخيصي: <code>{op.debug}</code>
-              </p>
-            ) : null}
-          </div>
+          <p className="text-sm text-text-secondary">بيانات التشغيل غير متاحة لهذه المساحة حاليًا.</p>
         )}
       </SectionCard>
 

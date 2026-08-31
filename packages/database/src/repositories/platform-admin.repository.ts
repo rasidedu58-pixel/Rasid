@@ -293,7 +293,6 @@ export interface WorkspaceOperationalSnapshot {
   activeEnrollmentsCount: number | null;
   sessionsThisMonth: { total: number; completed: number } | null;
   lastActivityAt: Date | null;
-  debug?: string | null;
 }
 
 export async function getWorkspaceOperationalSnapshot(workspaceId: string): Promise<WorkspaceOperationalSnapshot> {
@@ -350,9 +349,14 @@ export async function getWorkspaceOperationalSnapshot(workspaceId: string): Prom
       }
 
       const [activityRow] = await tx
-        .select({ last: sql<Date | null>`max(${auditEvents.createdAt})` })
+        .select({ last: sql<string | null>`max(${auditEvents.createdAt})` })
         .from(auditEvents)
         .where(eq(auditEvents.workspaceId, workspaceId));
+
+      // `max(...)` is a raw SQL aggregate, so drizzle applies no column codec —
+      // the value arrives as whatever postgres.js yields (a timestamp string),
+      // NOT a Date. Coerce explicitly so the caller can safely `.toISOString()`.
+      const lastActivityAt = activityRow?.last ? new Date(activityRow.last) : null;
 
       return {
         available: true,
@@ -361,15 +365,12 @@ export async function getWorkspaceOperationalSnapshot(workspaceId: string): Prom
         studentsCount: studentsRow?.c ?? 0,
         activeEnrollmentsCount: enrollRow?.c ?? 0,
         sessionsThisMonth,
-        lastActivityAt: activityRow?.last ?? null,
+        lastActivityAt,
       };
     });
-  } catch (err) {
-    // Reads not permitted yet (0055 grants not applied) or RLS blocked — degrade, never 500.
-    // TEMP DIAGNOSTIC — surface the caught reason (remove after root-cause).
-    const code = (err as { code?: string })?.code;
-    const message = err instanceof Error ? err.message : String(err);
-    return { ...unavailable, debug: `${code ? `[${code}] ` : ""}${message}`.slice(0, 300) };
+  } catch {
+    // Reads not permitted (grants missing) or RLS blocked — degrade, never 500.
+    return unavailable;
   }
 }
 
