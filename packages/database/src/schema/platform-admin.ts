@@ -44,11 +44,57 @@ export const platformAdmins = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    // Platform-Operations RBAC role (migration 0056). One of PLATFORM_OWNER /
+    // OPERATIONS_ADMIN / SUPPORT_AGENT — decides which platform WRITE actions
+    // this already-allowlisted staff member may take. A CHECK constraint in the
+    // migration is the source of truth for the allowed values.
+    role: text("role").notNull().default("SUPPORT_AGENT"),
     note: text("note"),
     grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
   (table) => [unique("platform_admins_user_id_unique").on(table.userId)],
 );
+
+/**
+ * Unit 1 — Customer Communication. A company→customer contact record logged
+ * by Rasid staff against a target workspace. A PLATFORM table (not tenant
+ * data): only `app_platform_admin` touches it; no `workspace_id`-keyed RLS
+ * tenant policy applies. `created_by_user_id` is the staff member (nullable /
+ * set-null so the log survives an account removal).
+ */
+export const platformContactLogs = pgTable("platform_contact_logs", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  workspaceId: uuid("workspace_id").notNull(),
+  channel: text("channel").notNull(),
+  direction: text("direction").notNull().default("OUTBOUND"),
+  summary: text("summary").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().default(sql`now()`),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
+/**
+ * Unit 1 — Follow-ups. A task Rasid staff queue against a customer workspace
+ * (call back, chase payment, check activation). PLATFORM table, same access
+ * model as `platform_contact_logs`.
+ */
+export const platformFollowUps = pgTable("platform_follow_ups", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  workspaceId: uuid("workspace_id").notNull(),
+  title: text("title").notNull(),
+  note: text("note"),
+  dueAt: timestamp("due_at", { withTimezone: true }),
+  status: text("status").notNull().default("PENDING"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  assignedToUserId: uuid("assigned_to_user_id").references(() => users.id, { onDelete: "set null" }),
+  resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
 
 export const platformAuditEvents = pgTable("platform_audit_events", {
   id: uuid("id")

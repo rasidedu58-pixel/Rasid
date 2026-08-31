@@ -3,6 +3,7 @@ import {
   onboardingCompleteRequestSchema,
   type MeResponse,
   type OnboardingCompleteResponse,
+  type PlatformRole,
   type WorkspaceContextResponse,
 } from "@academic-precision/contracts";
 import type { ZodError } from "zod";
@@ -56,21 +57,21 @@ export class IdentityService {
     // only after SupabaseAuthGuard has verified the token).
     const loaded = await this.repository.loadUserWithMemberships(authUser.id);
     if (loaded) {
-      const isStaff = await this.repository.isPlatformStaff(loaded.user.id);
-      return this.toMeResponse(loaded.user.id, loaded.user.fullName, loaded.memberships, isStaff);
+      const role = await this.repository.getPlatformRole(loaded.user.id);
+      return this.toMeResponse(loaded.user.id, loaded.user.fullName, loaded.memberships, role);
     }
 
     const provisioned = await this.ensureProvisioned(authUser);
     const memberships = await this.repository.listMemberships(provisioned.user.id);
-    const isStaff = await this.repository.isPlatformStaff(provisioned.user.id);
-    return this.toMeResponse(provisioned.user.id, provisioned.user.fullName, memberships, isStaff);
+    const role = await this.repository.getPlatformRole(provisioned.user.id);
+    return this.toMeResponse(provisioned.user.id, provisioned.user.fullName, memberships, role);
   }
 
   private toMeResponse(
     userId: string,
     fullName: string,
     memberships: MembershipWithWorkspace[],
-    isPlatformStaff: boolean,
+    platformRole: PlatformRole | null,
   ): MeResponse {
     return {
       user: { id: userId, fullName },
@@ -80,7 +81,7 @@ export class IdentityService {
         roleLabel: membership.roleLabel,
         status: membership.status as "INVITED" | "ACTIVE" | "DISABLED",
       })),
-      platform: { isStaff: isPlatformStaff },
+      platform: { isStaff: platformRole !== null, role: platformRole },
     };
   }
 

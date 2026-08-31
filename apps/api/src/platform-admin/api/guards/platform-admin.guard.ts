@@ -1,7 +1,15 @@
 import { CanActivate, type ExecutionContext, Injectable } from "@nestjs/common";
-import { isPlatformAdmin } from "@academic-precision/database";
+import { getPlatformAdminRole } from "@academic-precision/database";
+import type { PlatformRole } from "@academic-precision/contracts";
 import { ForbiddenApiException, UnauthenticatedException } from "../../../common/exceptions/api.exception";
 import { AUTH_USER_REQUEST_KEY, type AuthenticatedRequest } from "../../../identity/api/guards/supabase-auth.guard";
+
+/**
+ * Request key under which `PlatformAdminGuard` stashes the verified caller's
+ * platform role, so a following `PlatformPermissionGuard` can authorize a
+ * specific write without a second DB read.
+ */
+export const PLATFORM_ROLE_REQUEST_KEY = "platformRole" as const;
 
 /**
  * The ONE gate every platform-admin route sits behind, in addition to
@@ -22,14 +30,16 @@ export class PlatformAdminGuard implements CanActivate {
       throw new UnauthenticatedException();
     }
 
-    const allowed = await isPlatformAdmin(authUser.id);
-    if (!allowed) {
+    const role = await getPlatformAdminRole(authUser.id);
+    if (!role) {
       // Same safe-no-leak posture as every other authorization boundary in
       // this codebase: a non-admin gets a plain 403, never a hint about
       // what a platform-admin route would have returned.
       throw new ForbiddenApiException();
     }
 
+    // Stash the role for a following PlatformPermissionGuard (write routes).
+    (request as AuthenticatedRequest & { [PLATFORM_ROLE_REQUEST_KEY]?: PlatformRole })[PLATFORM_ROLE_REQUEST_KEY] = role;
     return true;
   }
 }

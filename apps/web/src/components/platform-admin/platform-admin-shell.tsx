@@ -3,15 +3,18 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Building2, CreditCard } from "lucide-react";
+import { LayoutDashboard, Users, Building2, CreditCard, ListChecks } from "lucide-react";
 import { cn } from "@academic-precision/ui";
+import { hasPlatformPermission, type PlatformPermission } from "@academic-precision/contracts";
+import { useWorkspace } from "../../lib/workspace-provider";
 import { RasidWordmark } from "../brand/rasid-wordmark";
 
-const NAV_ITEMS = [
-  { href: "/platform-admin", label: "لوحة التحكم", icon: LayoutDashboard },
-  { href: "/platform-admin/users", label: "المستخدمون", icon: Users },
-  { href: "/platform-admin/workspaces", label: "مساحات العمل", icon: Building2 },
-  { href: "/platform-admin/subscriptions", label: "الاشتراكات", icon: CreditCard },
+const NAV_ITEMS: { href: string; label: string; icon: typeof LayoutDashboard; permission: PlatformPermission }[] = [
+  { href: "/platform-admin", label: "لوحة التحكم", icon: LayoutDashboard, permission: "platform.customers.view" },
+  { href: "/platform-admin/follow-ups", label: "قائمة المتابعة", icon: ListChecks, permission: "platform.support.view" },
+  { href: "/platform-admin/users", label: "المستخدمون", icon: Users, permission: "platform.customers.view" },
+  { href: "/platform-admin/workspaces", label: "مساحات العمل", icon: Building2, permission: "platform.customers.view" },
+  { href: "/platform-admin/subscriptions", label: "الاشتراكات", icon: CreditCard, permission: "platform.subscriptions.view" },
 ];
 
 /**
@@ -22,6 +25,10 @@ const NAV_ITEMS = [
  */
 export function PlatformAdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { platformRole } = useWorkspace();
+  // UX-only nav filtering — the server enforces the same permission on every
+  // route, so a hidden item is still refused if reached by URL.
+  const navItems = NAV_ITEMS.filter((item) => hasPlatformPermission(platformRole, item.permission));
 
   return (
     <div className="flex min-h-screen">
@@ -30,7 +37,7 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
           <RasidWordmark variant="default" tone="onDark" />
           <span className="ps-[42px] text-xs text-shell-text-muted">Platform Admin</span>
         </div>
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = pathname === item.href || (item.href !== "/platform-admin" && pathname?.startsWith(item.href));
           return (
             <Link

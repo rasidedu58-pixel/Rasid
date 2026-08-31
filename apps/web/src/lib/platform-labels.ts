@@ -46,3 +46,43 @@ const AR_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "ما
 export function monthLabel(year: number, month: number): string {
   return `${AR_MONTHS[month - 1] ?? month} ${year}`;
 }
+
+// --- Platform Operations (Unit 1) -------------------------------------------
+export const PLATFORM_CONTACT_CHANNEL_LABEL: Record<string, string> = {
+  CALL: "اتصال",
+  WHATSAPP: "واتساب",
+  EMAIL: "بريد إلكتروني",
+  SMS: "رسالة نصية",
+  IN_PERSON: "حضوري",
+  OTHER: "أخرى",
+};
+
+export const PLATFORM_CONTACT_DIRECTION_LABEL: Record<string, string> = {
+  OUTBOUND: "صادر",
+  INBOUND: "وارد",
+};
+
+export const FOLLOW_UP_STATUS_LABEL: Record<string, string> = {
+  PENDING: "قيد المتابعة",
+  DONE: "تمّت",
+  CANCELLED: "أُلغيت",
+};
+
+export function followUpStatusTone(status: string): "success" | "warning" | "danger" | "neutral" {
+  switch (status) {
+    case "DONE":
+      return "success";
+    case "PENDING":
+      return "warning";
+    case "CANCELLED":
+      return "neutral";
+    default:
+      return "neutral";
+  }
+}
+
+export const PLATFORM_ROLE_LABEL: Record<string, string> = {
+  PLATFORM_OWNER: "مالك المنصة",
+  OPERATIONS_ADMIN: "مدير عمليات",
+  SUPPORT_AGENT: "وكيل دعم",
+};

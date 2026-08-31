@@ -16,8 +16,9 @@ import {
 } from "@academic-precision/ui";
 import { CheckCircle2, AlertTriangle, MinusCircle } from "lucide-react";
 import { PageHeader } from "../../../../components/shell/page-header";
+import { CustomerCommunication } from "../../../../components/platform-admin/customer-communication";
 import { qk } from "../../../../lib/query-keys";
-import { fetchPlatformAdminWorkspace, fetchPlatformWorkspaceOperational } from "../../../../lib/api/platform-admin";
+import { fetchPlatformAdminWorkspace, fetchPlatformWorkspaceOperational, fetchPlatformWorkspaceSubscription } from "../../../../lib/api/platform-admin";
 import { isForbidden } from "../../../../lib/api/client";
 import {
   CAPABILITY_LABEL,
@@ -39,6 +40,13 @@ export default function CustomerDetailPage() {
     queryFn: () => fetchPlatformWorkspaceOperational(workspaceId),
     retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
   });
+  // Subscription is a SEPARATE, subscriptions.view-gated read — a SUPPORT_AGENT
+  // (customers.view only) gets a 403 here and simply never sees billing data.
+  const subQuery = useQuery({
+    queryKey: qk.platformAdmin.workspaceSubscription(workspaceId),
+    queryFn: () => fetchPlatformWorkspaceSubscription(workspaceId),
+    retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
+  });
 
   if (wsQuery.isLoading) return <LoadingRegion className="min-h-[60vh]" />;
   if (isForbidden(wsQuery.error)) return <PermissionDeniedState />;
@@ -47,7 +55,8 @@ export default function CustomerDetailPage() {
   const w = wsQuery.data;
   const op = opQuery.data;
   const owner = w.members.find((m) => m.roleLabel === "OWNER");
-  const sub = w.subscription;
+  const canViewSub = !isForbidden(subQuery.error);
+  const sub = canViewSub ? subQuery.data?.subscription ?? null : null;
   const subActive = sub ? !["EXPIRED", "PAYMENT_FAILED"].includes(sub.state) : false;
 
   return (
@@ -72,11 +81,13 @@ export default function CustomerDetailPage() {
             label="الحساب / مساحة العمل"
             value={w.status === "ACTIVE" ? "نشطة" : "مؤرشفة"}
           />
-          <Signal
-            ok={subActive}
-            label="الاشتراك"
-            value={sub ? `${SUB_STATE_LABEL[sub.state] ?? sub.state}${sub.periodEnd ? ` — حتى ${formatDate(sub.periodEnd)}` : ""}` : "لا يوجد"}
-          />
+          {canViewSub ? (
+            <Signal
+              ok={subActive}
+              label="الاشتراك"
+              value={sub ? `${SUB_STATE_LABEL[sub.state] ?? sub.state}${sub.periodEnd ? ` — حتى ${formatDate(sub.periodEnd)}` : ""}` : "لا يوجد"}
+            />
+          ) : null}
           {op?.available ? (
             <>
               <Signal ok={!!op.currentMonth} label="الشهر التشغيلي" value={op.currentMonth ? monthLabel(op.currentMonth.year, op.currentMonth.month) : "لا يوجد شهر حالي"} />
@@ -111,6 +122,9 @@ export default function CustomerDetailPage() {
         )}
       </SectionCard>
 
+      {/* Unit 1 — Customer Communication + Follow-up */}
+      <CustomerCommunication workspaceId={workspaceId} ownerPhone={w.ownerPhone} />
+
       {/* Account / workspace facts */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card className="p-4">
@@ -133,19 +147,23 @@ export default function CustomerDetailPage() {
         </Card>
       </div>
 
-      {/* Subscription snapshot */}
-      <SectionCard title="الاشتراك">
-        {!sub ? (
-          <p className="text-sm text-text-secondary">لا يوجد اشتراك مسجّل.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <MiniStat label="الحالة" value={SUB_STATE_LABEL[sub.state] ?? sub.state} />
-            <MiniStat label="المزوّد" value={sub.provider} />
-            <MiniStat label="بداية الفترة" value={sub.periodStart ? formatDate(sub.periodStart) : "—"} />
-            <MiniStat label="نهاية الفترة" value={sub.periodEnd ? formatDateTime(sub.periodEnd) : "—"} />
-          </div>
-        )}
-      </SectionCard>
+      {/* Subscription snapshot — only for callers with platform.subscriptions.view */}
+      {canViewSub ? (
+        <SectionCard title="الاشتراك">
+          {subQuery.isLoading ? (
+            <p className="text-sm text-text-tertiary">جارٍ التحميل…</p>
+          ) : !sub ? (
+            <p className="text-sm text-text-secondary">لا يوجد اشتراك مسجّل.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <MiniStat label="الحالة" value={SUB_STATE_LABEL[sub.state] ?? sub.state} />
+              <MiniStat label="المزوّد" value={sub.provider} />
+              <MiniStat label="بداية الفترة" value={sub.periodStart ? formatDate(sub.periodStart) : "—"} />
+              <MiniStat label="نهاية الفترة" value={sub.periodEnd ? formatDateTime(sub.periodEnd) : "—"} />
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
 
       {/* Members */}
       <SectionCard title={`الفريق (${w.members.length})`}>

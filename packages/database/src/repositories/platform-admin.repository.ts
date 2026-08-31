@@ -171,7 +171,7 @@ export async function getWorkspaceDetail(workspaceId: string) {
   const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
   if (!workspace) return undefined;
 
-  const [owner] = await db.select({ fullName: users.fullName }).from(users).where(eq(users.id, workspace.ownerUserId)).limit(1);
+  const [owner] = await db.select({ fullName: users.fullName, phone: users.phone }).from(users).where(eq(users.id, workspace.ownerUserId)).limit(1);
 
   const memberRows = await db
     .select({
@@ -185,14 +185,23 @@ export async function getWorkspaceDetail(workspaceId: string) {
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.workspaceId, workspaceId));
 
-  const [subscription] = await db.select().from(subscriptions).where(eq(subscriptions.workspaceId, workspaceId)).limit(1);
-
   const entitlementRows = await db
     .select({ capability: entitlements.capability, state: entitlements.state })
     .from(entitlements)
     .where(and(eq(entitlements.workspaceId, workspaceId), sql`${entitlements.effectiveTo} IS NULL`));
 
-  return { workspace, ownerName: owner?.fullName ?? null, members: memberRows, subscription, entitlements: entitlementRows };
+  return { workspace, ownerName: owner?.fullName ?? null, ownerPhone: owner?.phone ?? null, members: memberRows, entitlements: entitlementRows };
+}
+
+/**
+ * Dedicated single-workspace subscription read, kept SEPARATE from
+ * `getWorkspaceDetail` so the sensitive billing row only ever flows through the
+ * `platform.subscriptions.view`-gated endpoint — never the customers.view one.
+ */
+export async function getWorkspaceSubscriptionRef(workspaceId: string) {
+  const db = getPlatformAdminDb();
+  const [subscription] = await db.select().from(subscriptions).where(eq(subscriptions.workspaceId, workspaceId)).limit(1);
+  return subscription ?? null;
 }
 
 export interface ListSubscriptionsParams {

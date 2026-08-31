@@ -6,6 +6,7 @@ import {
   findMembership,
   findSubscriptionByWorkspaceId,
   isPlatformAdmin,
+  getPlatformAdminRole,
   listAllowedEntitlementsForWorkspace,
   listMembershipsForUser,
   loadProvisionedIdentity,
@@ -23,6 +24,7 @@ import {
   type WorkspaceRow,
 } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
+import type { PlatformRole } from "@academic-precision/contracts";
 import type { IdentityRepositoryPort } from "../application/ports/identity-repository.port";
 
 /**
@@ -98,6 +100,11 @@ export class DrizzleIdentityRepository implements IdentityRepositoryPort {
    */
   isPlatformStaff(userId: string): Promise<boolean> {
     return isPlatformAdmin(userId);
+  }
+
+  /** The caller's platform-ops role (null if not staff) — for `/me`'s `platform.role`. */
+  getPlatformRole(userId: string): Promise<PlatformRole | null> {
+    return getPlatformAdminRole(userId);
   }
 
   /**

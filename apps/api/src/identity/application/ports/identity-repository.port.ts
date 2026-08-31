@@ -9,6 +9,7 @@ import type {
   WorkspaceCommercialState,
   WorkspaceRow,
 } from "@academic-precision/database";
+import type { PlatformRole } from "@academic-precision/contracts";
 
 /**
  * Port (dependency-inversion boundary) between the identity application
@@ -23,6 +24,8 @@ export interface IdentityRepositoryPort {
   listMemberships(userId: string): Promise<MembershipWithWorkspace[]>;
   /** Is this user a Rasid platform-staff member (row in `platform_admins`)? Read-only signal for the `/me` `platform.isStaff` flag. */
   isPlatformStaff(userId: string): Promise<boolean>;
+  /** The user's platform-ops role, or null if not staff. Drives `/me`'s `platform.role` (UI gating; server still enforces per-permission). */
+  getPlatformRole(userId: string): Promise<PlatformRole | null>;
   findMembership(workspaceId: string, userId: string): Promise<MembershipWithWorkspace | undefined>;
   completeOnboarding(input: OnboardingCompleteInput): Promise<WorkspaceRow>;
   /** Phase 8 — the workspace's current commercial state, for `GET /me/workspaces/:id/context`'s `subscriptionState` field. */

@@ -2,8 +2,11 @@ import { Module } from "@nestjs/common";
 import { SupabaseAuthGuard } from "../identity/api/guards/supabase-auth.guard";
 import { JwtTokenVerifier, TOKEN_VERIFIER } from "../identity/infrastructure/jwt-token-verifier";
 import { PlatformAdminController } from "./api/platform-admin.controller";
+import { PlatformOperationsController } from "./api/platform-operations.controller";
 import { PlatformAdminGuard } from "./api/guards/platform-admin.guard";
+import { PlatformPermissionGuard } from "./api/guards/platform-permission.guard";
 import { PlatformAdminService } from "./application/platform-admin.service";
+import { PlatformOperationsService } from "./application/platform-operations.service";
 
 /**
  * Phase 12 — Rasid Platform Admin. `SupabaseAuthGuard`/`TOKEN_VERIFIER`
@@ -17,7 +20,14 @@ import { PlatformAdminService } from "./application/platform-admin.service";
  * module yet (deliberate V1 scope choice, see the closure report).
  */
 @Module({
-  controllers: [PlatformAdminController],
-  providers: [PlatformAdminService, PlatformAdminGuard, SupabaseAuthGuard, { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier }],
+  controllers: [PlatformAdminController, PlatformOperationsController],
+  providers: [
+    PlatformAdminService,
+    PlatformOperationsService,
+    PlatformAdminGuard,
+    PlatformPermissionGuard,
+    SupabaseAuthGuard,
+    { provide: TOKEN_VERIFIER, useClass: JwtTokenVerifier },
+  ],
 })
 export class PlatformAdminModule {}

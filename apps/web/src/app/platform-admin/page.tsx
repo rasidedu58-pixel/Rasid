@@ -27,9 +27,12 @@ import {
 import { fetchApiHealth } from "../../lib/api/health";
 import { isForbidden } from "../../lib/api/client";
 import { SUB_STATE_LABEL, subStateTone } from "../../lib/platform-labels";
-import type { PlatformNeedsAttentionResponse } from "@academic-precision/contracts";
+import { useWorkspace } from "../../lib/workspace-provider";
+import { hasPlatformPermission, type PlatformNeedsAttentionResponse } from "@academic-precision/contracts";
 
 export default function PlatformCommandCenterPage() {
+  const { platformRole } = useWorkspace();
+  const canViewSubs = hasPlatformPermission(platformRole, "platform.subscriptions.view");
   const dashboard = useQuery({
     queryKey: qk.platformAdmin.dashboard(),
     queryFn: fetchPlatformAdminDashboard,
@@ -38,6 +41,7 @@ export default function PlatformCommandCenterPage() {
   const attention = useQuery({
     queryKey: qk.platformAdmin.needsAttention(),
     queryFn: fetchPlatformNeedsAttention,
+    enabled: canViewSubs,
     retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
   });
   const activity = useQuery({
@@ -65,11 +69,12 @@ export default function PlatformCommandCenterPage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="المستخدمون" value={String(data.totalUsers)} />
         <StatCard label="مساحات العمل" value={String(data.totalWorkspaces)} />
-        <StatCard label="تنتهي خلال 7 أيام" value={String(data.expiringWithin7Days)} tone={data.expiringWithin7Days > 0 ? "warning" : undefined} />
-        <StatCard label="يحتاج تدخلًا" value={String(attnTotal)} tone={attnTotal > 0 ? "danger" : undefined} />
+        {canViewSubs ? <StatCard label="تنتهي خلال 7 أيام" value={String(data.expiringWithin7Days)} tone={data.expiringWithin7Days > 0 ? "warning" : undefined} /> : null}
+        {canViewSubs ? <StatCard label="يحتاج تدخلًا" value={String(attnTotal)} tone={attnTotal > 0 ? "danger" : undefined} /> : null}
       </div>
 
-      {/* Needs attention */}
+      {/* Needs attention — subscription-derived, only for platform.subscriptions.view */}
+      {canViewSubs ? (
       <SectionCard
         title="يحتاج تدخلًا"
         description="حالات تشغيلية قابلة للرصد من بيانات الاشتراكات — لا تنبيهات وهمية."
@@ -86,9 +91,11 @@ export default function PlatformCommandCenterPage() {
           <p className="text-sm text-text-secondary">لا يوجد ما يحتاج تدخلًا الآن.</p>
         )}
       </SectionCard>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Subscriptions by state */}
+        {/* Subscriptions by state — only for platform.subscriptions.view */}
+        {canViewSubs ? (
         <Card>
           <CardContent className="p-5">
             <h2 className="mb-3 text-sm font-semibold text-text-primary">الاشتراكات حسب الحالة</h2>
@@ -113,6 +120,7 @@ export default function PlatformCommandCenterPage() {
             </div>
           </CardContent>
         </Card>
+        ) : null}
 
         {/* Recent activity */}
         <Card>

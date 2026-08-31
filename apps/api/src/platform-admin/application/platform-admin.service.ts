@@ -1,14 +1,17 @@
 import { Injectable } from "@nestjs/common";
-import type {
-  ListPlatformAdminSubscriptionsResponse,
-  ListPlatformAdminUsersResponse,
-  ListPlatformAdminWorkspacesResponse,
-  PlatformActivityResponse,
-  PlatformAdminDashboardResponse,
-  PlatformAdminUserDetail,
-  PlatformAdminWorkspaceDetail,
-  PlatformNeedsAttentionResponse,
-  PlatformOperationalSnapshot,
+import {
+  hasPlatformPermission,
+  type ListPlatformAdminSubscriptionsResponse,
+  type ListPlatformAdminUsersResponse,
+  type ListPlatformAdminWorkspacesResponse,
+  type PlatformActivityResponse,
+  type PlatformAdminDashboardResponse,
+  type PlatformAdminUserDetail,
+  type PlatformAdminWorkspaceDetail,
+  type PlatformNeedsAttentionResponse,
+  type PlatformOperationalSnapshot,
+  type PlatformRole,
+  type PlatformWorkspaceSubscriptionResponse,
 } from "@academic-precision/contracts";
 import {
   getDashboardStats,
@@ -17,11 +20,34 @@ import {
   getUserDetail,
   getWorkspaceDetail,
   getWorkspaceOperationalSnapshot,
+  getWorkspaceSubscriptionRef,
   listSubscriptions,
   listUsers,
   listWorkspaces,
   type PlatformAttentionRow,
 } from "@academic-precision/database";
+
+/**
+ * Redaction helpers — the dashboard and activity feed MIX customers-view
+ * content with subscription content in one response. A caller lacking
+ * `platform.subscriptions.view` must not receive the subscription portion, so
+ * these strip it out. Pure + exported for direct regression testing.
+ */
+export function redactDashboardForRole(
+  dashboard: PlatformAdminDashboardResponse,
+  role: PlatformRole | null,
+): PlatformAdminDashboardResponse {
+  if (hasPlatformPermission(role, "platform.subscriptions.view")) return dashboard;
+  return { ...dashboard, subscriptionsByState: {}, expiringWithin7Days: 0 };
+}
+export function redactActivityForRole(activity: PlatformActivityResponse, role: PlatformRole | null): PlatformActivityResponse {
+  if (hasPlatformPermission(role, "platform.subscriptions.view")) return activity;
+  return { ...activity, items: activity.items.filter((i) => i.kind !== "subscription.state_changed") };
+}
+export function redactWorkspaceSummariesForRole<T extends { subscriptionState: string | null }>(items: T[], role: PlatformRole | null): T[] {
+  if (hasPlatformPermission(role, "platform.subscriptions.view")) return items;
+  return items.map((i) => ({ ...i, subscriptionState: null }));
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 function daysLeft(periodEnd: Date | null): number | null {
@@ -50,9 +76,9 @@ import { ResourceNotFoundException } from "../../common/exceptions/api.exception
  */
 @Injectable()
 export class PlatformAdminService {
-  async getDashboard(): Promise<PlatformAdminDashboardResponse> {
+  async getDashboard(role: PlatformRole | null): Promise<PlatformAdminDashboardResponse> {
     const stats = await getDashboardStats();
-    return {
+    const full: PlatformAdminDashboardResponse = {
       totalUsers: stats.totalUsers,
       totalWorkspaces: stats.totalWorkspaces,
       subscriptionsByState: stats.subscriptionsByState,
@@ -64,6 +90,7 @@ export class PlatformAdminService {
       })),
       expiringWithin7Days: stats.expiringWithin7Days,
     };
+    return redactDashboardForRole(full, role);
   }
 
   async listUsers(params: { search?: string; cursor?: string; limit?: number }): Promise<ListPlatformAdminUsersResponse> {
@@ -95,19 +122,29 @@ export class PlatformAdminService {
     };
   }
 
-  async listWorkspaces(params: { search?: string; state?: string; cursor?: string; limit?: number }): Promise<ListPlatformAdminWorkspacesResponse> {
-    const result = await listWorkspaces(params);
+  async listWorkspaces(
+    params: { search?: string; state?: string; cursor?: string; limit?: number },
+    role: PlatformRole | null,
+  ): Promise<ListPlatformAdminWorkspacesResponse> {
+    // subscriptionState (and the ability to filter by it) is subscription data:
+    // a caller without platform.subscriptions.view cannot filter by it and never
+    // receives it in the summary.
+    const canViewSubs = hasPlatformPermission(role, "platform.subscriptions.view");
+    // Also refuse the subscription-state FILTER for a caller who can't see it.
+    const effectiveParams = canViewSubs ? params : { ...params, state: undefined };
+    const result = await listWorkspaces(effectiveParams);
+    const items = result.items.map((w) => ({
+      id: w.id,
+      name: w.name,
+      ownerUserId: w.ownerUserId,
+      ownerName: w.ownerName,
+      workspaceType: w.workspaceType,
+      status: w.status,
+      createdAt: w.createdAt.toISOString(),
+      subscriptionState: w.subscriptionState,
+    }));
     return {
-      items: result.items.map((w) => ({
-        id: w.id,
-        name: w.name,
-        ownerUserId: w.ownerUserId,
-        ownerName: w.ownerName,
-        workspaceType: w.workspaceType,
-        status: w.status,
-        createdAt: w.createdAt.toISOString(),
-        subscriptionState: w.subscriptionState,
-      })),
+      items: redactWorkspaceSummariesForRole(items, role),
       page: { hasNext: result.hasNext, nextCursor: result.nextCursor },
     };
   }
@@ -125,20 +162,28 @@ export class PlatformAdminService {
       createdAt: detail.workspace.createdAt.toISOString(),
       ownerUserId: detail.workspace.ownerUserId,
       ownerName: detail.ownerName,
+      ownerPhone: detail.ownerPhone,
       members: detail.members,
-      subscription: detail.subscription
+      entitlements: detail.entitlements,
+    };
+  }
+
+  /** Sensitive billing read — the controller gates this with platform.subscriptions.view. */
+  async getWorkspaceSubscription(workspaceId: string): Promise<PlatformWorkspaceSubscriptionResponse> {
+    const s = await getWorkspaceSubscriptionRef(workspaceId);
+    return {
+      subscription: s
         ? {
-            id: detail.subscription.id,
-            provider: detail.subscription.provider,
-            state: detail.subscription.state,
-            periodStart: detail.subscription.periodStart ? detail.subscription.periodStart.toISOString() : null,
-            periodEnd: detail.subscription.periodEnd ? detail.subscription.periodEnd.toISOString() : null,
-            cancelAtPeriodEnd: detail.subscription.cancelAtPeriodEnd,
-            providerCustomerId: detail.subscription.providerCustomerId,
-            providerSubscriptionId: detail.subscription.providerSubscriptionId,
+            id: s.id,
+            provider: s.provider,
+            state: s.state,
+            periodStart: s.periodStart ? s.periodStart.toISOString() : null,
+            periodEnd: s.periodEnd ? s.periodEnd.toISOString() : null,
+            cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+            providerCustomerId: s.providerCustomerId,
+            providerSubscriptionId: s.providerSubscriptionId,
           }
         : null,
-      entitlements: detail.entitlements,
     };
   }
 
@@ -151,9 +196,9 @@ export class PlatformAdminService {
     };
   }
 
-  async getActivity(): Promise<PlatformActivityResponse> {
+  async getActivity(role: PlatformRole | null): Promise<PlatformActivityResponse> {
     const data = await getPlatformActivity();
-    return {
+    const full: PlatformActivityResponse = {
       available: data.available,
       items: data.items.map((i) => ({
         kind: i.kind,
@@ -164,6 +209,7 @@ export class PlatformAdminService {
         detail: i.detail,
       })),
     };
+    return redactActivityForRole(full, role);
   }
 
   async getOperationalSnapshot(workspaceId: string): Promise<PlatformOperationalSnapshot> {

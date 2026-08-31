@@ -85,11 +85,21 @@ export const platformAdminWorkspaceDetailSchema = z.object({
   createdAt: z.string(),
   ownerUserId: z.string().uuid(),
   ownerName: z.string().nullable(),
+  ownerPhone: z.string().nullable(),
   members: z.array(platformAdminMemberSchema),
-  subscription: platformAdminSubscriptionRefSchema.nullable(),
+  // NOTE: subscription is deliberately NOT part of the customers.view workspace
+  // detail — it is sensitive billing data fetched separately from
+  // `GET /workspaces/:id/subscription`, gated by `platform.subscriptions.view`,
+  // so a customers.view-only role (SUPPORT_AGENT) can never obtain it here.
   entitlements: z.array(z.object({ capability: z.string(), state: z.string() })),
 });
 export type PlatformAdminWorkspaceDetail = z.infer<typeof platformAdminWorkspaceDetailSchema>;
+
+/** Dedicated subscription read for one workspace — gated by platform.subscriptions.view. */
+export const platformWorkspaceSubscriptionResponseSchema = z.object({
+  subscription: platformAdminSubscriptionRefSchema.nullable(),
+});
+export type PlatformWorkspaceSubscriptionResponse = z.infer<typeof platformWorkspaceSubscriptionResponseSchema>;
 
 export const platformAdminSubscriptionSummarySchema = z.object({
   id: z.string().uuid(),

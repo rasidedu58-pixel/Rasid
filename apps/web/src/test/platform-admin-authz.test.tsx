@@ -18,6 +18,12 @@ vi.mock("../lib/api/health", () => ({
   fetchApiHealth: () => Promise.resolve({ api: "up", database: "up" }),
 }));
 
+// The command center reads the caller's platform role to gate subscription
+// sections; render as a full owner so all sections show under test.
+vi.mock("../lib/workspace-provider", () => ({
+  useWorkspace: () => ({ platformRole: "PLATFORM_OWNER" }),
+}));
+
 afterEach(() => {
   cleanup();
   fetchDashboardMock.mockReset();

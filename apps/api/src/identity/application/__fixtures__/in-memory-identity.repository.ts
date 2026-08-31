@@ -9,6 +9,7 @@ import type {
   WorkspaceRow,
 } from "@academic-precision/database";
 import { resolveEntitlementSnapshot, type Capability } from "@academic-precision/database";
+import type { PlatformRole } from "@academic-precision/contracts";
 import type { IdentityRepositoryPort } from "../ports/identity-repository.port";
 
 /**
@@ -134,13 +135,16 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
     return [...primary, ...(this.extraMembershipsByUserId.get(userId) ?? [])];
   }
 
-  private readonly platformStaff = new Set<string>();
-  /** Test helper: mark a user as platform staff. */
-  seedPlatformStaff(userId: string): void {
-    this.platformStaff.add(userId);
+  private readonly platformStaff = new Map<string, PlatformRole>();
+  /** Test helper: mark a user as platform staff with an optional role. */
+  seedPlatformStaff(userId: string, role: PlatformRole = "PLATFORM_OWNER"): void {
+    this.platformStaff.set(userId, role);
   }
   async isPlatformStaff(userId: string): Promise<boolean> {
     return this.platformStaff.has(userId);
+  }
+  async getPlatformRole(userId: string): Promise<PlatformRole | null> {
+    return this.platformStaff.get(userId) ?? null;
   }
 
   /**

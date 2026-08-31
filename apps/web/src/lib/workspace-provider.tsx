@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { PermissionKey, CapabilityDto } from "@academic-precision/contracts";
+import type { PermissionKey, CapabilityDto, PlatformRole } from "@academic-precision/contracts";
 import { fetchMe, fetchWorkspaceContext } from "./api/identity";
 import { qk } from "./query-keys";
 import { useSession } from "./session-provider";
@@ -58,6 +58,8 @@ interface WorkspaceContextValue {
   isOwner: boolean;
   /** True if the signed-in user is Rasid platform staff (from `/me`). Gates the "إدارة راصد" entry; NOT an authorization boundary. */
   isPlatformStaff: boolean;
+  /** The signed-in user's platform-ops role (null if not staff). Gates which platform WRITE actions the UI offers; server still enforces. */
+  platformRole: PlatformRole | null;
   hasPermission: (key: PermissionKey) => boolean;
   canWrite: (capability?: CapabilityDto) => boolean;
   refetch: () => void;
@@ -146,6 +148,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         subscriptionState: null,
         isOwner: false,
         isPlatformStaff: false,
+        platformRole: null,
         hasPermission: () => false,
         canWrite: () => false,
         refetch: () => {
@@ -168,6 +171,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         subscriptionState: null,
         isOwner: false,
         isPlatformStaff: meQuery.data?.platform?.isStaff ?? false,
+        platformRole: meQuery.data?.platform?.role ?? null,
         hasPermission: () => false,
         canWrite: () => false,
         refetch: () => void meQuery.refetch(),
@@ -191,6 +195,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       subscriptionState,
       isOwner: roleLabel === "OWNER",
       isPlatformStaff: meQuery.data?.platform?.isStaff ?? false,
+      platformRole: meQuery.data?.platform?.role ?? null,
       hasPermission: (key) => permissions.has(key),
       // No capability arg => "is the workspace writable at all right now".
       // WRITE_BLOCKING_STATES mirrors the backend's own entitlement matrix

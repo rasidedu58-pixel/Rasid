@@ -26,6 +26,8 @@ import { useDebounce } from "../../../hooks/use-debounce";
 import { fetchPlatformAdminWorkspaces } from "../../../lib/api/platform-admin";
 import { isForbidden } from "../../../lib/api/client";
 import { SUB_STATE_LABEL, subStateTone } from "../../../lib/platform-labels";
+import { useWorkspace } from "../../../lib/workspace-provider";
+import { hasPlatformPermission } from "@academic-precision/contracts";
 
 const STATE_FILTERS: Array<{ value: string | null; label: string }> = [
   { value: null, label: "الكل" },
@@ -37,6 +39,8 @@ const STATE_FILTERS: Array<{ value: string | null; label: string }> = [
 ];
 
 export default function PlatformAdminWorkspacesPage() {
+  const { platformRole } = useWorkspace();
+  const canViewSubs = hasPlatformPermission(platformRole, "platform.subscriptions.view");
   const [search, setSearch] = useState("");
   const [state, setState] = useState<string | null>(null);
   const debouncedSearch = useDebounce(search, 300);
@@ -64,6 +68,7 @@ export default function PlatformAdminWorkspacesPage() {
           <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث باسم مساحة العمل..." className="ps-9" />
         </div>
+        {canViewSubs ? (
         <div className="flex flex-wrap gap-1.5">
           {STATE_FILTERS.map((f) => {
             const active = state === f.value;
@@ -83,6 +88,7 @@ export default function PlatformAdminWorkspacesPage() {
             );
           })}
         </div>
+        ) : null}
       </div>
 
       {query.isLoading ? (
@@ -99,7 +105,7 @@ export default function PlatformAdminWorkspacesPage() {
                 <TableRow>
                   <TableHead>الاسم</TableHead>
                   <TableHead>المالك</TableHead>
-                  <TableHead>حالة الاشتراك</TableHead>
+                  {canViewSubs ? <TableHead>حالة الاشتراك</TableHead> : null}
                   <TableHead>الحالة</TableHead>
                   <TableHead>تاريخ الإنشاء</TableHead>
                 </TableRow>
@@ -113,13 +119,15 @@ export default function PlatformAdminWorkspacesPage() {
                       </Link>
                     </TableCell>
                     <TableCell className="text-text-secondary">{w.ownerName ?? "—"}</TableCell>
-                    <TableCell>
-                      {w.subscriptionState ? (
-                        <Badge tone={subStateTone(w.subscriptionState)}>{SUB_STATE_LABEL[w.subscriptionState] ?? w.subscriptionState}</Badge>
-                      ) : (
-                        <span className="text-text-tertiary">—</span>
-                      )}
-                    </TableCell>
+                    {canViewSubs ? (
+                      <TableCell>
+                        {w.subscriptionState ? (
+                          <Badge tone={subStateTone(w.subscriptionState)}>{SUB_STATE_LABEL[w.subscriptionState] ?? w.subscriptionState}</Badge>
+                        ) : (
+                          <span className="text-text-tertiary">—</span>
+                        )}
+                      </TableCell>
+                    ) : null}
                     <TableCell>
                       <Badge tone={w.status === "ACTIVE" ? "success" : "neutral"}>{w.status === "ACTIVE" ? "نشطة" : "مؤرشفة"}</Badge>
                     </TableCell>

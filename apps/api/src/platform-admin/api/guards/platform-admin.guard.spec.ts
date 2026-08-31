@@ -2,20 +2,23 @@ import "reflect-metadata";
 import type { ExecutionContext } from "@nestjs/common";
 import { ForbiddenApiException, UnauthenticatedException } from "../../../common/exceptions/api.exception";
 import { AUTH_USER_REQUEST_KEY } from "../../../identity/api/guards/supabase-auth.guard";
-import { PlatformAdminGuard } from "./platform-admin.guard";
+import { PlatformAdminGuard, PLATFORM_ROLE_REQUEST_KEY } from "./platform-admin.guard";
 
-const isPlatformAdminMock = jest.fn();
+const getPlatformAdminRoleMock = jest.fn();
 
 jest.mock("@academic-precision/database", () => ({
-  isPlatformAdmin: (userId: string) => isPlatformAdminMock(userId),
+  getPlatformAdminRole: (userId: string) => getPlatformAdminRoleMock(userId),
 }));
 
-function makeContext(authUserId?: string): ExecutionContext {
+function makeContext(authUserId?: string): { context: ExecutionContext; request: Record<string, unknown> } {
   const request: Record<string, unknown> = {};
   if (authUserId) request[AUTH_USER_REQUEST_KEY] = { id: authUserId, email: null };
   return {
-    switchToHttp: () => ({ getRequest: () => request }),
-  } as unknown as ExecutionContext;
+    request,
+    context: {
+      switchToHttp: () => ({ getRequest: () => request }),
+    } as unknown as ExecutionContext,
+  };
 }
 
 describe("PlatformAdminGuard", () => {
@@ -23,22 +26,24 @@ describe("PlatformAdminGuard", () => {
 
   beforeEach(() => {
     guard = new PlatformAdminGuard();
-    isPlatformAdminMock.mockReset();
+    getPlatformAdminRoleMock.mockReset();
   });
 
   it("rejects (UNAUTHENTICATED) when no verified user is on the request at all", async () => {
-    await expect(guard.canActivate(makeContext())).rejects.toBeInstanceOf(UnauthenticatedException);
-    expect(isPlatformAdminMock).not.toHaveBeenCalled();
+    await expect(guard.canActivate(makeContext().context)).rejects.toBeInstanceOf(UnauthenticatedException);
+    expect(getPlatformAdminRoleMock).not.toHaveBeenCalled();
   });
 
   it("rejects (FORBIDDEN, safe no-leak) a verified but non-platform-admin caller — e.g. an ordinary Workspace Owner", async () => {
-    isPlatformAdminMock.mockResolvedValue(false);
-    await expect(guard.canActivate(makeContext("u-ordinary-owner"))).rejects.toBeInstanceOf(ForbiddenApiException);
-    expect(isPlatformAdminMock).toHaveBeenCalledWith("u-ordinary-owner");
+    getPlatformAdminRoleMock.mockResolvedValue(null);
+    await expect(guard.canActivate(makeContext("u-ordinary-owner").context)).rejects.toBeInstanceOf(ForbiddenApiException);
+    expect(getPlatformAdminRoleMock).toHaveBeenCalledWith("u-ordinary-owner");
   });
 
-  it("allows a verified caller whose id is in the platform_admins allowlist", async () => {
-    isPlatformAdminMock.mockResolvedValue(true);
-    await expect(guard.canActivate(makeContext("u-platform-admin"))).resolves.toBe(true);
+  it("allows a verified allowlisted caller and stashes their role on the request", async () => {
+    getPlatformAdminRoleMock.mockResolvedValue("OPERATIONS_ADMIN");
+    const { context, request } = makeContext("u-platform-admin");
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request[PLATFORM_ROLE_REQUEST_KEY]).toBe("OPERATIONS_ADMIN");
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { platformRoleSchema } from "./platform-operations";
 
 /**
  * Identity/Me/Onboarding contract types — API Contract v1.0 §9.1, §11.1,
@@ -22,7 +23,9 @@ export const meResponseSchema = z.object({
   // Platform (company-internal) staff status — lets the app conditionally show
   // an "إدارة راصد" entry. Read-only signal; the real authorization boundary is
   // still the server-side PlatformAdminGuard on every /platform-admin call.
-  platform: z.object({ isStaff: z.boolean() }),
+  // `role` is null for non-staff; for staff it drives which platform-ops write
+  // actions the UI offers (the server still enforces per-permission).
+  platform: z.object({ isStaff: z.boolean(), role: platformRoleSchema.nullable() }),
 });
 
 export type MeResponse = z.infer<typeof meResponseSchema>;
