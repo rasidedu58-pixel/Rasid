@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { CalendarRange, Plus } from "lucide-react";
-import { Badge, Button, Card, CardContent, EmptyState, ErrorState, LoadingRegion, formatMonthLabel } from "@academic-precision/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarClock, CalendarRange, Plus } from "lucide-react";
+import { Badge, Button, Card, CardContent, EmptyState, ErrorState, LoadingRegion, formatDate, formatMonthLabel, toast } from "@academic-precision/ui";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
-import { fetchMonths } from "../../../lib/api/scheduling";
+import { activateMonth, fetchMonthPrepEligibility, fetchMonths } from "../../../lib/api/scheduling";
 
 /**
  * Operating Months — Phase 11 Closure Delta. The entry point that closes
@@ -25,6 +25,15 @@ export default function MonthsPage() {
     queryFn: () => fetchMonths(workspaceId!),
     enabled: !!workspaceId,
   });
+  // Entitlement-aware: if CREATE_MONTH isn't available, never show an active
+  // prepare CTA (the server would reject it anyway).
+  const prep = useQuery({
+    queryKey: workspaceId ? qk.months.prepEligibility(workspaceId) : ["months", "prep", "none"],
+    queryFn: () => fetchMonthPrepEligibility(workspaceId!),
+    enabled: !!workspaceId && isOwner,
+  });
+  const entitlementBlocked = prep.data?.blockedReason === "ENTITLEMENT_REQUIRED";
+  const canShowPrepCta = isOwner && !entitlementBlocked;
 
   if (query.isLoading) {
     return (
@@ -46,7 +55,7 @@ export default function MonthsPage() {
 
   const months = [...query.data.months].sort((a, b) => b.year - a.year || b.month - a.month);
   const current = months.find((m) => m.status === "CURRENT");
-  const history = months.filter((m) => m.status !== "CURRENT");
+  const history = months.filter((m) => m.status === "ARCHIVED");
 
   return (
     <>
@@ -54,7 +63,7 @@ export default function MonthsPage() {
         title="الأشهر التشغيلية"
         description="الشهر التشغيلي يحدد المجموعات النشطة ورسومها وجدولها لهذا الشهر."
         actions={
-          isOwner ? (
+          canShowPrepCta ? (
             <Button asChild size="sm">
               <Link href="/months/new">
                 <Plus className="h-4 w-4" aria-hidden />
@@ -64,6 +73,12 @@ export default function MonthsPage() {
           ) : undefined
         }
       />
+
+      {entitlementBlocked ? (
+        <p className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-text-primary">
+          يلزم تجديد الاشتراك لبدء شهر تشغيلي جديد.
+        </p>
+      ) : null}
 
       {months.length === 0 ? (
         <EmptyState
@@ -75,7 +90,7 @@ export default function MonthsPage() {
               : "بانتظار مالك المساحة لتجهيز أول شهر تشغيلي."
           }
           action={
-            isOwner ? (
+            canShowPrepCta ? (
               <Button asChild size="sm">
                 <Link href="/months/new">تجهيز أول شهر تشغيلي</Link>
               </Button>
@@ -98,6 +113,8 @@ export default function MonthsPage() {
             </section>
           ) : null}
 
+          {isOwner && workspaceId ? <NextMonthPrep workspaceId={workspaceId} /> : null}
+
           {history.length > 0 ? (
             <section className="flex flex-col gap-2">
               <h2 className="text-sm font-semibold text-text-secondary">أشهر سابقة</h2>
@@ -115,4 +132,67 @@ export default function MonthsPage() {
       )}
     </>
   );
+}
+
+/**
+ * Next-month PREPARE / ACTIVATE surface (Owner-only). Shows the prepared DRAFT
+ * with a "start" action once its month has begun, or when the natural prep
+ * window opens. The server enforces every rule — this only surfaces state.
+ */
+function NextMonthPrep({ workspaceId }: { workspaceId: string }) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: qk.months.prepEligibility(workspaceId),
+    queryFn: () => fetchMonthPrepEligibility(workspaceId),
+  });
+  const activate = useMutation({
+    mutationFn: (monthId: string) => activateMonth(workspaceId, monthId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.months.list(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: qk.months.prepEligibility(workspaceId) });
+      toast.success("تم بدء الشهر الجديد");
+    },
+    onError: () => toast.error("تعذّر بدء الشهر — تأكد أن الشهر قد بدأ فعلًا"),
+  });
+
+  const data = query.data;
+  if (!data || !data.current) return null;
+
+  // Entitlement required — never offer prepare/activate, show the renewal note
+  // (the header already surfaces it too; the server guard is the real gate).
+  if (data.blockedReason === "ENTITLEMENT_REQUIRED") return null;
+
+  // A DRAFT is prepared for next month.
+  if (data.nextDraft) {
+    return (
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-text-secondary">الشهر القادم (مُجهَّز)</h2>
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <span className="flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-text-tertiary" aria-hidden />
+              <span className="font-medium text-text-primary">{formatMonthLabel(data.nextDraft.year, data.nextDraft.month)}</span>
+              <Badge tone="warning">مُجهَّز</Badge>
+            </span>
+            <Button size="sm" loading={activate.isPending} onClick={() => activate.mutate(data.nextDraft!.id)}>
+              بدء الشهر الجديد
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
+    );
+  }
+
+  // Not prepared yet — surface why / when.
+  if (data.prepBlocked) {
+    return <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-text-tertiary">تحضير الأشهر موقوف لهذه المساحة حاليًا.</p>;
+  }
+  if (!data.canPrepare && data.blockedReason === "OUTSIDE_WINDOW" && data.windowOpensAt) {
+    return (
+      <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-text-tertiary">
+        يمكن تجهيز {formatMonthLabel(data.target.year, data.target.month)} ابتداءً من {formatDate(data.windowOpensAt)}.
+      </p>
+    );
+  }
+  return null;
 }

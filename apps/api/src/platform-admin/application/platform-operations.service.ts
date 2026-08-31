@@ -2,23 +2,30 @@ import { Injectable } from "@nestjs/common";
 import {
   createContactLog,
   createFollowUp,
+  createMonthOverride,
   getFollowUpById,
   listContactLogs,
   listFollowUps,
+  listMonthOverridesForWorkspace,
   listPlatformStaff,
+  revokeMonthOverride,
   updateFollowUp,
+  type MonthOverrideRow,
   type PlatformContactLogRow,
   type FollowUpRow,
 } from "@academic-precision/database";
 import {
+  createMonthOverrideRequestSchema,
   createPlatformContactLogRequestSchema,
   createFollowUpRequestSchema,
   updateFollowUpRequestSchema,
   type CreateFollowUpRequest,
   type FollowUp,
   type ListFollowUpsResponse,
+  type ListMonthOverridesResponse,
   type ListPlatformContactLogsResponse,
   type ListPlatformStaffResponse,
+  type MonthOverride,
   type PlatformContactLog,
   type PlatformRole,
   type UpdateFollowUpRequest,
@@ -95,6 +102,28 @@ export class PlatformOperationsService {
     return { items: items.map((s) => ({ userId: s.userId, fullName: s.fullName, role: s.role as PlatformRole })) };
   }
 
+  // --- Operating-Month Overrides --------------------------------------------
+  async listMonthOverrides(workspaceId: string): Promise<ListMonthOverridesResponse> {
+    const items = await listMonthOverridesForWorkspace(workspaceId);
+    return { items: items.map(toMonthOverride) };
+  }
+
+  async createMonthOverride(workspaceId: string, actorUserId: string, body: unknown): Promise<{ id: string }> {
+    const parsed = this.parse(createMonthOverrideRequestSchema, body);
+    return createMonthOverride({
+      workspaceId,
+      actorUserId,
+      type: parsed.type,
+      reason: parsed.reason,
+      expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : null,
+    });
+  }
+
+  async revokeMonthOverride(overrideId: string, actorUserId: string): Promise<void> {
+    const res = await revokeMonthOverride({ overrideId, actorUserId });
+    if (!res) throw new ResourceNotFoundException();
+  }
+
   private parse<S extends ZodTypeAny>(schema: S, body: unknown): z.infer<S> {
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -139,5 +168,20 @@ function toFollowUp(row: FollowUpRow): FollowUp {
     assignedToName: row.assignedToName,
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
     resolvedByName: row.resolvedByName,
+  };
+}
+
+function toMonthOverride(row: MonthOverrideRow): MonthOverride {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    type: row.type as MonthOverride["type"],
+    reason: row.reason,
+    createdByName: row.createdByName,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+    revokedAt: row.revokedAt ? row.revokedAt.toISOString() : null,
+    revokedByName: row.revokedByName,
+    active: row.active,
   };
 }

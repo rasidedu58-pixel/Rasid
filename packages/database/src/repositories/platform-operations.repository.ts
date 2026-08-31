@@ -11,12 +11,12 @@
  * Every write appends a `platform_audit_events` row inside the same
  * transaction — the platform console is now an accountable actor.
  */
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb, getPlatformAdminDb } from "../connection";
 import { users } from "../schema/identity";
 import { workspaces } from "../schema/workspaces";
-import { platformAdmins, platformContactLogs, platformFollowUps, platformAuditEvents } from "../schema/platform-admin";
+import { platformAdmins, platformContactLogs, platformFollowUps, platformAuditEvents, platformOperatingMonthOverrides } from "../schema/platform-admin";
 
 // Local to avoid a database→contracts package dependency; the string values are
 // the single source of truth in migration 0056's CHECK constraint.
@@ -360,4 +360,140 @@ export async function updateFollowUp(params: {
     });
     return row;
   });
+}
+
+// --- Operating-Month Overrides (Platform Ops writes) ------------------------
+export type MonthOverrideType = "EARLY_PREP_ALLOWED" | "PREP_BLOCKED";
+
+export interface MonthOverrideRow {
+  id: string;
+  workspaceId: string;
+  type: string;
+  reason: string;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  createdAt: Date;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+  revokedByName: string | null;
+  active: boolean;
+}
+
+const ovCreatedBy = alias(users, "ov_created_by");
+const ovRevokedBy = alias(users, "ov_revoked_by");
+
+/** Full override history for one workspace (Customer 360), newest first. */
+export async function listMonthOverridesForWorkspace(workspaceId: string): Promise<MonthOverrideRow[]> {
+  const rows = await getPlatformAdminDb()
+    .select({
+      id: platformOperatingMonthOverrides.id,
+      workspaceId: platformOperatingMonthOverrides.workspaceId,
+      type: platformOperatingMonthOverrides.type,
+      reason: platformOperatingMonthOverrides.reason,
+      createdByUserId: platformOperatingMonthOverrides.createdByUserId,
+      createdByName: ovCreatedBy.fullName,
+      createdAt: platformOperatingMonthOverrides.createdAt,
+      expiresAt: platformOperatingMonthOverrides.expiresAt,
+      revokedAt: platformOperatingMonthOverrides.revokedAt,
+      revokedByName: ovRevokedBy.fullName,
+    })
+    .from(platformOperatingMonthOverrides)
+    .leftJoin(ovCreatedBy, eq(ovCreatedBy.id, platformOperatingMonthOverrides.createdByUserId))
+    .leftJoin(ovRevokedBy, eq(ovRevokedBy.id, platformOperatingMonthOverrides.revokedByUserId))
+    .where(eq(platformOperatingMonthOverrides.workspaceId, workspaceId))
+    .orderBy(desc(platformOperatingMonthOverrides.createdAt))
+    .limit(50);
+  const now = Date.now();
+  return rows.map((r) => ({
+    ...r,
+    active: r.revokedAt === null && (r.expiresAt === null || r.expiresAt.getTime() > now),
+  }));
+}
+
+/**
+ * Grant an override. Transactional: revoke any existing NON-revoked row of the
+ * same type first (including expired-but-unrevoked, so the partial unique index
+ * on (workspace_id, type) WHERE revoked_at IS NULL never conflicts), then insert
+ * the new one, then append a platform audit event.
+ */
+export async function createMonthOverride(params: {
+  workspaceId: string;
+  type: MonthOverrideType;
+  reason: string;
+  expiresAt?: Date | null;
+  actorUserId: string;
+}): Promise<{ id: string }> {
+  const db = getPlatformAdminDb();
+  return db.transaction(async (tx) => {
+    await tx
+      .update(platformOperatingMonthOverrides)
+      .set({ revokedAt: new Date(), revokedByUserId: params.actorUserId })
+      .where(
+        and(
+          eq(platformOperatingMonthOverrides.workspaceId, params.workspaceId),
+          eq(platformOperatingMonthOverrides.type, params.type),
+          isNull(platformOperatingMonthOverrides.revokedAt),
+        ),
+      );
+    const [row] = await tx
+      .insert(platformOperatingMonthOverrides)
+      .values({
+        workspaceId: params.workspaceId,
+        type: params.type,
+        reason: params.reason,
+        expiresAt: params.expiresAt ?? null,
+        createdByUserId: params.actorUserId,
+      })
+      .returning({ id: platformOperatingMonthOverrides.id });
+    if (!row) throw new Error("failed to insert operating-month override");
+    await writeAudit(tx, {
+      actorUserId: params.actorUserId,
+      action: "platform.operating_month_override.granted",
+      targetType: "operating_month_override",
+      targetId: row.id,
+      targetWorkspaceId: params.workspaceId,
+      afterJson: { type: params.type, expiresAt: params.expiresAt ?? null },
+    });
+    return { id: row.id };
+  });
+}
+
+/** Revoke an override (never hard-deleted). Returns null if not found. */
+export async function revokeMonthOverride(params: { overrideId: string; actorUserId: string }): Promise<{ id: string; workspaceId: string } | null> {
+  const db = getPlatformAdminDb();
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(platformOperatingMonthOverrides)
+      .set({ revokedAt: new Date(), revokedByUserId: params.actorUserId })
+      .where(and(eq(platformOperatingMonthOverrides.id, params.overrideId), isNull(platformOperatingMonthOverrides.revokedAt)))
+      .returning({ id: platformOperatingMonthOverrides.id, workspaceId: platformOperatingMonthOverrides.workspaceId });
+    if (!row) return null;
+    await writeAudit(tx, {
+      actorUserId: params.actorUserId,
+      action: "platform.operating_month_override.revoked",
+      targetType: "operating_month_override",
+      targetId: row.id,
+      targetWorkspaceId: row.workspaceId,
+      afterJson: { revoked: true },
+    });
+    return row;
+  });
+}
+
+/** Active override state for one workspace — used by Customer 360's platform read. */
+export async function getActiveMonthOverrideStatePlatform(workspaceId: string): Promise<{ prepBlocked: boolean; earlyPrepAllowed: boolean }> {
+  const rows = await getPlatformAdminDb()
+    .select({ type: platformOperatingMonthOverrides.type })
+    .from(platformOperatingMonthOverrides)
+    .where(
+      and(
+        eq(platformOperatingMonthOverrides.workspaceId, workspaceId),
+        isNull(platformOperatingMonthOverrides.revokedAt),
+        or(isNull(platformOperatingMonthOverrides.expiresAt), sql`${platformOperatingMonthOverrides.expiresAt} > now()`),
+      ),
+    );
+  return {
+    prepBlocked: rows.some((r) => r.type === "PREP_BLOCKED"),
+    earlyPrepAllowed: rows.some((r) => r.type === "EARLY_PREP_ALLOWED"),
+  };
 }

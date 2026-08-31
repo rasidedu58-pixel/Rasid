@@ -35,10 +35,11 @@ describe("SchedulingService — CreateMonth Carry-Forward", () => {
 
   beforeEach(() => {
     repo = new InMemorySchedulingRepository();
+    repo.monthOverrides = { prepBlocked: false, earlyPrepAllowed: true }; // window logic is covered by the pure eligibility unit test; keep month-prep deterministic here
     teamRepo = new InMemoryTeamRepository();
     resolver = new PermissionResolverService(teamRepo);
     previewTokens = new PreviewTokenService();
-    service = new SchedulingService(repo, resolver, previewTokens);
+    service = new SchedulingService(repo, resolver, previewTokens, { findCurrentEntitlementState: async () => "ALLOWED" as never });
 
     owner = { id: "u-owner", email: "owner@example.com" };
     const ownerMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: owner.id, roleLabel: "OWNER" });
@@ -171,13 +172,8 @@ describe("SchedulingService — CreateMonth Carry-Forward", () => {
     const key = randomUUID();
 
     const first = await previewAndConfirm(key);
-    // Re-confirm with the SAME key + SAME body shape (preview token content matches).
-    const preview2 = await service.previewCreateMonth(ownerContext, {
-      targetYear: 2026,
-      targetMonth: 9,
-      sourceMonthId: (await repo.listOperatingMonths(WORKSPACE_A)).find((m) => m.year === 2026 && m.month === 7)!.id,
-    });
-    void preview2;
+    // Re-confirm with the SAME key + the ORIGINAL preview token — the idempotency
+    // record short-circuits and returns the cached response (no duplicate).
     const second = await service.confirmCreateMonth(owner, ownerContext, key, { previewToken: first.preview.previewToken }, null);
 
     expect(second).toEqual(first.confirmed);
@@ -305,7 +301,7 @@ describe("SchedulingService — CreateMonth Carry-Forward", () => {
     const freshGroup = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Fresh" });
     const freshPreview = await service.previewCreateMonth(ownerContext, {
       targetYear: 2026,
-      targetMonth: 10,
+      targetMonth: 8, // the immediate next month after the seeded CURRENT (July)
       selectedGroupIds: [freshGroup.id],
       groupInitialConfig: {
         [freshGroup.id]: { baseFeeMinor: 1000, currencyCode: "EGP", duePolicy: "PER_GROUP", joinFeePolicy: "FULL", scheduleRules: [] },

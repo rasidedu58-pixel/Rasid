@@ -131,3 +131,13 @@ export function issueSeverityTone(sev: string): "success" | "warning" | "danger"
       return "neutral";
   }
 }
+
+// --- Operating-Month Overrides ----------------------------------------------
+export const MONTH_OVERRIDE_TYPE_LABEL: Record<string, string> = {
+  EARLY_PREP_ALLOWED: "سماح بالتحضير المبكر",
+  PREP_BLOCKED: "منع تحضير الأشهر",
+};
+
+export function monthOverrideTone(type: string): "success" | "warning" | "danger" | "neutral" {
+  return type === "PREP_BLOCKED" ? "danger" : "warning";
+}

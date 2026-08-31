@@ -9,7 +9,10 @@ import {
   findGroupMonthById,
   findIdempotencyRecord,
   findOperatingMonthById,
+  findCurrentOperatingMonth,
   findOperatingMonthByYearMonth,
+  getActiveMonthOverridesForWorkspace,
+  runActivateMonthTransaction,
   findSessionById,
   findWorkspaceTimezone,
   getCarryForwardStats,
@@ -36,6 +39,7 @@ import {
   type InsertGroupInput,
   type CalendarSessionRow,
   type ListSessionsFilter,
+  type ActivateMonthResult,
   type OperatingMonthRow,
   type PrepareGroupForCurrentMonthInput,
   type PrepareGroupForCurrentMonthResult,
@@ -94,6 +98,24 @@ export class DrizzleSchedulingRepository implements SchedulingRepositoryPort {
 
   findOperatingMonthById(id: string): Promise<OperatingMonthRow | undefined> {
     return withRuntimeContext(this.runtimeCtx(), (db) => findOperatingMonthById(db, id));
+  }
+
+  findCurrentOperatingMonth(workspaceId: string): Promise<OperatingMonthRow | undefined> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => findCurrentOperatingMonth(db, workspaceId));
+  }
+
+  getActiveMonthOverrides(workspaceId: string): Promise<{ prepBlocked: boolean; earlyPrepAllowed: boolean }> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => getActiveMonthOverridesForWorkspace(db, workspaceId));
+  }
+
+  runActivateMonthTransaction(input: {
+    workspaceId: string;
+    monthId: string;
+    actorUserId: string;
+    actorMembershipId: string | null;
+    correlationId?: string | null;
+  }): Promise<ActivateMonthResult> {
+    return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => runActivateMonthTransaction(db, input));
   }
 
   findOperatingMonthByYearMonth(

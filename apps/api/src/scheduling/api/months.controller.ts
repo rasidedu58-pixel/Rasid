@@ -13,11 +13,13 @@ import { RequireEntitlement } from "../../billing/api/decorators/require-entitle
 import {
   createMonthConfirmRequestSchema,
   createMonthPreviewRequestSchema,
+  type ActivateMonthResponse,
   type CreateMonthConfirmResponse,
   type CreateMonthPreviewRequest,
   type CreateMonthPreviewResponse,
   type ListGroupMonthsResponse,
   type ListMonthsResponse,
+  type MonthPrepEligibilityResponse,
   type OperatingMonth,
 } from "@academic-precision/contracts";
 import { RequirePermission } from "../../team/api/decorators/require-permission.decorator";
@@ -49,6 +51,12 @@ export class MonthsController {
     return this.schedulingService.listMonths(workspaceContext);
   }
 
+  @Get("months/prep-eligibility")
+  @ApiOperation({ summary: "Can the next month be prepared/started now? window + override state (GET /api/v1/months/prep-eligibility)" })
+  getPrepEligibility(@CurrentWorkspaceContext() workspaceContext: WorkspaceContext): Promise<MonthPrepEligibilityResponse> {
+    return this.schedulingService.getMonthPrepEligibility(workspaceContext);
+  }
+
   @Get("months/:id")
   @ApiOperation({ summary: "Operating month details (GET /api/v1/months/:id)" })
   getMonth(
@@ -56,6 +64,20 @@ export class MonthsController {
     @Param("id") id: string,
   ): Promise<OperatingMonth> {
     return this.schedulingService.getMonth(workspaceContext, id);
+  }
+
+  @Post("months/:id/activate")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CREATE_MONTH")
+  @ApiOperation({ summary: "Start a prepared DRAFT month — archive CURRENT, DRAFT→CURRENT, Owner-only (POST /api/v1/months/:id/activate)" })
+  activateMonth(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Param("id") id: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<ActivateMonthResponse> {
+    return this.schedulingService.activateMonth(user, workspaceContext, id, extractHeader(request, REQUEST_ID_HEADER));
   }
 
   @Get("months/:id/group-months")

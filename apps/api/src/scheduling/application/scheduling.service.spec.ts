@@ -28,12 +28,16 @@ describe("SchedulingService", () => {
   let owner: VerifiedSupabaseToken;
   let ownerContext: WorkspaceContext;
 
+  const entitlements = { state: "ALLOWED" as string | undefined, findCurrentEntitlementState: async () => entitlements.state as never };
+
   beforeEach(() => {
     repo = new InMemorySchedulingRepository();
+    repo.monthOverrides = { prepBlocked: false, earlyPrepAllowed: true }; // window logic is covered by the pure eligibility unit test; keep month-prep deterministic here
     teamRepo = new InMemoryTeamRepository();
     resolver = new PermissionResolverService(teamRepo);
     previewTokens = new PreviewTokenService();
-    service = new SchedulingService(repo, resolver, previewTokens);
+    entitlements.state = "ALLOWED";
+    service = new SchedulingService(repo, resolver, previewTokens, entitlements);
 
     owner = { id: "u-owner", email: "owner@example.com" };
     const ownerMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: owner.id, roleLabel: "OWNER" });
@@ -205,9 +209,12 @@ describe("SchedulingService", () => {
       await createMonthEndToEnd([group.id], key);
 
       const anotherGroup = seedActiveGroup();
+      // Preparing the immediate next month (Sep) is allowed via an EARLY_PREP override,
+      // making this deterministic regardless of the current date.
+      repo.monthOverrides = { prepBlocked: false, earlyPrepAllowed: true };
       const preview = await service.previewCreateMonth(ownerContext, {
-        targetYear: 2027,
-        targetMonth: 1,
+        targetYear: 2026,
+        targetMonth: 9,
         selectedGroupIds: [anotherGroup.id],
         groupInitialConfig: {
           [anotherGroup.id]: { baseFeeMinor: 999, currencyCode: "EGP", duePolicy: "PER_GROUP", joinFeePolicy: "FULL", scheduleRules: [] },
@@ -250,10 +257,12 @@ describe("SchedulingService", () => {
       );
     });
 
-    it("keeps INT-01 (single CURRENT month per workspace): creating a second month archives the first", async () => {
+    it("preparing the next month creates a DRAFT and keeps the current month CURRENT (no archive until activation)", async () => {
       const group = seedActiveGroup();
-      const first = await createMonthEndToEnd([group.id]);
+      const first = await createMonthEndToEnd([group.id]); // August → CURRENT (bootstrap)
 
+      // EARLY_PREP override makes preparing September deterministic (any date).
+      repo.monthOverrides = { prepBlocked: false, earlyPrepAllowed: true };
       const preview2 = await service.previewCreateMonth(ownerContext, {
         targetYear: 2026,
         targetMonth: 9,
@@ -262,13 +271,43 @@ describe("SchedulingService", () => {
           [group.id]: { baseFeeMinor: 20000, currencyCode: "EGP", duePolicy: "PER_GROUP", joinFeePolicy: "FULL", scheduleRules: [] },
         },
       });
-      await service.confirmCreateMonth(owner, ownerContext, randomUUID(), { previewToken: preview2.previewToken }, null);
+      const confirmed2 = await service.confirmCreateMonth(owner, ownerContext, randomUUID(), { previewToken: preview2.previewToken }, null);
 
+      expect(confirmed2.status).toBe("DRAFT");
       const months = await repo.listOperatingMonths(WORKSPACE_A);
-      const current = months.filter((m) => m.status === "CURRENT");
-      expect(current).toHaveLength(1);
-      const firstMonth = months.find((m) => m.id === first.confirmed.monthId);
-      expect(firstMonth?.status).toBe("ARCHIVED");
+      expect(months.filter((m) => m.status === "CURRENT")).toHaveLength(1);
+      expect(months.find((m) => m.id === first.confirmed.monthId)?.status).toBe("CURRENT"); // NOT archived
+      expect(months.find((m) => m.id === confirmed2.monthId)?.status).toBe("DRAFT");
+    });
+
+    it("prep eligibility is ENTITLEMENT_REQUIRED when CREATE_MONTH is not available (expired/no subscription)", async () => {
+      repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id, status: "CURRENT" });
+      entitlements.state = "BLOCKED";
+      const elig = await service.getMonthPrepEligibility(ownerContext);
+      expect(elig.canPrepare).toBe(false);
+      expect(elig.blockedReason).toBe("ENTITLEMENT_REQUIRED");
+      expect(elig.wouldBeStatus).toBeNull();
+    });
+
+    it("prep eligibility falls through to the normal window/override evaluation when CREATE_MONTH is available", async () => {
+      repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id, status: "CURRENT" });
+      entitlements.state = "ALLOWED";
+      repo.monthOverrides = { prepBlocked: false, earlyPrepAllowed: true };
+      const elig = await service.getMonthPrepEligibility(ownerContext);
+      expect(elig.canPrepare).toBe(true);
+      expect(elig.blockedReason).toBeNull();
+      expect(elig.wouldBeStatus).not.toBeNull();
+    });
+
+    it("activating a DRAFT archives the old CURRENT and promotes the DRAFT atomically (single CURRENT preserved)", async () => {
+      const aug = repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 8, createdByUserId: owner.id, status: "CURRENT" });
+      const sep = repo.seedMonth({ workspaceId: WORKSPACE_A, year: 2026, month: 9, createdByUserId: owner.id, status: "DRAFT" });
+      const res = await repo.runActivateMonthTransaction({ workspaceId: WORKSPACE_A, monthId: sep.id, actorUserId: owner.id, actorMembershipId: null });
+      expect(res.status).toBe("ACTIVATED");
+      const months = await repo.listOperatingMonths(WORKSPACE_A);
+      expect(months.find((m) => m.id === aug.id)?.status).toBe("ARCHIVED");
+      expect(months.find((m) => m.id === sep.id)?.status).toBe("CURRENT");
+      expect(months.filter((m) => m.status === "CURRENT")).toHaveLength(1);
     });
   });
 

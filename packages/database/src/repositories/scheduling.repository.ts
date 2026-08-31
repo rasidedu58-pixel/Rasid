@@ -13,9 +13,10 @@
  * transactional integrity of each operation (atomic writes, idempotency
  * race handling, optimistic-concurrency version checks at the SQL level).
  */
-import { and, asc, desc, eq, gt, gte, inArray, lte, sql as rawSql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql as rawSql } from "drizzle-orm";
 import { groupMonths, groups, scheduleRules } from "../schema/groups";
 import { locations, operatingMonths } from "../schema/months";
+import { platformOperatingMonthOverrides } from "../schema/platform-admin";
 import { sessions } from "../schema/sessions";
 import { idempotencyRecords } from "../schema/idempotency";
 import { auditEvents } from "../schema/audit";
@@ -629,6 +630,12 @@ export interface CreateMonthTransactionInput {
   createdByUserId: string;
   createdByMembershipId: string | null;
   correlationId?: string | null;
+  /**
+   * DRAFT = prepared ahead (the next month is created as DRAFT; the current
+   * month stays CURRENT and nothing is archived). CURRENT = created-and-started
+   * now (bootstrap or catch-up) — the previous CURRENT is archived.
+   */
+  targetStatus: "DRAFT" | "CURRENT";
   groupSpecs: CreateMonthGroupSpec[];
 }
 
@@ -892,6 +899,90 @@ class CarryForwardDueDayUnresolvedMarker extends Error {
  * Delta), matching the `recordPaymentTransaction`/`reversePaymentTransaction`
  * convention exactly.
  */
+/**
+ * Active operating-month override state for the caller's own workspace (tenant
+ * read on `app_runtime`, RLS-scoped). "Active" = not revoked and not expired.
+ */
+export async function getActiveMonthOverridesForWorkspace(db: Db, workspaceId: string): Promise<{ prepBlocked: boolean; earlyPrepAllowed: boolean }> {
+  try {
+    const rows = await db
+      .select({ type: platformOperatingMonthOverrides.type })
+      .from(platformOperatingMonthOverrides)
+      .where(
+        and(
+          eq(platformOperatingMonthOverrides.workspaceId, workspaceId),
+          isNull(platformOperatingMonthOverrides.revokedAt),
+          or(isNull(platformOperatingMonthOverrides.expiresAt), gt(platformOperatingMonthOverrides.expiresAt, rawSql`now()`)),
+        ),
+      );
+    return {
+      prepBlocked: rows.some((r) => r.type === "PREP_BLOCKED"),
+      earlyPrepAllowed: rows.some((r) => r.type === "EARLY_PREP_ALLOWED"),
+    };
+  } catch {
+    // Overrides table/grant not present yet (0058 not applied) — degrade to "no
+    // override" so month prepare/activate keeps working on the natural window.
+    return { prepBlocked: false, earlyPrepAllowed: false };
+  }
+}
+
+export type ActivateMonthResult =
+  | { status: "ACTIVATED"; operatingMonth: OperatingMonthRow }
+  | { status: "NOT_FOUND" }
+  | { status: "NOT_DRAFT" };
+
+/**
+ * Atomically start a prepared DRAFT month: archive the current CURRENT (if any)
+ * and flip the DRAFT → CURRENT, preserving the one-CURRENT-per-workspace
+ * invariant. Date/entitlement eligibility is validated by the caller (service).
+ */
+export async function runActivateMonthTransaction(
+  db: Db,
+  input: { workspaceId: string; monthId: string; actorUserId: string; actorMembershipId: string | null; correlationId?: string | null },
+): Promise<ActivateMonthResult> {
+  return db.transaction(async (tx) => {
+    const [draft] = await tx
+      .select()
+      .from(operatingMonths)
+      .where(and(eq(operatingMonths.id, input.monthId), eq(operatingMonths.workspaceId, input.workspaceId)))
+      .limit(1);
+    if (!draft) return { status: "NOT_FOUND" } as const;
+    if (draft.status !== "DRAFT") return { status: "NOT_DRAFT" } as const;
+
+    const [previousCurrent] = await tx
+      .select()
+      .from(operatingMonths)
+      .where(and(eq(operatingMonths.workspaceId, input.workspaceId), eq(operatingMonths.status, CURRENT_MONTH_STATUS)))
+      .limit(1);
+    if (previousCurrent) {
+      await tx
+        .update(operatingMonths)
+        .set({ status: ARCHIVED_MONTH_STATUS, archivedAt: new Date() })
+        .where(eq(operatingMonths.id, previousCurrent.id));
+    }
+
+    const [activated] = await tx
+      .update(operatingMonths)
+      .set({ status: CURRENT_MONTH_STATUS, activatedAt: new Date() })
+      .where(eq(operatingMonths.id, draft.id))
+      .returning();
+    if (!activated) throw new Error("Failed to activate operating month.");
+
+    await tx.insert(auditEvents).values({
+      workspaceId: input.workspaceId,
+      actorUserId: input.actorUserId,
+      actorMembershipId: input.actorMembershipId,
+      action: "month.activated",
+      entityType: "operating_month",
+      entityId: activated.id,
+      afterJson: { operatingMonthId: activated.id, previousCurrentId: previousCurrent?.id ?? null },
+      correlationId: input.correlationId ?? null,
+    });
+
+    return { status: "ACTIVATED", operatingMonth: activated } as const;
+  });
+}
+
 export async function runCreateMonthTransaction(
   db: Db,
   input: CreateMonthTransactionInput,
@@ -924,16 +1015,20 @@ async function runCreateMonthTransactionInner(
       return "MONTH_ALREADY_EXISTS" as const;
     }
 
-    const [previousCurrent] = await tx
-      .select()
-      .from(operatingMonths)
-      .where(and(eq(operatingMonths.workspaceId, input.workspaceId), eq(operatingMonths.status, CURRENT_MONTH_STATUS)))
-      .limit(1);
-    if (previousCurrent) {
-      await tx
-        .update(operatingMonths)
-        .set({ status: ARCHIVED_MONTH_STATUS, archivedAt: new Date() })
-        .where(eq(operatingMonths.id, previousCurrent.id));
+    // Only a CURRENT (created-and-started) month archives the previous CURRENT.
+    // A DRAFT (prepared ahead) leaves the current month untouched.
+    if (input.targetStatus === CURRENT_MONTH_STATUS) {
+      const [previousCurrent] = await tx
+        .select()
+        .from(operatingMonths)
+        .where(and(eq(operatingMonths.workspaceId, input.workspaceId), eq(operatingMonths.status, CURRENT_MONTH_STATUS)))
+        .limit(1);
+      if (previousCurrent) {
+        await tx
+          .update(operatingMonths)
+          .set({ status: ARCHIVED_MONTH_STATUS, archivedAt: new Date() })
+          .where(eq(operatingMonths.id, previousCurrent.id));
+      }
     }
 
     const [operatingMonth] = await tx
@@ -942,9 +1037,9 @@ async function runCreateMonthTransactionInner(
         workspaceId: input.workspaceId,
         year: input.targetYear,
         month: input.targetMonth,
-        status: CURRENT_MONTH_STATUS,
+        status: input.targetStatus,
         createdByUserId: input.createdByUserId,
-        activatedAt: new Date(),
+        activatedAt: input.targetStatus === CURRENT_MONTH_STATUS ? new Date() : null,
       })
       .returning();
     if (!operatingMonth) throw new Error("Failed to insert operating_months row.");

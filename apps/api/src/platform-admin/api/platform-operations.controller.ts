@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import type {
   FollowUp,
   ListFollowUpsResponse,
+  ListMonthOverridesResponse,
   ListPlatformContactLogsResponse,
   ListPlatformStaffResponse,
   PlatformContactLog,
@@ -97,5 +98,28 @@ export class PlatformOperationsController {
   @ApiOperation({ summary: "List platform staff (for follow-up assignment)" })
   listStaff(): Promise<ListPlatformStaffResponse> {
     return this.service.listStaff();
+  }
+
+  // --- Operating-Month Overrides --------------------------------------------
+  @Get("workspaces/:id/operating-month-overrides")
+  @RequirePlatformPermission("platform.operating_months.manage")
+  @ApiOperation({ summary: "List operating-month overrides for a workspace" })
+  listMonthOverrides(@Param("id") id: string): Promise<ListMonthOverridesResponse> {
+    return this.service.listMonthOverrides(id);
+  }
+
+  @Post("workspaces/:id/operating-month-overrides")
+  @RequirePlatformPermission("platform.operating_months.manage")
+  @ApiOperation({ summary: "Grant an operating-month override (EARLY_PREP_ALLOWED / PREP_BLOCKED)" })
+  createMonthOverride(@Param("id") id: string, @CurrentUser() user: VerifiedSupabaseToken, @Body() body: unknown): Promise<{ id: string }> {
+    return this.service.createMonthOverride(id, user.id, body);
+  }
+
+  @Delete("operating-month-overrides/:overrideId")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePlatformPermission("platform.operating_months.manage")
+  @ApiOperation({ summary: "Revoke an operating-month override (never hard-deleted)" })
+  async revokeMonthOverride(@Param("overrideId") overrideId: string, @CurrentUser() user: VerifiedSupabaseToken): Promise<void> {
+    await this.service.revokeMonthOverride(overrideId, user.id);
   }
 }

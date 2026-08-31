@@ -268,6 +268,32 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
     return this.monthsById.get(id);
   }
 
+  async findCurrentOperatingMonth(workspaceId: string): Promise<OperatingMonthRow | undefined> {
+    return [...this.monthsById.values()].find((m) => m.workspaceId === workspaceId && m.status === "CURRENT");
+  }
+
+  monthOverrides = { prepBlocked: false, earlyPrepAllowed: false };
+  async getActiveMonthOverrides(): Promise<{ prepBlocked: boolean; earlyPrepAllowed: boolean }> {
+    return this.monthOverrides;
+  }
+
+  async runActivateMonthTransaction(input: {
+    workspaceId: string;
+    monthId: string;
+    actorUserId?: string;
+    actorMembershipId?: string | null;
+    correlationId?: string | null;
+  }): Promise<{ status: "ACTIVATED"; operatingMonth: OperatingMonthRow } | { status: "NOT_FOUND" } | { status: "NOT_DRAFT" }> {
+    const draft = this.monthsById.get(input.monthId);
+    if (!draft || draft.workspaceId !== input.workspaceId) return { status: "NOT_FOUND" };
+    if (draft.status !== "DRAFT") return { status: "NOT_DRAFT" };
+    const current = [...this.monthsById.values()].find((m) => m.workspaceId === input.workspaceId && m.status === "CURRENT");
+    if (current) this.monthsById.set(current.id, { ...current, status: "ARCHIVED", archivedAt: new Date() });
+    const activated = { ...draft, status: "CURRENT" as const, activatedAt: new Date() };
+    this.monthsById.set(draft.id, activated);
+    return { status: "ACTIVATED", operatingMonth: activated };
+  }
+
   async findOperatingMonthByYearMonth(
     workspaceId: string,
     year: number,
@@ -583,18 +609,20 @@ export class InMemorySchedulingRepository implements SchedulingRepositoryPort {
     );
     if (duplicate) return "MONTH_ALREADY_EXISTS";
 
-    const previousCurrent = [...this.monthsById.values()].find(
-      (m) => m.workspaceId === input.workspaceId && m.status === "CURRENT",
-    );
-    if (previousCurrent) {
-      this.monthsById.set(previousCurrent.id, { ...previousCurrent, status: "ARCHIVED", archivedAt: this.now() });
+    if (input.targetStatus === "CURRENT") {
+      const previousCurrent = [...this.monthsById.values()].find(
+        (m) => m.workspaceId === input.workspaceId && m.status === "CURRENT",
+      );
+      if (previousCurrent) {
+        this.monthsById.set(previousCurrent.id, { ...previousCurrent, status: "ARCHIVED", archivedAt: this.now() });
+      }
     }
 
     const operatingMonth = this.seedMonth({
       workspaceId: input.workspaceId,
       year: input.targetYear,
       month: input.targetMonth,
-      status: "CURRENT",
+      status: input.targetStatus,
       createdByUserId: input.createdByUserId,
     });
 

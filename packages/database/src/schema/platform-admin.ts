@@ -96,6 +96,30 @@ export const platformFollowUps = pgTable("platform_follow_ups", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
 });
 
+/**
+ * Operating-Month Overrides — a per-workspace OPERATIONAL exception set by
+ * Rasid staff (Platform Ops), read by the tenant month-prepare flow. Distinct
+ * from feature entitlements (never grants CREATE_MONTH / extends a
+ * subscription). `type` = EARLY_PREP_ALLOWED (prepare the next month's DRAFT
+ * before the natural window) or PREP_BLOCKED (block preparing any new month).
+ * Append-only history: an override is never hard-deleted; a new one of the same
+ * type revokes the prior. "Active" = revoked_at IS NULL AND (expires_at IS NULL
+ * OR expires_at > now()).
+ */
+export const platformOperatingMonthOverrides = pgTable("platform_operating_month_overrides", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  workspaceId: uuid("workspace_id").notNull(),
+  type: text("type").notNull(),
+  reason: text("reason").notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+});
+
 export const platformAuditEvents = pgTable("platform_audit_events", {
   id: uuid("id")
     .primaryKey()

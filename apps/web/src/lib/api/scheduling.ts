@@ -5,6 +5,8 @@ import type {
   CreateMonthPreviewResponse,
   CreateMonthConfirmRequest,
   CreateMonthConfirmResponse,
+  ActivateMonthResponse,
+  MonthPrepEligibilityResponse,
   ListGroupMonthsResponse,
   ListGroupsResponse,
   Group,
@@ -45,6 +47,14 @@ export function fetchMonth(workspaceId: string, monthId: string): Promise<Operat
 
 export function previewCreateMonth(workspaceId: string, body: CreateMonthPreviewRequest): Promise<CreateMonthPreviewResponse> {
   return apiRequest<CreateMonthPreviewResponse>("/months/preview", { method: "POST", workspaceId, body });
+}
+
+export function fetchMonthPrepEligibility(workspaceId: string): Promise<MonthPrepEligibilityResponse> {
+  return apiRequest<MonthPrepEligibilityResponse>("/months/prep-eligibility", { workspaceId });
+}
+
+export function activateMonth(workspaceId: string, monthId: string): Promise<ActivateMonthResponse> {
+  return apiRequest<ActivateMonthResponse>(`/months/${monthId}/activate`, { method: "POST", workspaceId });
 }
 
 export function confirmCreateMonth(workspaceId: string, body: CreateMonthConfirmRequest): Promise<CreateMonthConfirmResponse> {

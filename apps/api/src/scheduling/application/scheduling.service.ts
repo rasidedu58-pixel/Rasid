@@ -31,7 +31,12 @@ import type {
   UpdateGroupRequest,
 } from "@academic-precision/contracts";
 import {
+  currentCalendarMonth,
+  evaluateMonthActivation,
+  evaluateMonthPrepEligibility,
   generateSessionOccurrencesForRules,
+  nextMonth,
+  prepWindowOpensAt,
   type GroupMonthRow,
   type GroupRow,
   type OperatingMonthRow,
@@ -44,6 +49,7 @@ import {
   IdempotencyConflictException,
   MonthAlreadyExistsException,
   MonthCreateFailedException,
+  MonthPrepNotAllowedException,
   NoCurrentMonthException,
   ResourceNotFoundException,
   SessionInvalidStateException,
@@ -55,8 +61,12 @@ import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { PermissionResolverService } from "../../team/application/permission-resolver.service";
 import { PreviewTokenService } from "./preview-token.service";
 import { SCHEDULING_REPOSITORY, type SchedulingRepositoryPort } from "./ports/scheduling-repository.port";
+import { ENTITLEMENT_REPOSITORY, type EntitlementRepositoryPort } from "../../billing/application/ports/entitlement-repository.port";
 
 const OWNER_ROLE_LABEL = "OWNER";
+// Configurable: how many days before the end of the current month the natural
+// "prepare next month" window opens. Default 7.
+const PREP_WINDOW_DAYS = Number.parseInt(process.env.OPERATING_MONTH_PREP_WINDOW_DAYS ?? "", 10) || 7;
 const CREATE_MONTH_OPERATION = "CreateMonth";
 const CREATE_MONTH_PREVIEW_KIND = "CreateMonth";
 const GROUP_MONTH_CHANGE_PREVIEW_KIND = "GroupMonthChange";
@@ -116,6 +126,7 @@ export class SchedulingService {
     @Inject(SCHEDULING_REPOSITORY) private readonly repository: SchedulingRepositoryPort,
     private readonly permissionResolver: PermissionResolverService,
     private readonly previewTokens: PreviewTokenService,
+    @Inject(ENTITLEMENT_REPOSITORY) private readonly entitlements: EntitlementRepositoryPort,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -302,6 +313,9 @@ export class SchedulingService {
       throw new MonthCreateFailedException("تعذر تحديد المنطقة الزمنية لمساحة العمل.");
     }
 
+    // Prepare/activate rules — window + platform override + next-month-only.
+    await this.resolvePrepDecision(workspaceContext.workspaceId, body.targetYear, body.targetMonth, workspaceTimezone);
+
     const groupSpecs: CreateMonthPreviewPayload["groupSpecs"] = [];
 
     if (body.sourceMonthId) {
@@ -476,11 +490,16 @@ export class SchedulingService {
       return idempotencyRow.responsePayload as CreateMonthConfirmResponse;
     }
 
+    // Re-evaluate eligibility at confirm time — a stale preview token must not
+    // bypass a window change / override revoke / subscription change.
+    const decision = await this.resolvePrepDecision(workspaceContext.workspaceId, plan.targetYear, plan.targetMonth, workspaceTimezone);
+
     const result = await this.repository.runCreateMonthTransaction({
       workspaceId: workspaceContext.workspaceId,
       workspaceTimezone,
       targetYear: plan.targetYear,
       targetMonth: plan.targetMonth,
+      targetStatus: decision.status,
       createdByUserId: authUser.id,
       createdByMembershipId: workspaceContext.membership.id,
       correlationId,
@@ -513,7 +532,7 @@ export class SchedulingService {
     // here anymore.
     const response: CreateMonthConfirmResponse = {
       monthId: result.operatingMonth.id,
-      status: "CURRENT",
+      status: decision.status,
       groupMonthCount: result.groupMonths.length,
       sessionCount: result.sessionCount,
       enrollmentCount: result.enrollmentCount,
@@ -522,6 +541,101 @@ export class SchedulingService {
     await this.repository.completeIdempotencyRecord(idempotencyRow.id, 201, response);
 
     return response;
+  }
+
+  /**
+   * Evaluate the PREPARE rules (window + platform override + next-month-only +
+   * duplicate) and return the resulting status (DRAFT ahead / CURRENT catch-up),
+   * or throw MonthPrepNotAllowedException. Used by both preview and confirm so a
+   * stale token can never bypass a changed window/override.
+   */
+  private async resolvePrepDecision(
+    workspaceId: string,
+    targetYear: number,
+    targetMonth: number,
+    timezone: string,
+  ): Promise<{ status: "DRAFT" | "CURRENT" }> {
+    const current = await this.repository.findCurrentOperatingMonth(workspaceId);
+    const overrides = await this.repository.getActiveMonthOverrides(workspaceId);
+    const duplicate = await this.repository.findOperatingMonthByYearMonth(workspaceId, targetYear, targetMonth);
+    const decision = evaluateMonthPrepEligibility({
+      current: current ? { year: current.year, month: current.month } : null,
+      target: { year: targetYear, month: targetMonth },
+      now: new Date(),
+      timezone,
+      windowDays: PREP_WINDOW_DAYS,
+      override: overrides,
+      duplicateExists: !!duplicate,
+    });
+    if (!decision.allowed) throw new MonthPrepNotAllowedException(decision.reason);
+    return { status: decision.status };
+  }
+
+  /** Read-only: what the teacher's "prepare next month" state is right now. */
+  async getMonthPrepEligibility(workspaceContext: WorkspaceContext) {
+    const workspaceId = workspaceContext.workspaceId;
+    const timezone = (await this.repository.findWorkspaceTimezone(workspaceId)) ?? "Africa/Cairo";
+    const current = await this.repository.findCurrentOperatingMonth(workspaceId);
+    const overrides = await this.repository.getActiveMonthOverrides(workspaceId);
+    const target = current ? nextMonth({ year: current.year, month: current.month }) : currentCalendarMonth(new Date(), timezone);
+    const duplicate = await this.repository.findOperatingMonthByYearMonth(workspaceId, target.year, target.month);
+    const nextDraft = duplicate && duplicate.status === "DRAFT" ? duplicate : undefined;
+
+    // Entitlement-aware: same source of truth EntitlementGuard uses for the
+    // CREATE_MONTH gate on preview/confirm/activate — so the UI never offers a
+    // prepare CTA the guard will then reject. NOT a parallel subscription check.
+    const entitlementAllowed = (await this.entitlements.findCurrentEntitlementState(workspaceId, "CREATE_MONTH")) === "ALLOWED";
+
+    const decision = entitlementAllowed
+      ? evaluateMonthPrepEligibility({
+          current: current ? { year: current.year, month: current.month } : null,
+          target,
+          now: new Date(),
+          timezone,
+          windowDays: PREP_WINDOW_DAYS,
+          override: overrides,
+          duplicateExists: !!duplicate,
+        })
+      : ({ allowed: false, reason: "ENTITLEMENT_REQUIRED" } as const);
+
+    return {
+      current: current ? this.toMonthDto(current) : null,
+      nextDraft: nextDraft ? this.toMonthDto(nextDraft) : null,
+      target,
+      canPrepare: decision.allowed,
+      wouldBeStatus: decision.allowed ? decision.status : null,
+      blockedReason: decision.allowed ? null : decision.reason,
+      windowOpensAt: current ? prepWindowOpensAt({ year: current.year, month: current.month }, timezone, PREP_WINDOW_DAYS) : null,
+      earlyPrepAllowed: overrides.earlyPrepAllowed,
+      prepBlocked: overrides.prepBlocked,
+    };
+  }
+
+  /** Activate a prepared DRAFT month (archive current CURRENT, flip DRAFT→CURRENT). Owner-only + entitlement-gated at the controller. */
+  async activateMonth(authUser: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, monthId: string, correlationId: string | null) {
+    this.assertOwner(workspaceContext);
+    const workspaceId = workspaceContext.workspaceId;
+    const timezone = (await this.repository.findWorkspaceTimezone(workspaceId)) ?? "Africa/Cairo";
+    const draft = await this.repository.findOperatingMonthById(monthId);
+    if (!draft || draft.workspaceId !== workspaceId) throw new ResourceNotFoundException();
+    const current = await this.repository.findCurrentOperatingMonth(workspaceId);
+    const check = evaluateMonthActivation({
+      draft: { year: draft.year, month: draft.month },
+      draftStatus: draft.status,
+      current: current ? { year: current.year, month: current.month } : null,
+      now: new Date(),
+      timezone,
+    });
+    if (!check.allowed) throw new MonthPrepNotAllowedException(check.reason);
+    const result = await this.repository.runActivateMonthTransaction({
+      workspaceId,
+      monthId,
+      actorUserId: authUser.id,
+      actorMembershipId: workspaceContext.membership.id,
+      correlationId,
+    });
+    if (result.status !== "ACTIVATED") throw new MonthPrepNotAllowedException(result.status === "NOT_DRAFT" ? "NOT_DRAFT" : "NOT_STARTED");
+    return { monthId: result.operatingMonth.id, status: "CURRENT" as const };
   }
 
   // ---------------------------------------------------------------------

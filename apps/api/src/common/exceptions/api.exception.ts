@@ -96,6 +96,25 @@ export class MonthAlreadyExistsException extends ApiException {
 }
 
 /**
+ * 409 — the operating-month prepare/activate rules block this action: outside
+ * the natural window, a platform PREP_BLOCKED override, not the immediate next
+ * month, a duplicate, or (activation) the target month hasn't begun yet.
+ */
+const MONTH_PREP_REASON_MESSAGES: Record<string, string> = {
+  PREP_BLOCKED: "تحضير الأشهر موقوف لهذه المساحة حاليًا (قرار تشغيلي من إدارة راصد).",
+  NOT_NEXT_MONTH: "يمكن تجهيز الشهر التالي مباشرةً فقط — لا يمكن تجاوز أكثر من شهر.",
+  DUPLICATE: "هذا الشهر مُجهَّز بالفعل.",
+  OUTSIDE_WINDOW: "لم تبدأ نافذة تجهيز الشهر القادم بعد.",
+  NOT_DRAFT: "لا يوجد شهر مُجهَّز (DRAFT) لبدئه.",
+  NOT_STARTED: "لا يمكن بدء الشهر قبل بدء شهره التقويمي.",
+};
+export class MonthPrepNotAllowedException extends ApiException {
+  constructor(reason: string, details?: Record<string, unknown>) {
+    super(409, "MONTH_PREP_NOT_ALLOWED", MONTH_PREP_REASON_MESSAGES[reason] ?? "لا يمكن تنفيذ هذه العملية الآن.", { reason, ...details });
+  }
+}
+
+/**
  * 422 — the CreateMonth transaction could not complete: an invalid/expired
  * preview token, a source-state change since preview, or a validation
  * failure. API Contract §12 also allows 500 for a genuine unexpected

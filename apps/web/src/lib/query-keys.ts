@@ -24,6 +24,7 @@ export const qk = {
     list: (ws: string) => ["months", ws, "list"] as const,
     detail: (ws: string, id: string) => ["months", ws, "detail", id] as const,
     groupMonths: (ws: string, id: string) => ["months", ws, id, "group-months"] as const,
+    prepEligibility: (ws: string) => ["months", ws, "prep-eligibility"] as const,
   },
   sessions: {
     list: (ws: string, params?: Record<string, unknown>) => ["sessions", ws, "list", params] as const,
@@ -79,5 +80,6 @@ export const qk = {
     followUpQueue: (params?: Record<string, unknown>) => ["platform-admin", "follow-ups", params] as const,
     staff: () => ["platform-admin", "staff"] as const,
     status: () => ["platform-admin", "platform-status"] as const,
+    monthOverrides: (workspaceId: string) => ["platform-admin", "workspaces", "month-overrides", workspaceId] as const,
   },
 } as const;

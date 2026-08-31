@@ -1,8 +1,10 @@
 import type {
   CreateFollowUpRequest,
+  CreateMonthOverrideRequest,
   CreatePlatformContactLogRequest,
   FollowUp,
   ListFollowUpsResponse,
+  ListMonthOverridesResponse,
   ListPlatformContactLogsResponse,
   ListPlatformStaffResponse,
   PlatformContactLog,
@@ -45,4 +47,17 @@ export function updateFollowUp(followUpId: string, body: UpdateFollowUpRequest):
 // --- Staff ------------------------------------------------------------------
 export function fetchPlatformStaff(): Promise<ListPlatformStaffResponse> {
   return apiRequest<ListPlatformStaffResponse>("/platform-admin/staff");
+}
+
+// --- Operating-Month Overrides ----------------------------------------------
+export function fetchWorkspaceMonthOverrides(workspaceId: string): Promise<ListMonthOverridesResponse> {
+  return apiRequest<ListMonthOverridesResponse>(`/platform-admin/workspaces/${workspaceId}/operating-month-overrides`);
+}
+
+export function createWorkspaceMonthOverride(workspaceId: string, body: CreateMonthOverrideRequest): Promise<{ id: string }> {
+  return apiRequest<{ id: string }>(`/platform-admin/workspaces/${workspaceId}/operating-month-overrides`, { method: "POST", body });
+}
+
+export function revokeMonthOverride(overrideId: string): Promise<void> {
+  return apiRequest<void>(`/platform-admin/operating-month-overrides/${overrideId}`, { method: "DELETE" });
 }

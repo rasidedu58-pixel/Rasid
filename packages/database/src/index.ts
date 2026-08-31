@@ -18,6 +18,7 @@ export * from "./repositories/platform-operations.repository";
 export * from "./repositories/platform-status.repository";
 export * from "./scheduling/session-generator";
 export * from "./scheduling/proration";
+export * from "./scheduling/month-prep-eligibility";
 export * from "./students/arabic-normalize";
 export * from "./session-mode/roster";
 export * from "./session-mode/missing-records";

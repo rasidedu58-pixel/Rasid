@@ -1,4 +1,5 @@
 import type {
+  ActivateMonthResult,
   CalendarSessionRow,
   CarryForwardStats,
   CreateMonthTransactionInput,
@@ -42,11 +43,22 @@ export interface SchedulingRepositoryPort {
   // Months
   listOperatingMonths(workspaceId: string): Promise<OperatingMonthRow[]>;
   findOperatingMonthById(id: string): Promise<OperatingMonthRow | undefined>;
+  findCurrentOperatingMonth(workspaceId: string): Promise<OperatingMonthRow | undefined>;
   findOperatingMonthByYearMonth(
     workspaceId: string,
     year: number,
     month: number,
   ): Promise<OperatingMonthRow | undefined>;
+  /** Active operating-month override state for the caller's own workspace (tenant read). */
+  getActiveMonthOverrides(workspaceId: string): Promise<{ prepBlocked: boolean; earlyPrepAllowed: boolean }>;
+  /** Atomically start a prepared DRAFT month (archive current CURRENT, flip DRAFT→CURRENT). */
+  runActivateMonthTransaction(input: {
+    workspaceId: string;
+    monthId: string;
+    actorUserId: string;
+    actorMembershipId: string | null;
+    correlationId?: string | null;
+  }): Promise<ActivateMonthResult>;
 
   // GroupMonth / schedule
   listGroupMonthsForOperatingMonth(operatingMonthId: string): Promise<GroupMonthRow[]>;

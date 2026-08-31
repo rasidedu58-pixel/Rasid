@@ -154,6 +154,35 @@ export const updateFollowUpRequestSchema = z
   });
 export type UpdateFollowUpRequest = z.infer<typeof updateFollowUpRequestSchema>;
 
+// --- Operating-Month Overrides (Platform Ops) -------------------------------
+export const MONTH_OVERRIDE_TYPES = ["EARLY_PREP_ALLOWED", "PREP_BLOCKED"] as const;
+export const monthOverrideTypeSchema = z.enum(MONTH_OVERRIDE_TYPES);
+export type MonthOverrideType = (typeof MONTH_OVERRIDE_TYPES)[number];
+
+export const monthOverrideSchema = z.object({
+  id: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  type: monthOverrideTypeSchema,
+  reason: z.string(),
+  createdByName: z.string().nullable(),
+  createdAt: z.string(),
+  expiresAt: z.string().nullable(),
+  revokedAt: z.string().nullable(),
+  revokedByName: z.string().nullable(),
+  active: z.boolean(),
+});
+export type MonthOverride = z.infer<typeof monthOverrideSchema>;
+
+export const listMonthOverridesResponseSchema = z.object({ items: z.array(monthOverrideSchema) });
+export type ListMonthOverridesResponse = z.infer<typeof listMonthOverridesResponseSchema>;
+
+export const createMonthOverrideRequestSchema = z.object({
+  type: monthOverrideTypeSchema,
+  reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+  expiresAt: z.string().datetime().optional(),
+});
+export type CreateMonthOverrideRequest = z.infer<typeof createMonthOverrideRequestSchema>;
+
 /** A platform staff member who can be assigned follow-ups (the allowlist). */
 export const platformStaffRefSchema = z.object({
   userId: z.string().uuid(),

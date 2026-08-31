@@ -162,12 +162,36 @@ export type CreateMonthConfirmRequest = z.infer<typeof createMonthConfirmRequest
 
 export const createMonthConfirmResponseSchema = z.object({
   monthId: z.string().uuid(),
-  status: z.literal("CURRENT"),
+  // DRAFT = prepared ahead (current month unchanged); CURRENT = created-and-started now.
+  status: z.enum(["DRAFT", "CURRENT"]),
   groupMonthCount: z.number().int(),
   sessionCount: z.number().int(),
   enrollmentCount: z.number().int(),
 });
 export type CreateMonthConfirmResponse = z.infer<typeof createMonthConfirmResponseSchema>;
+
+// --- Month prepare/activate eligibility + activation ------------------------
+export const monthPrepEligibilityResponseSchema = z.object({
+  current: operatingMonthSchema.nullable(),
+  // The DRAFT already prepared for the next month, if any.
+  nextDraft: operatingMonthSchema.nullable(),
+  // The immediate next calendar month that could be prepared.
+  target: z.object({ year: z.number().int(), month: z.number().int() }),
+  canPrepare: z.boolean(),
+  // Resulting status if prepared now: DRAFT (ahead) or CURRENT (catch-up/bootstrap).
+  wouldBeStatus: z.enum(["DRAFT", "CURRENT"]).nullable(),
+  blockedReason: z.enum(["ENTITLEMENT_REQUIRED", "PREP_BLOCKED", "NOT_NEXT_MONTH", "DUPLICATE", "OUTSIDE_WINDOW"]).nullable(),
+  windowOpensAt: z.string().nullable(),
+  earlyPrepAllowed: z.boolean(),
+  prepBlocked: z.boolean(),
+});
+export type MonthPrepEligibilityResponse = z.infer<typeof monthPrepEligibilityResponseSchema>;
+
+export const activateMonthResponseSchema = z.object({
+  monthId: z.string().uuid(),
+  status: z.literal("CURRENT"),
+});
+export type ActivateMonthResponse = z.infer<typeof activateMonthResponseSchema>;
 
 // ---------------------------------------------------------------------------
 // GroupMonth
