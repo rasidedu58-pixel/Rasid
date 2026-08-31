@@ -176,6 +176,7 @@ export class PlatformAdminService {
       activeEnrollmentsCount: snap.activeEnrollmentsCount,
       sessionsThisMonth: snap.sessionsThisMonth,
       lastActivityAt: snap.lastActivityAt ? snap.lastActivityAt.toISOString() : null,
+      debug: snap.debug ?? null,
     };
   }
 

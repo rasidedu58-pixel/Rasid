@@ -293,6 +293,7 @@ export interface WorkspaceOperationalSnapshot {
   activeEnrollmentsCount: number | null;
   sessionsThisMonth: { total: number; completed: number } | null;
   lastActivityAt: Date | null;
+  debug?: string | null;
 }
 
 export async function getWorkspaceOperationalSnapshot(workspaceId: string): Promise<WorkspaceOperationalSnapshot> {
@@ -363,9 +364,12 @@ export async function getWorkspaceOperationalSnapshot(workspaceId: string): Prom
         lastActivityAt: activityRow?.last ?? null,
       };
     });
-  } catch {
+  } catch (err) {
     // Reads not permitted yet (0055 grants not applied) or RLS blocked — degrade, never 500.
-    return unavailable;
+    // TEMP DIAGNOSTIC — surface the caught reason (remove after root-cause).
+    const code = (err as { code?: string })?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    return { ...unavailable, debug: `${code ? `[${code}] ` : ""}${message}`.slice(0, 300) };
   }
 }
 

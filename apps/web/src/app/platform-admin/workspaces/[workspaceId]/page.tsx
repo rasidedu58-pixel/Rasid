@@ -92,6 +92,11 @@ export default function CustomerDetailPage() {
       <SectionCard title="اللقطة التشغيلية">
         {opQuery.isLoading ? (
           <p className="text-sm text-text-tertiary">جارٍ التحميل…</p>
+        ) : opQuery.isError ? (
+          <p className="text-sm text-danger">
+            تعذّر تحميل اللقطة التشغيلية (خطأ في الطلب).{" "}
+            <code className="text-xs">{String((opQuery.error as { code?: string })?.code ?? "")} {String((opQuery.error as Error)?.message ?? opQuery.error)}</code>
+          </p>
         ) : op?.available ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
             <MiniStat label="الشهر الحالي" value={op.currentMonth ? monthLabel(op.currentMonth.year, op.currentMonth.month) : "—"} />
@@ -102,9 +107,14 @@ export default function CustomerDetailPage() {
             <MiniStat label="آخر نشاط" value={op.lastActivityAt ? formatDate(op.lastActivityAt) : "—"} />
           </div>
         ) : (
-          <p className="text-sm text-text-secondary">
+          <div className="text-sm text-text-secondary">
             بيانات التشغيل غير متاحة لدور القراءة بعد — تُفعَّل بتطبيق migration الصلاحيات <code className="text-xs">0055</code> (لم يُطبَّق على Production تلقائيًا).
-          </p>
+            {op?.debug ? (
+              <p className="mt-2 text-xs text-danger">
+                سبب تشخيصي: <code>{op.debug}</code>
+              </p>
+            ) : null}
+          </div>
         )}
       </SectionCard>
 
