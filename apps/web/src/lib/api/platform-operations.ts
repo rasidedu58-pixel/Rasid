@@ -61,3 +61,19 @@ export function createWorkspaceMonthOverride(workspaceId: string, body: CreateMo
 export function revokeMonthOverride(overrideId: string): Promise<void> {
   return apiRequest<void>(`/platform-admin/operating-month-overrides/${overrideId}`, { method: "DELETE" });
 }
+
+// --- Customer & Subscription Controls ---------------------------------------
+export function customerAccountAction(workspaceId: string, body: { action: "SUSPEND" | "REACTIVATE"; reason: string }): Promise<{ status: string }> {
+  return apiRequest<{ status: string }>(`/platform-admin/workspaces/${workspaceId}/account-action`, { method: "POST", body });
+}
+
+export function editCustomer(workspaceId: string, body: { name?: string; ownerPhone?: string | null; reason: string }): Promise<{ name: string; ownerPhone: string | null }> {
+  return apiRequest<{ name: string; ownerPhone: string | null }>(`/platform-admin/workspaces/${workspaceId}/customer`, { method: "PATCH", body });
+}
+
+export function subscriptionAdminAction(
+  workspaceId: string,
+  body: { action: "EXTEND_DAYS" | "SET_END_DATE" | "SUSPEND" | "REACTIVATE"; reason: string; days?: number; endDate?: string },
+): Promise<{ state: string; periodEnd: string | null }> {
+  return apiRequest<{ state: string; periodEnd: string | null }>(`/platform-admin/workspaces/${workspaceId}/subscription-action`, { method: "POST", body });
+}

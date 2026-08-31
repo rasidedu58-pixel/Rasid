@@ -16,7 +16,10 @@ import { alias } from "drizzle-orm/pg-core";
 import { getDb, getPlatformAdminDb } from "../connection";
 import { users } from "../schema/identity";
 import { workspaces } from "../schema/workspaces";
+import { subscriptions } from "../schema/subscriptions";
 import { platformAdmins, platformContactLogs, platformFollowUps, platformAuditEvents, platformOperatingMonthOverrides } from "../schema/platform-admin";
+import { updateSubscriptionStateTransaction, SUBSCRIPTION_VERSION_CONFLICT } from "./subscriptions.repository";
+import type { SubscriptionState } from "../billing/entitlement-matrix";
 
 // Local to avoid a database→contracts package dependency; the string values are
 // the single source of truth in migration 0056's CHECK constraint.
@@ -496,4 +499,139 @@ export async function getActiveMonthOverrideStatePlatform(workspaceId: string): 
     prepBlocked: rows.some((r) => r.type === "PREP_BLOCKED"),
     earlyPrepAllowed: rows.some((r) => r.type === "EARLY_PREP_ALLOWED"),
   };
+}
+
+// --- Customer Account Controls (suspend / reactivate) -----------------------
+export async function setWorkspaceAccountStatus(params: {
+  workspaceId: string;
+  action: "SUSPEND" | "REACTIVATE";
+  reason: string;
+  actorUserId: string;
+}): Promise<{ status: string } | null> {
+  const db = getPlatformAdminDb();
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, params.workspaceId)).limit(1);
+    if (!before) return null;
+    const nextStatus = params.action === "SUSPEND" ? "ARCHIVED" : "ACTIVE";
+    const [updated] = await tx
+      .update(workspaces)
+      .set({ status: nextStatus, archivedAt: params.action === "SUSPEND" ? new Date() : null })
+      .where(eq(workspaces.id, params.workspaceId))
+      .returning({ status: workspaces.status });
+    if (!updated) return null;
+    await writeAudit(tx, {
+      actorUserId: params.actorUserId,
+      action: params.action === "SUSPEND" ? "platform.customer.suspended" : "platform.customer.reactivated",
+      targetType: "workspace",
+      targetId: params.workspaceId,
+      targetWorkspaceId: params.workspaceId,
+      afterJson: { before: before.status, after: nextStatus, reason: params.reason },
+    });
+    return { status: updated.status };
+  });
+}
+
+// --- Customer Edit (operational fields only — never auth/email) -------------
+export async function editCustomerFields(params: {
+  workspaceId: string;
+  name?: string;
+  ownerPhone?: string | null;
+  reason: string;
+  actorUserId: string;
+}): Promise<{ name: string; ownerPhone: string | null } | null> {
+  const db = getPlatformAdminDb();
+  return db.transaction(async (tx) => {
+    const [ws] = await tx.select({ name: workspaces.name, ownerUserId: workspaces.ownerUserId }).from(workspaces).where(eq(workspaces.id, params.workspaceId)).limit(1);
+    if (!ws) return null;
+    const [owner] = await tx.select({ phone: users.phone, fullName: users.fullName }).from(users).where(eq(users.id, ws.ownerUserId)).limit(1);
+
+    const before = { name: ws.name, ownerPhone: owner?.phone ?? null };
+    if (params.name !== undefined) {
+      await tx.update(workspaces).set({ name: params.name }).where(eq(workspaces.id, params.workspaceId));
+    }
+    if (params.ownerPhone !== undefined) {
+      await tx.update(users).set({ phone: params.ownerPhone }).where(eq(users.id, ws.ownerUserId));
+    }
+    const after = { name: params.name ?? ws.name, ownerPhone: params.ownerPhone !== undefined ? params.ownerPhone : owner?.phone ?? null };
+    await writeAudit(tx, {
+      actorUserId: params.actorUserId,
+      action: "platform.customer.edited",
+      targetType: "workspace",
+      targetId: params.workspaceId,
+      targetWorkspaceId: params.workspaceId,
+      afterJson: { before, after, reason: params.reason },
+    });
+    return after;
+  });
+}
+
+// --- Subscription / Trial Controls ------------------------------------------
+// Reuses updateSubscriptionStateTransaction (no bespoke billing logic); wraps it
+// with a before/after platform_audit_event in ONE outer transaction (the reused
+// tx nests as a savepoint), so the state change and its audit are atomic.
+export type SubscriptionAdminAction = "EXTEND_DAYS" | "SET_END_DATE" | "SUSPEND" | "REACTIVATE";
+const REACTIVATE_DEFAULT_DAYS = 30;
+
+export async function applySubscriptionAdminAction(params: {
+  workspaceId: string;
+  action: SubscriptionAdminAction;
+  reason: string;
+  days?: number;
+  endDate?: Date;
+  actorUserId: string;
+}): Promise<{ state: string; periodEnd: string | null } | "NO_SUBSCRIPTION" | "VERSION_CONFLICT"> {
+  const db = getPlatformAdminDb();
+  return db.transaction(async (tx) => {
+    const [sub] = await tx.select().from(subscriptions).where(eq(subscriptions.workspaceId, params.workspaceId)).limit(1);
+    if (!sub) return "NO_SUBSCRIPTION" as const;
+
+    const now = new Date();
+    let nextState = sub.state as SubscriptionState;
+    let periodEnd: Date | undefined;
+    switch (params.action) {
+      case "EXTEND_DAYS": {
+        const base = sub.periodEnd && sub.periodEnd > now ? sub.periodEnd : now;
+        periodEnd = new Date(base.getTime() + (params.days ?? 0) * 24 * 60 * 60 * 1000);
+        break;
+      }
+      case "SET_END_DATE":
+        periodEnd = params.endDate;
+        break;
+      case "SUSPEND":
+        nextState = "EXPIRED";
+        break;
+      case "REACTIVATE":
+        nextState = "ACTIVE";
+        periodEnd = sub.periodEnd && sub.periodEnd > now ? sub.periodEnd : new Date(now.getTime() + REACTIVATE_DEFAULT_DAYS * 24 * 60 * 60 * 1000);
+        break;
+    }
+
+    const result = await updateSubscriptionStateTransaction(tx, {
+      id: sub.id,
+      workspaceId: params.workspaceId,
+      expectedVersion: sub.version,
+      nextState,
+      periodEnd,
+      sourceType: "ADMIN",
+      sourceId: null,
+      actorUserId: params.actorUserId,
+      actorMembershipId: null,
+    });
+    if (result === SUBSCRIPTION_VERSION_CONFLICT) return "VERSION_CONFLICT" as const;
+
+    await writeAudit(tx, {
+      actorUserId: params.actorUserId,
+      action: "platform.subscription.admin_action",
+      targetType: "subscription",
+      targetId: sub.id,
+      targetWorkspaceId: params.workspaceId,
+      afterJson: {
+        action: params.action,
+        reason: params.reason,
+        before: { state: sub.state, periodEnd: sub.periodEnd ? sub.periodEnd.toISOString() : null },
+        after: { state: result.state, periodEnd: result.periodEnd ? result.periodEnd.toISOString() : null },
+      },
+    });
+    return { state: result.state, periodEnd: result.periodEnd ? result.periodEnd.toISOString() : null };
+  });
 }

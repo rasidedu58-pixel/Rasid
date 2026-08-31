@@ -100,6 +100,28 @@ export class PlatformOperationsController {
     return this.service.listStaff();
   }
 
+  // --- Customer account + subscription controls -----------------------------
+  @Post("workspaces/:id/account-action")
+  @RequirePlatformPermission("platform.customers.manage")
+  @ApiOperation({ summary: "Suspend / reactivate a customer account" })
+  accountAction(@Param("id") id: string, @CurrentUser() user: VerifiedSupabaseToken, @Body() body: unknown): Promise<{ status: string }> {
+    return this.service.accountAction(id, user.id, body);
+  }
+
+  @Patch("workspaces/:id/customer")
+  @RequirePlatformPermission("platform.customers.manage")
+  @ApiOperation({ summary: "Edit a customer's operational fields (name / owner phone)" })
+  editCustomer(@Param("id") id: string, @CurrentUser() user: VerifiedSupabaseToken, @Body() body: unknown): Promise<{ name: string; ownerPhone: string | null }> {
+    return this.service.editCustomer(id, user.id, body);
+  }
+
+  @Post("workspaces/:id/subscription-action")
+  @RequirePlatformPermission("platform.subscriptions.manage")
+  @ApiOperation({ summary: "Extend trial / set end date / suspend / reactivate a subscription" })
+  subscriptionAction(@Param("id") id: string, @CurrentUser() user: VerifiedSupabaseToken, @Body() body: unknown): Promise<{ state: string; periodEnd: string | null }> {
+    return this.service.subscriptionAction(id, user.id, body);
+  }
+
   // --- Operating-Month Overrides --------------------------------------------
   @Get("workspaces/:id/operating-month-overrides")
   @RequirePlatformPermission("platform.operating_months.manage")

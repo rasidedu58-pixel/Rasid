@@ -17,6 +17,7 @@ import {
 import { CheckCircle2, AlertTriangle, MinusCircle } from "lucide-react";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { CustomerCommunication } from "../../../../components/platform-admin/customer-communication";
+import { CustomerControls } from "../../../../components/platform-admin/customer-controls";
 import { OperatingMonthOverrides } from "../../../../components/platform-admin/operating-month-overrides";
 import { PlatformStatusNotice } from "../../../../components/platform-admin/platform-status-widgets";
 import { qk } from "../../../../lib/query-keys";
@@ -132,6 +133,9 @@ export default function CustomerDetailPage() {
 
       {/* Operating-Month Overrides (platform.operating_months.manage) */}
       <OperatingMonthOverrides workspaceId={workspaceId} />
+
+      {/* Customer & Subscription controls (platform.customers.manage / subscriptions.manage) */}
+      <CustomerControls workspaceId={workspaceId} status={w.status} canViewSubscription={canViewSub} />
 
       {/* Account / workspace facts */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

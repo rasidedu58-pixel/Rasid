@@ -1,14 +1,17 @@
 import { Injectable } from "@nestjs/common";
 import {
+  applySubscriptionAdminAction,
   createContactLog,
   createFollowUp,
   createMonthOverride,
+  editCustomerFields,
   getFollowUpById,
   listContactLogs,
   listFollowUps,
   listMonthOverridesForWorkspace,
   listPlatformStaff,
   revokeMonthOverride,
+  setWorkspaceAccountStatus,
   updateFollowUp,
   type MonthOverrideRow,
   type PlatformContactLogRow,
@@ -18,6 +21,9 @@ import {
   createMonthOverrideRequestSchema,
   createPlatformContactLogRequestSchema,
   createFollowUpRequestSchema,
+  customerAccountActionRequestSchema,
+  editCustomerRequestSchema,
+  subscriptionAdminActionRequestSchema,
   updateFollowUpRequestSchema,
   type CreateFollowUpRequest,
   type FollowUp,
@@ -31,7 +37,7 @@ import {
   type UpdateFollowUpRequest,
 } from "@academic-precision/contracts";
 import type { z, ZodTypeAny } from "zod";
-import { ResourceNotFoundException, ValidationApiException } from "../../common/exceptions/api.exception";
+import { ResourceNotFoundException, ValidationApiException, VersionConflictException } from "../../common/exceptions/api.exception";
 
 /**
  * Platform Operations — Unit 1 write service (Customer Communication +
@@ -122,6 +128,37 @@ export class PlatformOperationsService {
   async revokeMonthOverride(overrideId: string, actorUserId: string): Promise<void> {
     const res = await revokeMonthOverride({ overrideId, actorUserId });
     if (!res) throw new ResourceNotFoundException();
+  }
+
+  // --- Customer account controls --------------------------------------------
+  async accountAction(workspaceId: string, actorUserId: string, body: unknown): Promise<{ status: string }> {
+    const parsed = this.parse(customerAccountActionRequestSchema, body);
+    const res = await setWorkspaceAccountStatus({ workspaceId, actorUserId, action: parsed.action, reason: parsed.reason });
+    if (!res) throw new ResourceNotFoundException();
+    return res;
+  }
+
+  async editCustomer(workspaceId: string, actorUserId: string, body: unknown): Promise<{ name: string; ownerPhone: string | null }> {
+    const parsed = this.parse(editCustomerRequestSchema, body);
+    const res = await editCustomerFields({ workspaceId, actorUserId, name: parsed.name, ownerPhone: parsed.ownerPhone, reason: parsed.reason });
+    if (!res) throw new ResourceNotFoundException();
+    return res;
+  }
+
+  // --- Subscription / trial controls ----------------------------------------
+  async subscriptionAction(workspaceId: string, actorUserId: string, body: unknown): Promise<{ state: string; periodEnd: string | null }> {
+    const parsed = this.parse(subscriptionAdminActionRequestSchema, body);
+    const res = await applySubscriptionAdminAction({
+      workspaceId,
+      actorUserId,
+      action: parsed.action,
+      reason: parsed.reason,
+      days: parsed.days,
+      endDate: parsed.endDate ? new Date(parsed.endDate) : undefined,
+    });
+    if (res === "NO_SUBSCRIPTION") throw new ResourceNotFoundException("لا يوجد اشتراك لهذه المساحة.");
+    if (res === "VERSION_CONFLICT") throw new VersionConflictException();
+    return res;
   }
 
   private parse<S extends ZodTypeAny>(schema: S, body: unknown): z.infer<S> {

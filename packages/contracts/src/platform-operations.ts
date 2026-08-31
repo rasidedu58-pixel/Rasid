@@ -34,8 +34,11 @@ export const PLATFORM_PERMISSIONS = [
   // --- Platform status & issues (Issues Center) ---
   "platform.health.view", // overall status + per-service status + active issues
   "platform.health.details", // operational detail: worker job metrics + recent problems
-  // --- Reserved: Operating-Month Overrides (Unit 2) — held now to enforce the boundary ---
+  // --- Operating-Month Overrides ---
   "platform.operating_months.manage",
+  // --- Customer & Subscription controls ---
+  "platform.customers.manage", // suspend / reactivate a customer account; edit operational fields
+  "platform.subscriptions.manage", // extend trial, set end date, suspend / reactivate a subscription
   // --- Owner-only: platform staff / role management (reserved) ---
   "platform.staff.manage",
 ] as const;
@@ -57,7 +60,9 @@ export const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[
   PLATFORM_OWNER: [...PLATFORM_PERMISSIONS],
   OPERATIONS_ADMIN: [
     "platform.customers.view",
+    "platform.customers.manage",
     "platform.subscriptions.view",
+    "platform.subscriptions.manage",
     "platform.support.view",
     "platform.support.manage",
     "platform.health.view",
@@ -182,6 +187,35 @@ export const createMonthOverrideRequestSchema = z.object({
   expiresAt: z.string().datetime().optional(),
 });
 export type CreateMonthOverrideRequest = z.infer<typeof createMonthOverrideRequestSchema>;
+
+// --- Customer Account Controls ----------------------------------------------
+export const customerAccountActionRequestSchema = z.object({
+  action: z.enum(["SUSPEND", "REACTIVATE"]),
+  reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+});
+export type CustomerAccountActionRequest = z.infer<typeof customerAccountActionRequestSchema>;
+
+/** Edit the allowed operational fields of a customer (never auth/email identity). */
+export const editCustomerRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200).optional(),
+    ownerPhone: z.string().trim().max(40).nullable().optional(),
+    reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+  })
+  .refine((v) => v.name !== undefined || v.ownerPhone !== undefined, { message: "لا يوجد تغيير" });
+export type EditCustomerRequest = z.infer<typeof editCustomerRequestSchema>;
+
+// --- Subscription / Trial Controls ------------------------------------------
+export const subscriptionAdminActionRequestSchema = z
+  .object({
+    action: z.enum(["EXTEND_DAYS", "SET_END_DATE", "SUSPEND", "REACTIVATE"]),
+    reason: z.string().trim().min(1, "السبب مطلوب").max(2000),
+    days: z.number().int().min(1).max(365).optional(),
+    endDate: z.string().datetime().optional(),
+  })
+  .refine((v) => v.action !== "EXTEND_DAYS" || typeof v.days === "number", { message: "عدد الأيام مطلوب", path: ["days"] })
+  .refine((v) => v.action !== "SET_END_DATE" || typeof v.endDate === "string", { message: "تاريخ الانتهاء مطلوب", path: ["endDate"] });
+export type SubscriptionAdminActionRequest = z.infer<typeof subscriptionAdminActionRequestSchema>;
 
 /** A platform staff member who can be assigned follow-ups (the allowlist). */
 export const platformStaffRefSchema = z.object({

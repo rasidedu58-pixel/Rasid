@@ -400,6 +400,13 @@
       "when": 1788600000000,
       "tag": "0058_operating_month_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788700000000,
+      "tag": "0059_platform_admin_customer_writes",
+      "breakpoints": true
     }
   ]
 }
