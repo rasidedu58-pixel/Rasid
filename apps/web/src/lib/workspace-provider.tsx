@@ -56,6 +56,8 @@ interface WorkspaceContextValue {
   entitlements: ReadonlySet<string>;
   subscriptionState: string | null;
   isOwner: boolean;
+  /** Teacher profile completeness (phone + governorate + subject) from `/me`. Drives the mandatory Step-2 onboarding redirect for owners. */
+  profileCompleted: boolean;
   /** True if the signed-in user is Rasid platform staff (from `/me`). Gates the "إدارة راصد" entry; NOT an authorization boundary. */
   isPlatformStaff: boolean;
   /** The signed-in user's platform-ops role (null if not staff). Gates which platform WRITE actions the UI offers; server still enforces. */
@@ -147,6 +149,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         entitlements: new Set(),
         subscriptionState: null,
         isOwner: false,
+        profileCompleted: false,
         isPlatformStaff: false,
         platformRole: null,
         hasPermission: () => false,
@@ -170,6 +173,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         entitlements: new Set(),
         subscriptionState: null,
         isOwner: false,
+        profileCompleted: meQuery.data?.profile?.profileCompleted ?? false,
         isPlatformStaff: meQuery.data?.platform?.isStaff ?? false,
         platformRole: meQuery.data?.platform?.role ?? null,
         hasPermission: () => false,
@@ -194,6 +198,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       entitlements,
       subscriptionState,
       isOwner: roleLabel === "OWNER",
+      profileCompleted: meQuery.data?.profile?.profileCompleted ?? false,
       isPlatformStaff: meQuery.data?.platform?.isStaff ?? false,
       platformRole: meQuery.data?.platform?.role ?? null,
       hasPermission: (key) => permissions.has(key),

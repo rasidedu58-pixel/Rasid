@@ -299,6 +299,31 @@ export async function completeOnboarding(
  * already exists (e.g. an existing teacher joining staff). Identity fields come
  * from the verified JWT, never from client input.
  */
+/**
+ * Updates the caller's OWN profile fields (teacher onboarding Step-2 + settings
+ * edit). Runs under the `users_self_update` RLS policy (migration 0061) — the
+ * adapter wraps this in `withRuntimeContext({ userId })`, so RLS admits only the
+ * caller's own row. Only the whitelisted profile columns are ever written here
+ * (never id/status/email/created_at); values are already validated by the API
+ * against the governorate/subject enums + normalized Egyptian phone. A `null`
+ * for subjectOther explicitly clears it (when subject != OTHER). `undefined`
+ * fields are left unchanged. Returns the updated row.
+ */
+export async function updateUserProfile(
+  db: Db,
+  userId: string,
+  patch: { fullName?: string; phone?: string; governorate?: string; subject?: string; subjectOther?: string | null },
+): Promise<UserRow | undefined> {
+  const set: Partial<typeof users.$inferInsert> = { updatedAt: new Date() };
+  if (patch.fullName !== undefined) set.fullName = patch.fullName;
+  if (patch.phone !== undefined) set.phone = patch.phone;
+  if (patch.governorate !== undefined) set.governorate = patch.governorate;
+  if (patch.subject !== undefined) set.subject = patch.subject;
+  if (patch.subjectOther !== undefined) set.subjectOther = patch.subjectOther;
+  const [updated] = await db.update(users).set(set).where(eq(users.id, userId)).returning();
+  return updated;
+}
+
 export async function ensureApplicationUser(input: { authUserId: string; email: string | null; fullName: string }): Promise<void> {
   await withRuntimeContext({ userId: input.authUserId }, (db) =>
     db

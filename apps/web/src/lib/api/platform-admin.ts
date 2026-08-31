@@ -33,7 +33,9 @@ export function fetchPlatformAdminUser(userId: string): Promise<PlatformAdminUse
   return apiRequest<PlatformAdminUserDetail>(`/platform-admin/users/${userId}`);
 }
 
-export function fetchPlatformAdminWorkspaces(params: { search?: string; state?: string; cursor?: string; limit?: number } = {}): Promise<ListPlatformAdminWorkspacesResponse> {
+export function fetchPlatformAdminWorkspaces(
+  params: { search?: string; state?: string; governorate?: string; subject?: string; cursor?: string; limit?: number } = {},
+): Promise<ListPlatformAdminWorkspacesResponse> {
   return apiRequest<ListPlatformAdminWorkspacesResponse>("/platform-admin/workspaces", { query: params });
 }
 

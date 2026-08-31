@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MailCheck, CheckCircle2 } from "lucide-react";
 import { Button } from "@academic-precision/ui";
+import { shouldForceTeacherOnboarding } from "@academic-precision/contracts";
 import { getSupabaseClient } from "../../lib/supabase-client";
 import { useWorkspace } from "../../lib/workspace-provider";
 import { AuthCard } from "../../components/auth/auth-card";
@@ -71,9 +72,19 @@ function VerifyEmailContent() {
       if (workspace.status === "ready" || workspace.status === "no-workspace") router.replace(returnTo);
       return;
     }
-    if (workspace.status === "no-workspace") router.replace("/onboarding");
-    else if (workspace.status === "ready") router.replace("/dashboard");
-  }, [verifyState, workspace.status, router, returnTo]);
+    // New teacher: once provisioned (status ready), route to Step-2 onboarding
+    // until the profile is complete, then into the app. Platform staff are never
+    // sent to teacher onboarding.
+    if (workspace.status === "ready") {
+      const toOnboarding = shouldForceTeacherOnboarding({
+        workspaceReady: true,
+        isOwner: workspace.isOwner,
+        isPlatformStaff: workspace.isPlatformStaff,
+        profileCompleted: workspace.profileCompleted,
+      });
+      router.replace(toOnboarding ? "/onboarding" : "/dashboard");
+    }
+  }, [verifyState, workspace.status, workspace.isOwner, workspace.isPlatformStaff, workspace.profileCompleted, router, returnTo]);
 
   useEffect(() => {
     if (cooldown <= 0) return;

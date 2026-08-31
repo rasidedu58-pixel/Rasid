@@ -1,59 +1,72 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { onboardingCompleteRequestSchema, type DueDatePolicy } from "@academic-precision/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  EGYPT_GOVERNORATES,
+  TEACHING_SUBJECTS,
+  completeTeacherOnboardingRequestSchema,
+} from "@academic-precision/contracts";
 import { Button, Field, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@academic-precision/ui";
 import { ApiRequestError, isSessionExpired, isValidationError } from "../../lib/api/client";
-import { completeOnboarding } from "../../lib/api/identity";
+import { fetchMe, updateTeacherProfile } from "../../lib/api/identity";
+import { qk } from "../../lib/query-keys";
 import { useSession } from "../../lib/session-provider";
 import { AuthCard } from "../../components/auth/auth-card";
 
-type OnboardingState = "idle" | "saving";
+type State = "idle" | "saving";
 
 /**
- * Owner onboarding (PRD §29.3). Short form only: display name, optional
- * subjects, due-date policy — no group/month is required here. Both
- * "Complete" and "Skip" land on the real Dashboard now (Phase 11) — the
- * backend already auto-provisions a default workspace on first
- * authenticated request (`IdentityService.ensureProvisioned`), so skipping
- * this refinement step never blocks using the product.
+ * Teacher Onboarding — Step 2 ("عرّفنا بك في دقيقة"). Three fields only: phone,
+ * governorate, subject (name + email were captured at signup). Mandatory: the
+ * AuthGuard routes an owner here until the profile is complete. Phone is
+ * prefilled from `/me` (e.g. a customer created via secure invite already has
+ * name + phone) so the user never re-enters known data.
  */
 export default function OnboardingPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { status: sessionStatus } = useSession();
-  const [state, setState] = useState<OnboardingState>("idle");
+  const me = useQuery({ queryKey: qk.me(), queryFn: fetchMe, enabled: sessionStatus === "authenticated" });
 
-  const [displayName, setDisplayName] = useState("");
-  const [subjects, setSubjects] = useState("");
-  const [dueDatePolicy, setDueDatePolicy] = useState<DueDatePolicy>("PER_GROUP");
-  const [unifiedDueDay, setUnifiedDueDay] = useState<string>("");
+  const [state, setState] = useState<State>("idle");
+  const [phone, setPhone] = useState("");
+  const [governorate, setGovernorate] = useState("");
+  const [subject, setSubject] = useState("");
+  const [subjectOther, setSubjectOther] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [prefilled, setPrefilled] = useState(false);
 
   useEffect(() => {
     if (sessionStatus === "unauthenticated") router.replace("/login");
   }, [sessionStatus, router]);
 
-  function buildPayload() {
-    return {
-      displayName: displayName.trim(),
-      subjects: subjects
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      dueDatePolicy,
-      unifiedDueDay: dueDatePolicy === "UNIFIED" && unifiedDueDay !== "" ? Number(unifiedDueDay) : undefined,
-    };
-  }
+  // Prefill any known profile fields once (customer-invite name/phone, or a
+  // partially-completed profile), so the user only fills what's missing.
+  useEffect(() => {
+    if (prefilled || !me.data) return;
+    const p = me.data.profile;
+    if (p.phone) setPhone(p.phone);
+    if (p.governorate) setGovernorate(p.governorate);
+    if (p.subject) setSubject(p.subject);
+    if (p.subjectOther) setSubjectOther(p.subjectOther);
+    // Already complete (e.g. arrived here by mistake) → go straight to the app.
+    if (p.profileCompleted) router.replace("/dashboard");
+    setPrefilled(true);
+  }, [me.data, prefilled, router]);
+
+  const governorates = useMemo(() => EGYPT_GOVERNORATES, []);
+  const subjects = useMemo(() => TEACHING_SUBJECTS, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
     setFieldErrors({});
 
-    const payload = buildPayload();
-    const parsed = onboardingCompleteRequestSchema.safeParse(payload);
+    const payload = { phone: phone.trim(), governorate, subject, subjectOther: subject === "OTHER" ? subjectOther.trim() : undefined };
+    const parsed = completeTeacherOnboardingRequestSchema.safeParse(payload);
     if (!parsed.success) {
       const errors: Record<string, string[]> = {};
       for (const issue of parsed.error.issues) {
@@ -66,8 +79,9 @@ export default function OnboardingPage() {
 
     setState("saving");
     try {
-      await completeOnboarding(parsed.data);
-      router.push("/dashboard");
+      await updateTeacherProfile(parsed.data);
+      await queryClient.refetchQueries({ queryKey: qk.me() });
+      router.replace("/dashboard");
     } catch (error) {
       if (error instanceof ApiRequestError) {
         if (isSessionExpired(error)) {
@@ -75,50 +89,67 @@ export default function OnboardingPage() {
           return;
         }
         if (isValidationError(error)) {
+          setFieldErrors((error as ApiRequestError).fieldErrors ?? {});
           setErrorMessage("بيانات غير صالحة. راجع الحقول أعلاه.");
           setState("idle");
           return;
         }
       }
-      setErrorMessage("تعذّر حفظ الإعداد الأولي. حاول مرة أخرى.");
+      // Keep entered values on any transient failure — retry loses nothing.
+      setErrorMessage("تعذّر الحفظ. تأكد من اتصالك وحاول مرة أخرى.");
       setState("idle");
     }
   }
 
-  if (sessionStatus === "loading" || sessionStatus === "unauthenticated") {
+  if (sessionStatus === "loading" || sessionStatus === "unauthenticated" || me.isLoading) {
     return (
-      <AuthCard title="جارٍ التحميل...">
+      <AuthCard title="لحظة من فضلك…">
         <div />
       </AuthCard>
     );
   }
 
   return (
-    <AuthCard title="الإعداد الأولي" description="خطوة سريعة لتجهيز مساحة عملك.">
+    <AuthCard title="عرّفنا بك في دقيقة" description="هذه المعلومات تساعد راصد على تهيئة تجربتك بشكل أفضل.">
+      <p className="mb-4 text-center text-xs font-medium text-text-tertiary">الخطوة 2 من 2</p>
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-        <Field label="اسم العرض" htmlFor="displayName" error={fieldErrors.displayName?.[0]}>
-          <Input id="displayName" type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required invalid={!!fieldErrors.displayName} />
+        <Field label="رقم الهاتف" htmlFor="phone" required error={fieldErrors.phone?.[0]}>
+          <Input id="phone" type="tel" dir="ltr" inputMode="tel" placeholder="010xxxxxxxx" value={phone} onChange={(e) => setPhone(e.target.value)} invalid={!!fieldErrors.phone} />
         </Field>
 
-        <Field label="المواد الدراسية" htmlFor="subjects" hint="اختياري، مفصولة بفاصلة.">
-          <Input id="subjects" type="text" value={subjects} onChange={(e) => setSubjects(e.target.value)} placeholder="رياضيات، فيزياء" />
-        </Field>
-
-        <Field label="سياسة تاريخ الاستحقاق" htmlFor="dueDatePolicy">
-          <Select value={dueDatePolicy} onValueChange={(v) => setDueDatePolicy(v as DueDatePolicy)}>
-            <SelectTrigger id="dueDatePolicy">
-              <SelectValue />
+        <Field label="المحافظة" htmlFor="governorate" required error={fieldErrors.governorate?.[0]}>
+          <Select value={governorate} onValueChange={setGovernorate}>
+            <SelectTrigger id="governorate">
+              <SelectValue placeholder="اختر المحافظة" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="PER_GROUP">حسب كل مجموعة</SelectItem>
-              <SelectItem value="UNIFIED">موحّد لكل المجموعات</SelectItem>
+              {governorates.map((g) => (
+                <SelectItem key={g.code} value={g.code}>
+                  {g.ar}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>
 
-        {dueDatePolicy === "UNIFIED" ? (
-          <Field label="يوم الاستحقاق الموحّد" htmlFor="unifiedDueDay" hint="من 1 إلى 28." error={fieldErrors.unifiedDueDay?.[0]}>
-            <Input id="unifiedDueDay" type="number" min={1} max={28} value={unifiedDueDay} onChange={(e) => setUnifiedDueDay(e.target.value)} invalid={!!fieldErrors.unifiedDueDay} />
+        <Field label="المادة التي تدرّسها" htmlFor="subject" required error={fieldErrors.subject?.[0]}>
+          <Select value={subject} onValueChange={setSubject}>
+            <SelectTrigger id="subject">
+              <SelectValue placeholder="اختر المادة" />
+            </SelectTrigger>
+            <SelectContent>
+              {subjects.map((s) => (
+                <SelectItem key={s.code} value={s.code}>
+                  {s.ar}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+
+        {subject === "OTHER" ? (
+          <Field label="اسم المادة" htmlFor="subjectOther" required error={fieldErrors.subjectOther?.[0]}>
+            <Input id="subjectOther" type="text" value={subjectOther} onChange={(e) => setSubjectOther(e.target.value)} invalid={!!fieldErrors.subjectOther} />
           </Field>
         ) : null}
 
@@ -128,14 +159,9 @@ export default function OnboardingPage() {
           </p>
         ) : null}
 
-        <div className="mt-1 flex gap-2">
-          <Button type="submit" loading={state === "saving"} className="flex-1">
-            إكمال الإعداد
-          </Button>
-          <Button type="button" variant="outline" onClick={() => router.push("/dashboard")} disabled={state === "saving"} className="flex-1">
-            تخطي الآن
-          </Button>
-        </div>
+        <Button type="submit" loading={state === "saving"} size="lg" className="mt-1 w-full">
+          ابدأ استخدام راصد
+        </Button>
       </form>
     </AuthCard>
   );

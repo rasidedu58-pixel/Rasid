@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingRegion, ErrorState } from "@academic-precision/ui";
+import { shouldForceTeacherOnboarding } from "@academic-precision/contracts";
 import { useSession } from "../../lib/session-provider";
 import { useWorkspace } from "../../lib/workspace-provider";
 
@@ -23,9 +24,24 @@ export function AuthGuard({ children }: { children: ReactNode }) {
     if (sessionStatus === "unauthenticated") router.replace("/login");
   }, [sessionStatus, router]);
 
+  // Mandatory Step-2 onboarding: an OWNER (teacher) whose workspace is ready
+  // but whose profile is incomplete is routed to /onboarding. Deliberately NOT
+  // triggered by `no-workspace` — a platform-staff user without a tenant
+  // workspace must never be forced into teacher onboarding (item 15). Refresh
+  // resumes from the same place because it re-derives from `/me`.
   useEffect(() => {
-    if (sessionStatus === "authenticated" && workspace.status === "no-workspace") router.replace("/onboarding");
-  }, [sessionStatus, workspace.status, router]);
+    if (
+      sessionStatus === "authenticated" &&
+      shouldForceTeacherOnboarding({
+        workspaceReady: workspace.status === "ready",
+        isOwner: workspace.isOwner,
+        isPlatformStaff: workspace.isPlatformStaff,
+        profileCompleted: workspace.profileCompleted,
+      })
+    ) {
+      router.replace("/onboarding");
+    }
+  }, [sessionStatus, workspace.status, workspace.isOwner, workspace.isPlatformStaff, workspace.profileCompleted, router]);
 
   // Phase 15: this guard now renders INSIDE the AppShell content region
   // (see (app)/layout.tsx) — loading/error states are content-area sized,

@@ -414,6 +414,13 @@
       "when": 1788800000000,
       "tag": "0060_platform_staff_customers_features",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1788900000000,
+      "tag": "0061_teacher_profile_fields",
+      "breakpoints": true
     }
   ]
 }

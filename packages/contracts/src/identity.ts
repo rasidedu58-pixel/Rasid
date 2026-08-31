@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { platformRoleSchema } from "./platform-operations";
+import { teacherProfileSchema } from "./teacher-profile";
 
 /**
  * Identity/Me/Onboarding contract types — API Contract v1.0 §9.1, §11.1,
@@ -26,6 +27,9 @@ export const meResponseSchema = z.object({
   // `role` is null for non-staff; for staff it drives which platform-ops write
   // actions the UI offers (the server still enforces per-permission).
   platform: z.object({ isStaff: z.boolean(), role: platformRoleSchema.nullable() }),
+  // Teacher profile foundation — personal data + a deterministic completeness
+  // flag the app uses to route an owner into Step-2 onboarding when incomplete.
+  profile: teacherProfileSchema,
 });
 
 export type MeResponse = z.infer<typeof meResponseSchema>;

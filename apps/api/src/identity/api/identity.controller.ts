@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type {
   MeResponse,
   OnboardingCompleteResponse,
+  TeacherProfile,
   WorkspaceContextResponse,
 } from "@academic-precision/contracts";
 import { IdentityService } from "../application/identity.service";
@@ -39,6 +40,12 @@ export class IdentityController {
     @Param("id") workspaceId: string,
   ): Promise<WorkspaceContextResponse> {
     return this.identityService.getWorkspaceContext(user, workspaceId);
+  }
+
+  @Patch("me/profile")
+  @ApiOperation({ summary: "Update the caller's teacher profile (name / phone / governorate / subject)" })
+  updateProfile(@CurrentUser() user: VerifiedSupabaseToken, @Body() body: unknown): Promise<TeacherProfile> {
+    return this.identityService.updateProfile(user, body);
   }
 
   @Post("onboarding/complete")

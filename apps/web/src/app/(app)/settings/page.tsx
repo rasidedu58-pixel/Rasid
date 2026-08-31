@@ -7,6 +7,7 @@ import { PageHeader } from "../../../components/shell/page-header";
 import { useSession } from "../../../lib/session-provider";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { BillingTab } from "./billing-tab";
+import { PersonalInfoCard } from "./personal-info-card";
 
 export default function SettingsPage() {
   return (
@@ -48,6 +49,9 @@ function SettingsContent() {
               <Row label="الدور" value={roleLabel === "OWNER" ? "مالك مساحة العمل" : roleLabel ?? "—"} />
             </div>
           </SectionCard>
+          <div className="mt-4">
+            <PersonalInfoCard />
+          </div>
         </TabsContent>
 
         <TabsContent value="workspace">

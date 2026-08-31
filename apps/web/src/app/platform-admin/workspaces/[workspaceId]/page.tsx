@@ -20,6 +20,7 @@ import { CustomerCommunication } from "../../../../components/platform-admin/cus
 import { CustomerControls } from "../../../../components/platform-admin/customer-controls";
 import { OperatingMonthOverrides } from "../../../../components/platform-admin/operating-month-overrides";
 import { WorkspaceFeatures } from "../../../../components/platform-admin/workspace-features";
+import { GOVERNORATE_LABEL, SUBJECT_LABEL } from "@academic-precision/contracts";
 import { PlatformStatusNotice } from "../../../../components/platform-admin/platform-status-widgets";
 import { qk } from "../../../../lib/query-keys";
 import { fetchPlatformAdminWorkspace, fetchPlatformWorkspaceOperational, fetchPlatformWorkspaceSubscription } from "../../../../lib/api/platform-admin";
@@ -148,6 +149,20 @@ export default function CustomerDetailPage() {
           <Link href={`/platform-admin/users/${w.ownerUserId}`} className="mt-1 block truncate text-sm font-medium text-brand hover:underline">
             {w.ownerName ?? "—"}
           </Link>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-text-secondary">الهاتف</p>
+          <p className="mt-1 text-sm font-medium text-text-primary" dir="ltr">{w.ownerPhone ?? "—"}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-text-secondary">المحافظة</p>
+          <p className="mt-1 text-sm font-medium text-text-primary">{w.ownerGovernorate ? GOVERNORATE_LABEL[w.ownerGovernorate] ?? w.ownerGovernorate : "—"}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-text-secondary">المادة</p>
+          <p className="mt-1 text-sm font-medium text-text-primary">
+            {w.ownerSubject ? (w.ownerSubject === "OTHER" ? w.ownerSubjectOther ?? "أخرى" : SUBJECT_LABEL[w.ownerSubject] ?? w.ownerSubject) : "—"}
+          </p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-text-secondary">المنطقة الزمنية</p>

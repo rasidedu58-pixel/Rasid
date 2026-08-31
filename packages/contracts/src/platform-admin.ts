@@ -86,6 +86,9 @@ export const platformAdminWorkspaceDetailSchema = z.object({
   ownerUserId: z.string().uuid(),
   ownerName: z.string().nullable(),
   ownerPhone: z.string().nullable(),
+  ownerGovernorate: z.string().nullable(),
+  ownerSubject: z.string().nullable(),
+  ownerSubjectOther: z.string().nullable(),
   members: z.array(platformAdminMemberSchema),
   // NOTE: subscription is deliberately NOT part of the customers.view workspace
   // detail — it is sensitive billing data fetched separately from

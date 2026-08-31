@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Building2, Search } from "lucide-react";
+import { EGYPT_GOVERNORATES, TEACHING_SUBJECTS } from "@academic-precision/contracts";
 import {
   Badge,
   CursorPagination,
@@ -44,12 +45,21 @@ export default function PlatformAdminWorkspacesPage() {
   const canViewSubs = hasPlatformPermission(platformRole, "platform.subscriptions.view");
   const [search, setSearch] = useState("");
   const [state, setState] = useState<string | null>(null);
+  const [governorate, setGovernorate] = useState<string>("");
+  const [subject, setSubject] = useState<string>("");
   const debouncedSearch = useDebounce(search, 300);
 
   const query = useInfiniteQuery({
-    queryKey: ["platform-admin", "workspaces", debouncedSearch, state],
+    queryKey: ["platform-admin", "workspaces", debouncedSearch, state, governorate, subject],
     queryFn: ({ pageParam }: { pageParam?: string }) =>
-      fetchPlatformAdminWorkspaces({ search: debouncedSearch || undefined, state: state ?? undefined, cursor: pageParam, limit: 30 }),
+      fetchPlatformAdminWorkspaces({
+        search: debouncedSearch || undefined,
+        state: state ?? undefined,
+        governorate: governorate || undefined,
+        subject: subject || undefined,
+        cursor: pageParam,
+        limit: 30,
+      }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
     retry: (failureCount, error) => !isForbidden(error) && failureCount < 2,
@@ -67,9 +77,37 @@ export default function PlatformAdminWorkspacesPage() {
       <CustomerCreate />
 
       <div className="mb-4 flex flex-col gap-3">
-        <div className="relative max-w-sm">
-          <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث باسم مساحة العمل..." className="ps-9" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative max-w-sm flex-1">
+            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث بالاسم أو اسم المالك أو الهاتف..." className="ps-9" />
+          </div>
+          <select
+            value={governorate}
+            onChange={(e) => setGovernorate(e.target.value)}
+            className="h-9 rounded-md border border-border bg-surface px-2 text-sm text-text-primary"
+            aria-label="تصفية بالمحافظة"
+          >
+            <option value="">كل المحافظات</option>
+            {EGYPT_GOVERNORATES.map((g) => (
+              <option key={g.code} value={g.code}>
+                {g.ar}
+              </option>
+            ))}
+          </select>
+          <select
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="h-9 rounded-md border border-border bg-surface px-2 text-sm text-text-primary"
+            aria-label="تصفية بالمادة"
+          >
+            <option value="">كل المواد</option>
+            {TEACHING_SUBJECTS.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.ar}
+              </option>
+            ))}
+          </select>
         </div>
         {canViewSubs ? (
         <div className="flex flex-wrap gap-1.5">

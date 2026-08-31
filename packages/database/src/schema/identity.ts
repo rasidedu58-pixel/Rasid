@@ -19,6 +19,12 @@ export const users = pgTable(
     /** Display-only mirror of the identity provider's email; not an auth source. */
     emailDisplay: text("email_display"),
     phone: text("phone"),
+    // Teacher profile foundation (migration 0061). Stable codes only, validated
+    // in the contracts (governorate / subject enums); `subject_other` holds the
+    // free text when subject = 'OTHER'. Nullable — filled at Step-2 onboarding.
+    governorate: text("governorate"),
+    subject: text("subject"),
+    subjectOther: text("subject_other"),
     status: text("status").notNull().default("ACTIVE"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),

@@ -1,6 +1,7 @@
 export * from "./errors";
 export * from "./pagination";
 export * from "./identity";
+export * from "./teacher-profile";
 export * from "./permission-catalog";
 export * from "./team";
 export * from "./invitations";

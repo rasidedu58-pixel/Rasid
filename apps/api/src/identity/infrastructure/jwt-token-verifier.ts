@@ -7,6 +7,16 @@ import type { ServerEnv } from "@academic-precision/config/server";
 export interface VerifiedSupabaseToken {
   id: string;
   email: string | null;
+  /**
+   * The name the user entered at signup, carried in Supabase Auth
+   * `user_metadata.full_name` (set by `signUp({ options: { data: { full_name }}})`).
+   * This is the FIRST trusted source of the user's name — provisioning writes it
+   * to `users.full_name` so the signup name is never lost. Null when absent
+   * (e.g. an invite-based signup that set no metadata name). Optional at the
+   * type level so existing test doubles need not set it; the real verifier
+   * always populates it (string or null).
+   */
+  fullName?: string | null;
 }
 
 export interface TokenVerifier {
@@ -68,7 +78,11 @@ export class JwtTokenVerifier implements TokenVerifier {
       }
 
       const email = typeof payload.email === "string" ? payload.email : null;
-      return { id: sub, email };
+      // Signup name lives in Supabase `user_metadata` (full_name, or name).
+      const meta = payload.user_metadata && typeof payload.user_metadata === "object" ? (payload.user_metadata as Record<string, unknown>) : {};
+      const rawName = typeof meta.full_name === "string" ? meta.full_name : typeof meta.name === "string" ? meta.name : null;
+      const fullName = rawName && rawName.trim().length > 0 ? rawName.trim() : null;
+      return { id: sub, email, fullName };
     } catch (error) {
       if (error instanceof joseErrors.JWTExpired) {
         throw new TokenExpiredVerificationError("Token expired.");

@@ -110,10 +110,12 @@ export class PlatformAdminController {
     @CurrentPlatformRole() role: PlatformRole | null,
     @Query("search") search?: string,
     @Query("state") state?: string,
+    @Query("governorate") governorate?: string,
+    @Query("subject") subject?: string,
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ): Promise<ListPlatformAdminWorkspacesResponse> {
-    return this.service.listWorkspaces({ search, state, cursor, limit: limit ? Number(limit) : undefined }, role);
+    return this.service.listWorkspaces({ search, state, governorate, subject, cursor, limit: limit ? Number(limit) : undefined }, role);
   }
 
   @Get("workspaces/:id")

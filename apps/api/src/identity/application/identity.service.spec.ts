@@ -33,6 +33,43 @@ describe("IdentityService", () => {
     });
   });
 
+  describe("teacher profile foundation", () => {
+    it("signup name survives provisioning: uses the JWT metadata name for users.fullName", async () => {
+      const me = await service.getMe({ id: "u-named", email: "ahmed@example.com", fullName: "أحمد المصري" });
+      expect(me.user.fullName).toBe("أحمد المصري");
+    });
+
+    it("falls back to the email local-part only when the token carries no name", async () => {
+      const me = await service.getMe({ id: "u-noname", email: "sara@example.com", fullName: null });
+      expect(me.user.fullName).toBe("sara");
+    });
+
+    it("a fresh teacher's profile is incomplete; becomes complete after updateProfile", async () => {
+      const before = await service.getMe(AUTH_USER);
+      expect(before.profile.profileCompleted).toBe(false);
+
+      const profile = await service.updateProfile(AUTH_USER, { phone: "01012345678", governorate: "CAIRO", subject: "MATH" });
+      expect(profile).toEqual({ phone: "+201012345678", governorate: "CAIRO", subject: "MATH", subjectOther: null, profileCompleted: true });
+
+      const after = await service.getMe(AUTH_USER);
+      expect(after.profile.profileCompleted).toBe(true);
+      expect(after.profile.phone).toBe("+201012345678");
+    });
+
+    it("normalizes the phone and clears subject_other when subject is not OTHER", async () => {
+      await service.getMe(AUTH_USER);
+      await service.updateProfile(AUTH_USER, { subject: "OTHER", subjectOther: "علم النفس", phone: "+201112345678", governorate: "GIZA" });
+      const other = await service.updateProfile(AUTH_USER, { subject: "PHYSICS" });
+      expect(other.subject).toBe("PHYSICS");
+      expect(other.subjectOther).toBeNull();
+    });
+
+    it("rejects an invalid Egyptian phone with a validation error", async () => {
+      await service.getMe(AUTH_USER);
+      await expect(service.updateProfile(AUTH_USER, { phone: "0191234567" })).rejects.toBeInstanceOf(ValidationApiException);
+    });
+  });
+
   describe("idempotent provisioning", () => {
     it("creates exactly one user/workspace/owner-membership across repeated calls", async () => {
       const first = await service.getMe(AUTH_USER);

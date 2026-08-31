@@ -1,4 +1,11 @@
-import type { MeResponse, OnboardingCompleteRequest, OnboardingCompleteResponse, WorkspaceContextResponse } from "@academic-precision/contracts";
+import type {
+  MeResponse,
+  OnboardingCompleteRequest,
+  OnboardingCompleteResponse,
+  TeacherProfile,
+  UpdateTeacherProfileRequest,
+  WorkspaceContextResponse,
+} from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
 export function fetchMe(): Promise<MeResponse> {
@@ -11,4 +18,8 @@ export function fetchWorkspaceContext(workspaceId: string): Promise<WorkspaceCon
 
 export function completeOnboarding(body: OnboardingCompleteRequest): Promise<OnboardingCompleteResponse> {
   return apiRequest<OnboardingCompleteResponse>("/onboarding/complete", { method: "POST", body });
+}
+
+export function updateTeacherProfile(body: UpdateTeacherProfileRequest): Promise<TeacherProfile> {
+  return apiRequest<TeacherProfile>("/me/profile", { method: "PATCH", body });
 }

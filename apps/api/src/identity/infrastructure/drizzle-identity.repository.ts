@@ -12,6 +12,7 @@ import {
   loadProvisionedIdentity,
   loadUserWithMemberships,
   loadWorkspaceCommercialState,
+  updateUserProfile,
   withRuntimeContext,
   type EntitlementRow,
   type MembershipWithWorkspace,
@@ -19,6 +20,7 @@ import {
   type ProvisionedIdentity,
   type ProvisionInput,
   type SubscriptionRow,
+  type UserRow,
   type UserWithMemberships,
   type WorkspaceCommercialState,
   type WorkspaceRow,
@@ -127,6 +129,18 @@ export class DrizzleIdentityRepository implements IdentityRepositoryPort {
       { userId: ctx?.userId, workspaceId: input.workspaceId },
       (db) => completeOnboarding(db, input),
     );
+  }
+
+  /**
+   * Teacher profile edit — runs under the caller's own `app.user_id` so the
+   * `users_self_update` RLS policy (0061) admits only their row. No workspace
+   * context needed (users is a global identity table).
+   */
+  updateProfile(
+    userId: string,
+    patch: { fullName?: string; phone?: string; governorate?: string; subject?: string; subjectOther?: string | null },
+  ): Promise<UserRow | undefined> {
+    return withRuntimeContext({ userId }, (db) => updateUserProfile(db, userId, patch));
   }
 
   findSubscriptionByWorkspaceId(workspaceId: string): Promise<SubscriptionRow | undefined> {

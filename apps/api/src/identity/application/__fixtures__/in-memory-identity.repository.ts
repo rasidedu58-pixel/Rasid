@@ -90,6 +90,9 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
       fullName: input.fullName,
       emailDisplay: input.email,
       phone: null,
+      governorate: null,
+      subject: null,
+      subjectOther: null,
       status: "ACTIVE",
       createdAt: now,
       updatedAt: now,
@@ -243,6 +246,9 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
       fullName: "Seeded user",
       emailDisplay: null,
       phone: null,
+      governorate: null,
+      subject: null,
+      subjectOther: null,
       status: "ACTIVE",
       createdAt: now,
       updatedAt: now,
@@ -250,6 +256,25 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
     this.workspacesByUserId.set(userId, workspace);
     this.membershipsByUserId.set(userId, membership);
     this.seedTrialSubscription(workspace.id);
+  }
+
+  async updateProfile(
+    userId: string,
+    patch: { fullName?: string; phone?: string; governorate?: string; subject?: string; subjectOther?: string | null },
+  ): Promise<ProvisionedIdentity["user"] | undefined> {
+    const user = this.usersById.get(userId);
+    if (!user) return undefined;
+    const updated = {
+      ...user,
+      ...(patch.fullName !== undefined ? { fullName: patch.fullName } : {}),
+      ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
+      ...(patch.governorate !== undefined ? { governorate: patch.governorate } : {}),
+      ...(patch.subject !== undefined ? { subject: patch.subject } : {}),
+      ...(patch.subjectOther !== undefined ? { subjectOther: patch.subjectOther } : {}),
+      updatedAt: new Date(),
+    };
+    this.usersById.set(userId, updated);
+    return updated;
   }
 
   async findSubscriptionByWorkspaceId(workspaceId: string): Promise<SubscriptionRow | undefined> {

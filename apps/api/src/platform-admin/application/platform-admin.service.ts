@@ -123,7 +123,7 @@ export class PlatformAdminService {
   }
 
   async listWorkspaces(
-    params: { search?: string; state?: string; cursor?: string; limit?: number },
+    params: { search?: string; state?: string; governorate?: string; subject?: string; cursor?: string; limit?: number },
     role: PlatformRole | null,
   ): Promise<ListPlatformAdminWorkspacesResponse> {
     // subscriptionState (and the ability to filter by it) is subscription data:
@@ -163,6 +163,9 @@ export class PlatformAdminService {
       ownerUserId: detail.workspace.ownerUserId,
       ownerName: detail.ownerName,
       ownerPhone: detail.ownerPhone,
+      ownerGovernorate: detail.ownerGovernorate,
+      ownerSubject: detail.ownerSubject,
+      ownerSubjectOther: detail.ownerSubjectOther,
       members: detail.members,
       entitlements: detail.entitlements,
     };

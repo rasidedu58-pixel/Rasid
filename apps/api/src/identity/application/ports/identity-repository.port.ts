@@ -5,6 +5,7 @@ import type {
   ProvisionedIdentity,
   ProvisionInput,
   SubscriptionRow,
+  UserRow,
   UserWithMemberships,
   WorkspaceCommercialState,
   WorkspaceRow,
@@ -28,6 +29,11 @@ export interface IdentityRepositoryPort {
   getPlatformRole(userId: string): Promise<PlatformRole | null>;
   findMembership(workspaceId: string, userId: string): Promise<MembershipWithWorkspace | undefined>;
   completeOnboarding(input: OnboardingCompleteInput): Promise<WorkspaceRow>;
+  /** Teacher profile edit (Step-2 onboarding + settings) — updates the caller's OWN row under the users_self_update RLS policy. */
+  updateProfile(
+    userId: string,
+    patch: { fullName?: string; phone?: string; governorate?: string; subject?: string; subjectOther?: string | null },
+  ): Promise<UserRow | undefined>;
   /** Phase 8 — the workspace's current commercial state, for `GET /me/workspaces/:id/context`'s `subscriptionState` field. */
   findSubscriptionByWorkspaceId(workspaceId: string): Promise<SubscriptionRow | undefined>;
   /** Phase 8 — the workspace's CURRENT entitlement snapshot (ALLOWED capabilities only — a caller only needs to know what it CAN do), for the same response's `entitlements` field. */

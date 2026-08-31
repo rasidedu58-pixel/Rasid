@@ -1,13 +1,17 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  isTeacherProfileComplete,
+  normalizeEgyptianPhone,
   onboardingCompleteRequestSchema,
+  updateTeacherProfileRequestSchema,
   type MeResponse,
   type OnboardingCompleteResponse,
   type PlatformRole,
+  type TeacherProfile,
   type WorkspaceContextResponse,
 } from "@academic-precision/contracts";
 import type { ZodError } from "zod";
-import type { MembershipWithWorkspace } from "@academic-precision/database";
+import type { MembershipWithWorkspace, UserRow } from "@academic-precision/database";
 import {
   ForbiddenApiException,
   ResourceNotFoundException,
@@ -42,7 +46,12 @@ export class IdentityService {
     return this.repository.provision({
       authUserId: authUser.id,
       email: authUser.email,
-      fullName: authUser.email?.split("@")[0]?.trim() || DEFAULT_FULL_NAME,
+      // FIRST trusted name wins: the signup name (Supabase user_metadata,
+      // surfaced on the verified token) is used so it is never lost. Only when
+      // the token carries no name do we fall back to the email local-part, then
+      // a neutral default. Provisioning is idempotent (ON CONFLICT DO NOTHING),
+      // so this sets the name exactly once — later edits go through the profile.
+      fullName: authUser.fullName || authUser.email?.split("@")[0]?.trim() || DEFAULT_FULL_NAME,
     });
   }
 
@@ -58,23 +67,32 @@ export class IdentityService {
     const loaded = await this.repository.loadUserWithMemberships(authUser.id);
     if (loaded) {
       const role = await this.repository.getPlatformRole(loaded.user.id);
-      return this.toMeResponse(loaded.user.id, loaded.user.fullName, loaded.memberships, role);
+      return this.toMeResponse(loaded.user, loaded.memberships, role);
     }
 
     const provisioned = await this.ensureProvisioned(authUser);
     const memberships = await this.repository.listMemberships(provisioned.user.id);
     const role = await this.repository.getPlatformRole(provisioned.user.id);
-    return this.toMeResponse(provisioned.user.id, provisioned.user.fullName, memberships, role);
+    return this.toMeResponse(provisioned.user, memberships, role);
+  }
+
+  private toProfile(user: UserRow): TeacherProfile {
+    return {
+      phone: user.phone ?? null,
+      governorate: user.governorate ?? null,
+      subject: user.subject ?? null,
+      subjectOther: user.subjectOther ?? null,
+      profileCompleted: isTeacherProfileComplete(user),
+    };
   }
 
   private toMeResponse(
-    userId: string,
-    fullName: string,
+    user: UserRow,
     memberships: MembershipWithWorkspace[],
     platformRole: PlatformRole | null,
   ): MeResponse {
     return {
-      user: { id: userId, fullName },
+      user: { id: user.id, fullName: user.fullName },
       workspaces: memberships.map(({ membership, workspace }) => ({
         id: workspace.id,
         name: workspace.name,
@@ -82,7 +100,43 @@ export class IdentityService {
         status: membership.status as "INVITED" | "ACTIVE" | "DISABLED",
       })),
       platform: { isStaff: platformRole !== null, role: platformRole },
+      profile: this.toProfile(user),
     };
+  }
+
+  /**
+   * Teacher profile update — backs Step-2 onboarding AND settings edit. The
+   * caller can only edit their OWN row (repository runs under the
+   * `users_self_update` RLS policy). Phone is normalized to E.164 (+20…) before
+   * storage; setting a non-OTHER subject clears any stale `subject_other`.
+   * "Onboarded" is derived deterministically from the resulting fields.
+   */
+  async updateProfile(authUser: VerifiedSupabaseToken, body: unknown): Promise<TeacherProfile> {
+    // Ensure the user row exists (a brand-new owner may edit before any other
+    // read provisioned them). Idempotent.
+    await this.ensureProvisioned(authUser);
+
+    const parsed = updateTeacherProfileRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationApiException(this.toFieldErrors(parsed.error));
+    }
+    const d = parsed.data;
+
+    const patch: { fullName?: string; phone?: string; governorate?: string; subject?: string; subjectOther?: string | null } = {};
+    if (d.fullName !== undefined) patch.fullName = d.fullName;
+    if (d.phone !== undefined) patch.phone = normalizeEgyptianPhone(d.phone) ?? d.phone; // schema already validated normalizability
+    if (d.governorate !== undefined) patch.governorate = d.governorate;
+    if (d.subject !== undefined) {
+      patch.subject = d.subject;
+      // A concrete subject clears any prior "other" text; OTHER keeps the given text.
+      patch.subjectOther = d.subject === "OTHER" ? (d.subjectOther ?? null) : null;
+    } else if (d.subjectOther !== undefined) {
+      patch.subjectOther = d.subjectOther;
+    }
+
+    const updated = await this.repository.updateProfile(authUser.id, patch);
+    if (!updated) throw new ResourceNotFoundException();
+    return this.toProfile(updated);
   }
 
   async getWorkspaceContext(

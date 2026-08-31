@@ -121,6 +121,8 @@ export async function getUserDetail(userId: string) {
 export interface ListWorkspacesParams {
   search?: string;
   state?: string;
+  governorate?: string;
+  subject?: string;
   cursor?: string;
   limit?: number;
 }
@@ -132,8 +134,13 @@ export async function listWorkspaces(params: ListWorkspacesParams) {
   const owner = users;
 
   const conditions = [
-    params.search ? ilike(workspaces.name, `%${params.search}%`) : undefined,
+    // General search now spans the workspace name AND the owner's name/phone.
+    params.search
+      ? or(ilike(workspaces.name, `%${params.search}%`), ilike(owner.fullName, `%${params.search}%`), ilike(owner.phone, `%${params.search}%`))
+      : undefined,
     params.state ? eq(subscriptions.state, params.state) : undefined,
+    params.governorate ? eq(owner.governorate, params.governorate) : undefined,
+    params.subject ? eq(owner.subject, params.subject) : undefined,
     decoded ? or(lt(workspaces.createdAt, decoded.createdAt), and(eq(workspaces.createdAt, decoded.createdAt), lt(workspaces.id, decoded.id))) : undefined,
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
 
@@ -171,7 +178,11 @@ export async function getWorkspaceDetail(workspaceId: string) {
   const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
   if (!workspace) return undefined;
 
-  const [owner] = await db.select({ fullName: users.fullName, phone: users.phone }).from(users).where(eq(users.id, workspace.ownerUserId)).limit(1);
+  const [owner] = await db
+    .select({ fullName: users.fullName, phone: users.phone, governorate: users.governorate, subject: users.subject, subjectOther: users.subjectOther })
+    .from(users)
+    .where(eq(users.id, workspace.ownerUserId))
+    .limit(1);
 
   const memberRows = await db
     .select({
@@ -190,7 +201,16 @@ export async function getWorkspaceDetail(workspaceId: string) {
     .from(entitlements)
     .where(and(eq(entitlements.workspaceId, workspaceId), sql`${entitlements.effectiveTo} IS NULL`));
 
-  return { workspace, ownerName: owner?.fullName ?? null, ownerPhone: owner?.phone ?? null, members: memberRows, entitlements: entitlementRows };
+  return {
+    workspace,
+    ownerName: owner?.fullName ?? null,
+    ownerPhone: owner?.phone ?? null,
+    ownerGovernorate: owner?.governorate ?? null,
+    ownerSubject: owner?.subject ?? null,
+    ownerSubjectOther: owner?.subjectOther ?? null,
+    members: memberRows,
+    entitlements: entitlementRows,
+  };
 }
 
 /**
