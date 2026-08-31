@@ -24,7 +24,7 @@ import {
   fetchPlatformAdminDashboard,
   fetchPlatformNeedsAttention,
 } from "../../lib/api/platform-admin";
-import { fetchApiHealth } from "../../lib/api/health";
+import { PlatformStatusWidget } from "../../components/platform-admin/platform-status-widgets";
 import { isForbidden } from "../../lib/api/client";
 import { SUB_STATE_LABEL, subStateTone } from "../../lib/platform-labels";
 import { useWorkspace } from "../../lib/workspace-provider";
@@ -64,7 +64,7 @@ export default function PlatformCommandCenterPage() {
 
       <PlatformSearch />
 
-      <PlatformHealthCard />
+      <PlatformStatusWidget />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="المستخدمون" value={String(data.totalUsers)} />
@@ -224,36 +224,3 @@ function AttentionGroup({
   );
 }
 
-function PlatformHealthCard() {
-  const health = useQuery({
-    queryKey: qk.platformAdmin.health(),
-    queryFn: fetchApiHealth,
-    refetchInterval: 30_000,
-  });
-  const api = health.data?.api ?? (health.isLoading ? "unknown" : "down");
-  const db = health.data?.database ?? "unknown";
-  return (
-    <Card>
-      <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-3 p-5">
-        <span className="text-sm font-semibold text-text-primary">حالة المنصة</span>
-        <HealthPill label="واجهة البرمجة (API)" status={api} />
-        <HealthPill label="قاعدة البيانات" status={db} />
-        <span className="ms-auto text-xs text-text-tertiary">
-          المراقبة الخارجية (Sentry/Uptime) تُدار خارج هذه اللوحة.
-        </span>
-      </CardContent>
-    </Card>
-  );
-}
-
-function HealthPill({ label, status }: { label: string; status: "up" | "down" | "unknown" }) {
-  const tone = status === "up" ? "success" : status === "down" ? "danger" : "neutral";
-  const text = status === "up" ? "تعمل" : status === "down" ? "متوقفة" : "—";
-  return (
-    <span className="flex items-center gap-2 text-sm">
-      <StatusDot tone={tone} label="" />
-      <span className="text-text-secondary">{label}</span>
-      <span className="font-medium text-text-primary">{text}</span>
-    </span>
-  );
-}

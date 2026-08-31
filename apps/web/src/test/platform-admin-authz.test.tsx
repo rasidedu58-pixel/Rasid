@@ -12,6 +12,8 @@ vi.mock("../lib/api/platform-admin", () => ({
   fetchPlatformActivity: () => Promise.resolve({ items: [], available: true }),
   fetchPlatformAdminWorkspaces: () => Promise.resolve({ items: [], page: { hasNext: false, nextCursor: null } }),
   fetchPlatformAdminUsers: () => Promise.resolve({ items: [], page: { hasNext: false, nextCursor: null } }),
+  fetchPlatformStatus: () =>
+    Promise.resolve({ database: "OPERATIONAL", worker: "OPERATIONAL", workerSource: "available", jobs: { pending: 0, retrying: 0, dead: 0 }, activeIssues: [], recentProblems: [], generatedAt: "2026-08-31T00:00:00.000Z" }),
 }));
 
 vi.mock("../lib/api/health", () => ({

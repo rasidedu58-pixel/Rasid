@@ -386,6 +386,13 @@
       "when": 1788400000000,
       "tag": "0056_platform_operations_rbac",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1788500000000,
+      "tag": "0057_platform_admin_outbox_read",
+      "breakpoints": true
     }
   ]
 }

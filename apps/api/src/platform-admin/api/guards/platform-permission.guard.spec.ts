@@ -40,6 +40,10 @@ describe("PlatformPermissionGuard — RBAC matrix (reads + writes)", () => {
     it("cannot see the global subscriptions list", () => deny("SUPPORT_AGENT", "platform.subscriptions.view"));
     it("cannot manage operating months", () => deny("SUPPORT_AGENT", "platform.operating_months.manage"));
     it("cannot manage staff (owner-only)", () => deny("SUPPORT_AGENT", "platform.staff.manage"));
+    it("can view basic platform status, but NOT operational details", () => {
+      allow("SUPPORT_AGENT", "platform.health.view");
+      deny("SUPPORT_AGENT", "platform.health.details");
+    });
   });
 
   describe("OPERATIONS_ADMIN — operations, but not owner-only security ops", () => {
@@ -50,6 +54,7 @@ describe("PlatformPermissionGuard — RBAC matrix (reads + writes)", () => {
       allow("OPERATIONS_ADMIN", "platform.operating_months.manage");
     });
     it("cannot perform the owner-only staff/role management", () => deny("OPERATIONS_ADMIN", "platform.staff.manage"));
+    it("can view platform health details", () => allow("OPERATIONS_ADMIN", "platform.health.details"));
   });
 
   describe("PLATFORM_OWNER — full surface", () => {

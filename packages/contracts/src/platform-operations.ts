@@ -31,6 +31,9 @@ export const PLATFORM_PERMISSIONS = [
   "platform.support.view", // contact logs + follow-ups + staff list (reads)
   // --- Writes (Unit 1) ---
   "platform.support.manage", // record a contact log; create / resolve / cancel / reassign / reschedule follow-ups
+  // --- Platform status & issues (Issues Center) ---
+  "platform.health.view", // overall status + per-service status + active issues
+  "platform.health.details", // operational detail: worker job metrics + recent problems
   // --- Reserved: Operating-Month Overrides (Unit 2) — held now to enforce the boundary ---
   "platform.operating_months.manage",
   // --- Owner-only: platform staff / role management (reserved) ---
@@ -57,9 +60,11 @@ export const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[
     "platform.subscriptions.view",
     "platform.support.view",
     "platform.support.manage",
+    "platform.health.view",
+    "platform.health.details",
     "platform.operating_months.manage",
   ],
-  SUPPORT_AGENT: ["platform.customers.view", "platform.support.view", "platform.support.manage"],
+  SUPPORT_AGENT: ["platform.customers.view", "platform.support.view", "platform.support.manage", "platform.health.view"],
 };
 
 export function hasPlatformPermission(role: PlatformRole | null | undefined, permission: PlatformPermission): boolean {

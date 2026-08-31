@@ -12,6 +12,7 @@ import type {
   PlatformNeedsAttentionResponse,
   PlatformOperationalSnapshot,
   PlatformRole,
+  PlatformStatusResponse,
   PlatformWorkspaceSubscriptionResponse,
 } from "@academic-precision/contracts";
 import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
@@ -20,6 +21,7 @@ import { PlatformAdminGuard } from "./guards/platform-admin.guard";
 import { PlatformPermissionGuard, RequirePlatformPermission } from "./guards/platform-permission.guard";
 import { CurrentPlatformRole } from "./decorators/current-platform-role.decorator";
 import { PlatformAdminService } from "../application/platform-admin.service";
+import { PlatformStatusService } from "../application/platform-status.service";
 
 const RATE_LIMIT = loadRateLimitConfig();
 
@@ -39,7 +41,17 @@ const RATE_LIMIT = loadRateLimitConfig();
 @Throttle({ default: { limit: RATE_LIMIT.platformAdmin.limit, ttl: RATE_LIMIT.platformAdmin.ttlMs } })
 @Controller("platform-admin")
 export class PlatformAdminController {
-  constructor(private readonly service: PlatformAdminService) {}
+  constructor(
+    private readonly service: PlatformAdminService,
+    private readonly statusService: PlatformStatusService,
+  ) {}
+
+  @Get("platform-status")
+  @ApiOperation({ summary: "Platform status + derived active issues (GET /api/v1/platform-admin/platform-status)" })
+  @RequirePlatformPermission("platform.health.view")
+  getPlatformStatus(@CurrentPlatformRole() role: PlatformRole | null): Promise<PlatformStatusResponse> {
+    return this.statusService.getStatus(role);
+  }
 
   @Get("dashboard")
   @ApiOperation({ summary: "Platform-wide counts — no invented MRR/revenue (GET /api/v1/platform-admin/dashboard)" })

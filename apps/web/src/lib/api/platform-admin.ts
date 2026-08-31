@@ -8,6 +8,7 @@ import type {
   PlatformAdminWorkspaceDetail,
   PlatformNeedsAttentionResponse,
   PlatformOperationalSnapshot,
+  PlatformStatusResponse,
   PlatformWorkspaceSubscriptionResponse,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
@@ -59,4 +60,9 @@ export function fetchPlatformWorkspaceOperational(workspaceId: string): Promise<
 /** Sensitive billing read — the API gates this with platform.subscriptions.view (403 for SUPPORT_AGENT). */
 export function fetchPlatformWorkspaceSubscription(workspaceId: string): Promise<PlatformWorkspaceSubscriptionResponse> {
   return apiRequest<PlatformWorkspaceSubscriptionResponse>(`/platform-admin/workspaces/${workspaceId}/subscription`);
+}
+
+/** Platform status + derived active issues (platform.health.view). */
+export function fetchPlatformStatus(): Promise<PlatformStatusResponse> {
+  return apiRequest<PlatformStatusResponse>("/platform-admin/platform-status");
 }

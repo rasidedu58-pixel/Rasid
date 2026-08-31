@@ -86,3 +86,48 @@ export const PLATFORM_ROLE_LABEL: Record<string, string> = {
   OPERATIONS_ADMIN: "مدير عمليات",
   SUPPORT_AGENT: "وكيل دعم",
 };
+
+// --- Platform Issues Center -------------------------------------------------
+export const SERVICE_STATUS_LABEL: Record<string, string> = {
+  OPERATIONAL: "تعمل بصورة طبيعية",
+  DEGRADED: "أداء متدهور",
+  DOWN: "متوقفة",
+  UNKNOWN: "غير معروفة",
+};
+
+export function serviceStatusTone(status: string): "success" | "warning" | "danger" | "neutral" {
+  switch (status) {
+    case "OPERATIONAL":
+      return "success";
+    case "DEGRADED":
+      return "warning";
+    case "DOWN":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+export const PLATFORM_SERVICE_LABEL: Record<string, string> = {
+  web: "الواجهة (Web)",
+  api: "واجهة البرمجة (API)",
+  database: "قاعدة البيانات",
+  worker: "المعالج الخلفي (Worker)",
+};
+
+export const ISSUE_SEVERITY_LABEL: Record<string, string> = {
+  INFO: "معلومة",
+  WARNING: "تحذير",
+  CRITICAL: "حرِج",
+};
+
+export function issueSeverityTone(sev: string): "success" | "warning" | "danger" | "neutral" {
+  switch (sev) {
+    case "CRITICAL":
+      return "danger";
+    case "WARNING":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}

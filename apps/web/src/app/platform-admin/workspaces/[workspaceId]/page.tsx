@@ -17,6 +17,7 @@ import {
 import { CheckCircle2, AlertTriangle, MinusCircle } from "lucide-react";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { CustomerCommunication } from "../../../../components/platform-admin/customer-communication";
+import { PlatformStatusNotice } from "../../../../components/platform-admin/platform-status-widgets";
 import { qk } from "../../../../lib/query-keys";
 import { fetchPlatformAdminWorkspace, fetchPlatformWorkspaceOperational, fetchPlatformWorkspaceSubscription } from "../../../../lib/api/platform-admin";
 import { isForbidden } from "../../../../lib/api/client";
@@ -72,6 +73,9 @@ export default function CustomerDetailPage() {
           </div>
         }
       />
+
+      {/* If the platform itself is degraded/down, tell support it may be platform-wide. */}
+      <PlatformStatusNotice />
 
       {/* Support diagnostic — the "why might it not be working" at-a-glance panel */}
       <SectionCard title="تشخيص الدعم" description="نظرة سريعة تجيب: أين المشكلة المحتملة؟">

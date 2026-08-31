@@ -78,5 +78,6 @@ export const qk = {
     workspaceFollowUps: (workspaceId: string) => ["platform-admin", "workspaces", "follow-ups", workspaceId] as const,
     followUpQueue: (params?: Record<string, unknown>) => ["platform-admin", "follow-ups", params] as const,
     staff: () => ["platform-admin", "staff"] as const,
+    status: () => ["platform-admin", "platform-status"] as const,
   },
 } as const;

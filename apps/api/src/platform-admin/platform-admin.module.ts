@@ -7,6 +7,7 @@ import { PlatformAdminGuard } from "./api/guards/platform-admin.guard";
 import { PlatformPermissionGuard } from "./api/guards/platform-permission.guard";
 import { PlatformAdminService } from "./application/platform-admin.service";
 import { PlatformOperationsService } from "./application/platform-operations.service";
+import { PlatformStatusService } from "./application/platform-status.service";
 
 /**
  * Phase 12 — Rasid Platform Admin. `SupabaseAuthGuard`/`TOKEN_VERIFIER`
@@ -24,6 +25,7 @@ import { PlatformOperationsService } from "./application/platform-operations.ser
   providers: [
     PlatformAdminService,
     PlatformOperationsService,
+    PlatformStatusService,
     PlatformAdminGuard,
     PlatformPermissionGuard,
     SupabaseAuthGuard,

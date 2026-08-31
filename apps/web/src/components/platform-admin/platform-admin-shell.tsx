@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Building2, CreditCard, ListChecks } from "lucide-react";
+import { LayoutDashboard, Users, Building2, CreditCard, ListChecks, Activity } from "lucide-react";
 import { cn } from "@academic-precision/ui";
 import { hasPlatformPermission, type PlatformPermission } from "@academic-precision/contracts";
 import { useWorkspace } from "../../lib/workspace-provider";
@@ -12,6 +12,7 @@ import { RasidWordmark } from "../brand/rasid-wordmark";
 const NAV_ITEMS: { href: string; label: string; icon: typeof LayoutDashboard; permission: PlatformPermission }[] = [
   { href: "/platform-admin", label: "لوحة التحكم", icon: LayoutDashboard, permission: "platform.customers.view" },
   { href: "/platform-admin/follow-ups", label: "قائمة المتابعة", icon: ListChecks, permission: "platform.support.view" },
+  { href: "/platform-admin/issues", label: "حالة المنصة والمشكلات", icon: Activity, permission: "platform.health.view" },
   { href: "/platform-admin/users", label: "المستخدمون", icon: Users, permission: "platform.customers.view" },
   { href: "/platform-admin/workspaces", label: "مساحات العمل", icon: Building2, permission: "platform.customers.view" },
   { href: "/platform-admin/subscriptions", label: "الاشتراكات", icon: CreditCard, permission: "platform.subscriptions.view" },

@@ -13,3 +13,4 @@ export * from "./billing";
 export * from "./reports";
 export * from "./platform-admin";
 export * from "./platform-operations";
+export * from "./platform-status";
