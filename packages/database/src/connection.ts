@@ -36,7 +36,7 @@ let db: PostgresJsDatabase<typeof schema> | undefined;
  * Postgres CONNECTION LIMIT — exceeding it FAILS with error 53300 rather
  * than queueing, measured live). Defaults preserve prior behavior.
  */
-function poolOptions(url: string, envVar: string, defaultMax: number): Parameters<typeof postgres>[1] {
+function poolOptions(url: string, envVar: string, defaultMax: number, maxLifetimeSecs = 60 * 30): Parameters<typeof postgres>[1] {
   const raw = process.env[envVar];
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   const max = Number.isFinite(parsed) && parsed > 0 ? parsed : defaultMax;
@@ -53,7 +53,11 @@ function poolOptions(url: string, envVar: string, defaultMax: number): Parameter
     // connections starves other consumers (measured: the API's idle
     // session connections consumed the role budget during external tests).
     idle_timeout: 60,
-    max_lifetime: 60 * 30,
+    // Recycle connections so a half-open one (server stuck in ClientRead
+    // when a Railway↔pooler connection goes half-open) can't pin the pool
+    // indefinitely — the platform-admin pool is tiny, so it uses a shorter
+    // lifetime to self-heal fast.
+    max_lifetime: maxLifetimeSecs,
   };
 }
 
@@ -168,7 +172,10 @@ export function getPlatformAdminDb(): PostgresJsDatabase<typeof schema> {
     // a single human's read-only console; it must never reserve budget
     // the teacher-facing API needs.
     const url = getPlatformAdminDatabaseUrl();
-    platformAdminClient = postgres(url, poolOptions(url, "PLATFORM_ADMIN_DB_POOL_MAX", 2));
+    // Headroom of 3 (role CONNECTION LIMIT) so one half-open connection can't
+    // block the whole console, and a short 5-minute lifetime so any stuck
+    // connection recycles quickly.
+    platformAdminClient = postgres(url, poolOptions(url, "PLATFORM_ADMIN_DB_POOL_MAX", 3, 60 * 5));
     platformAdminDb = drizzle(platformAdminClient, { schema });
   }
   return platformAdminDb;
