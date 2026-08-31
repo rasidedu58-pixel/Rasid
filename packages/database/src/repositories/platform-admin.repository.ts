@@ -307,54 +307,64 @@ export async function getWorkspaceOperationalSnapshot(workspaceId: string): Prom
     lastActivityAt: null,
   };
   try {
-    const [current] = await db
-      .select({ id: operatingMonths.id, year: operatingMonths.year, month: operatingMonths.month, status: operatingMonths.status })
-      .from(operatingMonths)
-      .where(and(eq(operatingMonths.workspaceId, workspaceId), eq(operatingMonths.status, "CURRENT")))
-      .limit(1);
+    // Run inside a transaction that sets `app.workspace_id` to the target
+    // workspace, so the operational tables' tenant-isolation RLS policies
+    // evaluate cleanly (scoped to this workspace) instead of throwing on an
+    // unset context — the 0055 SELECT grants provide the table privilege, this
+    // provides the row scope. If the grants aren't applied yet, the reads still
+    // fail and we degrade to `available:false` (never a 500).
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.workspace_id', ${workspaceId}, true)`);
 
-    const [groupsRow] = await db
-      .select({ c: sql<number>`count(*)`.mapWith(Number) })
-      .from(groups)
-      .where(and(eq(groups.workspaceId, workspaceId), eq(groups.status, "ACTIVE")));
-    const [studentsRow] = await db
-      .select({ c: sql<number>`count(*)`.mapWith(Number) })
-      .from(students)
-      .where(and(eq(students.workspaceId, workspaceId), eq(students.status, "ACTIVE")));
-    const [enrollRow] = await db
-      .select({ c: sql<number>`count(*)`.mapWith(Number) })
-      .from(enrollments)
-      .where(and(eq(enrollments.workspaceId, workspaceId), eq(enrollments.status, "ACTIVE")));
+      const [current] = await tx
+        .select({ id: operatingMonths.id, year: operatingMonths.year, month: operatingMonths.month, status: operatingMonths.status })
+        .from(operatingMonths)
+        .where(and(eq(operatingMonths.workspaceId, workspaceId), eq(operatingMonths.status, "CURRENT")))
+        .limit(1);
 
-    let sessionsThisMonth: { total: number; completed: number } | null = null;
-    if (current) {
-      const [sessRow] = await db
-        .select({
-          total: sql<number>`count(*)`.mapWith(Number),
-          completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')`.mapWith(Number),
-        })
-        .from(sessions)
-        .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
-        .where(and(eq(groupMonths.workspaceId, workspaceId), eq(groupMonths.operatingMonthId, current.id)));
-      sessionsThisMonth = { total: sessRow?.total ?? 0, completed: sessRow?.completed ?? 0 };
-    }
+      const [groupsRow] = await tx
+        .select({ c: sql<number>`count(*)`.mapWith(Number) })
+        .from(groups)
+        .where(and(eq(groups.workspaceId, workspaceId), eq(groups.status, "ACTIVE")));
+      const [studentsRow] = await tx
+        .select({ c: sql<number>`count(*)`.mapWith(Number) })
+        .from(students)
+        .where(and(eq(students.workspaceId, workspaceId), eq(students.status, "ACTIVE")));
+      const [enrollRow] = await tx
+        .select({ c: sql<number>`count(*)`.mapWith(Number) })
+        .from(enrollments)
+        .where(and(eq(enrollments.workspaceId, workspaceId), eq(enrollments.status, "ACTIVE")));
 
-    const [activityRow] = await db
-      .select({ last: sql<Date | null>`max(${auditEvents.createdAt})` })
-      .from(auditEvents)
-      .where(eq(auditEvents.workspaceId, workspaceId));
+      let sessionsThisMonth: { total: number; completed: number } | null = null;
+      if (current) {
+        const [sessRow] = await tx
+          .select({
+            total: sql<number>`count(*)`.mapWith(Number),
+            completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')`.mapWith(Number),
+          })
+          .from(sessions)
+          .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
+          .where(and(eq(groupMonths.workspaceId, workspaceId), eq(groupMonths.operatingMonthId, current.id)));
+        sessionsThisMonth = { total: sessRow?.total ?? 0, completed: sessRow?.completed ?? 0 };
+      }
 
-    return {
-      available: true,
-      currentMonth: current ?? null,
-      groupsCount: groupsRow?.c ?? 0,
-      studentsCount: studentsRow?.c ?? 0,
-      activeEnrollmentsCount: enrollRow?.c ?? 0,
-      sessionsThisMonth,
-      lastActivityAt: activityRow?.last ?? null,
-    };
+      const [activityRow] = await tx
+        .select({ last: sql<Date | null>`max(${auditEvents.createdAt})` })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, workspaceId));
+
+      return {
+        available: true,
+        currentMonth: current ?? null,
+        groupsCount: groupsRow?.c ?? 0,
+        studentsCount: studentsRow?.c ?? 0,
+        activeEnrollmentsCount: enrollRow?.c ?? 0,
+        sessionsThisMonth,
+        lastActivityAt: activityRow?.last ?? null,
+      };
+    });
   } catch {
-    // Permission denied (0055 not yet applied) — degrade, never 500.
+    // Reads not permitted yet (0055 grants not applied) or RLS blocked — degrade, never 500.
     return unavailable;
   }
 }
