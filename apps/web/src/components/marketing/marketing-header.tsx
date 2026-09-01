@@ -56,7 +56,11 @@ export function MarketingHeader() {
         scrolled ? "border-border bg-surface/80 shadow-sm backdrop-blur-md" : "border-transparent bg-surface/50 backdrop-blur"
       }`}
     >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+      <div
+        className={`mx-auto flex max-w-6xl items-center justify-between px-4 transition-[height] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] sm:px-6 ${
+          scrolled ? "h-14" : "h-16"
+        }`}
+      >
         <Link href="/" aria-label="راصد — الصفحة الرئيسية" className="focus-ring rounded-md">
           <BrandMark size="sm" />
         </Link>
@@ -68,7 +72,8 @@ export function MarketingHeader() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`rounded-md px-3 py-2 text-sm transition-colors ${
+                data-active={isActive ? "true" : undefined}
+                className={`nav-underline rounded-md px-3 py-2 text-sm transition-colors ${
                   isActive ? "text-text-primary" : "text-text-secondary hover:text-text-primary"
                 }`}
                 aria-current={isActive ? "true" : undefined}

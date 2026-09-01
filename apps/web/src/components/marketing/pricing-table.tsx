@@ -21,7 +21,7 @@ export function PricingTable() {
             key={plan.id}
             className={`relative flex flex-col rounded-2xl border p-6 transition-all duration-200 ${
               highlighted
-                ? "border-brand bg-brand-subtle/40 shadow-floating ring-1 ring-brand/30 lg:-translate-y-2"
+                ? "price-sheen border-brand bg-brand-subtle/40 shadow-floating ring-1 ring-brand/30 lg:-translate-y-2"
                 : "border-border bg-surface shadow-sm hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md"
             }`}
           >

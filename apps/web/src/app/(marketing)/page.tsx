@@ -26,14 +26,15 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
-import { Badge, Button, Card, CardContent } from "@academic-precision/ui";
+import { Badge, Button } from "@academic-precision/ui";
 import { AuthenticatedRedirect } from "../../components/marketing/authenticated-redirect";
 import { PricingTable } from "../../components/marketing/pricing-table";
 import { PricingCalculator } from "../../components/marketing/pricing-calculator";
 import { SplashScreen } from "../../components/marketing/splash-screen";
-import { RasidMark } from "../../components/brand/rasid-mark";
 import { MotionRoot, Reveal } from "../../components/marketing/motion";
-import { TiltCard } from "../../components/marketing/anim";
+import { HeroProductPreview } from "../../components/marketing/hero-product-preview";
+import { OperatingRhythm } from "../../components/marketing/operating-rhythm";
+import { SpotlightCard } from "../../components/marketing/spotlight-card";
 import { FaqSearch } from "../../components/marketing/faq-search";
 import { TestimonialsSection, LogosSection, StatsSection } from "../../components/marketing/social-proof";
 import { FAQ_ITEMS } from "../../lib/marketing/faq-config";
@@ -182,12 +183,12 @@ export default function LandingPage() {
         <div className="relative mx-auto max-w-6xl px-4 pb-24 pt-16 sm:px-6 sm:pt-24 lg:pt-28">
           <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
             <div className="flex flex-col items-start gap-6">
-              <Reveal as="div" className="w-fit">
+              <Reveal as="div" variant="focus" className="w-fit">
                 <Badge tone="brand" className="border border-brand/20 px-3 py-1">
                   كل ما يجري في مجموعاتك… وما يحتاج تدخّلك
                 </Badge>
               </Reveal>
-              <Reveal as="h1" delay={60} className="text-display text-text-primary">
+              <Reveal as="h1" variant="focus" delay={60} className="text-display text-text-primary">
                 شغّل مجموعاتك{" "}
                 {/* Break kept on ≥sm for the clean two-tone split; hidden on
                     mobile so `text-wrap: balance` activates and avoids a
@@ -195,26 +196,26 @@ export default function LandingPage() {
                 <br className="hidden sm:block" />
                 <span className="text-gradient">دون أن يضيع منك شيء</span>
               </Reveal>
-              <Reveal as="p" delay={120} className="max-w-[38rem] text-lg leading-[1.85] text-text-secondary sm:text-[1.125rem]">
+              <Reveal as="p" variant="focus" delay={120} className="max-w-[38rem] text-lg leading-[1.85] text-text-secondary sm:text-[1.125rem]">
                 الحصص والحضور والواجبات والتحصيل والمتابعة في مكان واحد — وراصد يُظهر لك ما يحتاج تدخّلك الآن، قبل أن يفوتك.
               </Reveal>
-              <Reveal as="div" delay={180}>
+              <Reveal as="div" variant="focus" delay={180}>
                 <OperatingRhythm />
               </Reveal>
-              <Reveal as="div" delay={240} className="flex flex-col gap-3 pt-1 sm:flex-row">
-                <Button asChild size="lg">
+              <Reveal as="div" variant="focus" delay={240} className="flex flex-col gap-3 pt-1 sm:flex-row">
+                <Button asChild size="lg" className="cta-sweep">
                   <Link href="/signup">ابدأ {TRIAL_DAYS} يومًا مجانًا</Link>
                 </Button>
                 <Button asChild size="lg" variant="outline">
                   <Link href="#how-it-works">شاهد راصد أثناء العمل</Link>
                 </Button>
               </Reveal>
-              <Reveal as="p" delay={300} className="text-sm text-text-tertiary">
+              <Reveal as="p" variant="focus" delay={300} className="text-sm text-text-tertiary">
                 {TRIAL_DAYS} يومًا مجانًا • بدون بطاقة ائتمان.
               </Reveal>
             </div>
 
-            <Reveal as="div" delay={160} className="relative">
+            <Reveal as="div" variant="focus" delay={160} className="relative">
               <HeroProductPreview />
             </Reveal>
           </div>
@@ -250,14 +251,15 @@ export default function LandingPage() {
           <SectionEyebrow>كيف يعمل</SectionEyebrow>
           <h2 className="mt-3 text-h2 text-text-primary">من الحصة إلى القرار… في ثلاث خطوات</h2>
         </Reveal>
-        <div className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
-          <div aria-hidden className="absolute inset-x-[16%] top-9 hidden h-px bg-gradient-to-l from-transparent via-border-strong to-transparent md:block" />
+        <Reveal as="div" className="relative grid grid-cols-1 gap-6 md:grid-cols-3">
+          <div aria-hidden className="workflow-line absolute inset-x-[16%] top-9 hidden h-px bg-gradient-to-l from-transparent via-brand/50 to-transparent md:block" />
+          <span aria-hidden className="workflow-dot hidden md:block" />
           {HOW_IT_WORKS.map((item, i) => (
             <Reveal as="div" key={item.step} delay={i * 90} className="relative">
-              <StepCard step={item.step} title={item.title} description={item.description} />
+              <SpotlightCard><StepCard step={item.step} title={item.title} description={item.description} /></SpotlightCard>
             </Reveal>
           ))}
-        </div>
+        </Reveal>
       </section>
 
       {/* ── Features — asymmetric bento ── */}
@@ -275,7 +277,7 @@ export default function LandingPage() {
                 delay={(i % 2) * 90}
                 className={group.wide ? "lg:col-span-2" : "lg:col-span-1"}
               >
-                <FeatureGroupCard group={group} />
+                <SpotlightCard><FeatureGroupCard group={group} /></SpotlightCard>
               </Reveal>
             ))}
           </div>
@@ -294,7 +296,7 @@ export default function LandingPage() {
         <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           {PERSONAS.map((persona, i) => (
             <Reveal as="div" key={persona.title} delay={i * 90}>
-              <PersonaCard persona={persona} />
+              <SpotlightCard><PersonaCard persona={persona} /></SpotlightCard>
             </Reveal>
           ))}
         </div>
@@ -319,7 +321,7 @@ export default function LandingPage() {
             <PricingCalculator />
           </Reveal>
 
-          <Reveal as="div">
+          <Reveal as="div" variant="rise">
             <PricingTable />
           </Reveal>
           <div className="mt-10 text-center">
@@ -343,7 +345,7 @@ export default function LandingPage() {
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {TRUST_POINTS.map((point, i) => (
             <Reveal as="div" key={point.title} delay={(i % 3) * 80}>
-              <TrustCard icon={point.icon} title={point.title} description={point.description} />
+              <SpotlightCard><TrustCard icon={point.icon} title={point.title} description={point.description} /></SpotlightCard>
             </Reveal>
           ))}
         </div>
@@ -374,13 +376,14 @@ export default function LandingPage() {
           <div className="rasid-cta-glow absolute inset-0" />
           <div className="hero-grid absolute inset-0 opacity-60" />
         </div>
-        <Reveal as="div" className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
+        <Reveal as="div" variant="rise" className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
+          <span aria-hidden className="cta-scan-ring -z-10" />
           <h2 className="text-h1 text-text-primary">دع راصد يتابع التفاصيل… وركّز أنت على طلابك</h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-text-secondary">
             ابدأ اليوم، ونظّم مجموعاتك من الحصة القادمة — وستعرف ما يحتاج تدخّلك قبل أن تنساه.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Button asChild size="lg">
+            <Button asChild size="lg" className="cta-sweep">
               <Link href="/signup">ابدأ {TRIAL_DAYS} يومًا مجانًا</Link>
             </Button>
             <Button asChild size="lg" variant="ghost">
@@ -398,21 +401,6 @@ export default function LandingPage() {
 
 function SectionEyebrow({ children }: { children: ReactNode }) {
   return <p className="text-xs font-semibold uppercase tracking-[0.05em] text-brand">{children}</p>;
-}
-
-/** The سجّل → افهم → تصرّف → تابع rhythm as a compact right-to-left flow. */
-function OperatingRhythm() {
-  const steps = ["سجّل", "افهم", "تصرّف", "تابع"];
-  return (
-    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-base font-semibold">
-      {steps.map((step, i) => (
-        <span key={step} className="flex items-center gap-2.5">
-          <span className="text-brand">{step}</span>
-          {i < steps.length - 1 ? <ArrowLeft className="h-4 w-4 text-text-tertiary" aria-hidden /> : null}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function ComparisonCard({ variant, title, items }: { variant: "before" | "after"; title: string; items: string[] }) {
@@ -531,88 +519,6 @@ function TrustCard({ icon: Icon, title, description }: { icon: typeof KeyRound; 
   );
 }
 
-/**
- * Honest product mockup — built from the SAME design tokens/labels the real
- * Dashboard uses (real feature names, real "مركز الإجراءات" framing), inside a
- * premium frame with a soft glow and two slow-floating status chips, with a
- * subtle pointer 3D tilt. Not a stock illustration or invented metrics.
- */
-function HeroProductPreview() {
-  return (
-    <div className="relative mx-auto max-w-md lg:max-w-none">
-      {/* ambient glow behind the frame */}
-      <div aria-hidden className="pointer-events-none absolute -inset-6 -z-10 bg-[radial-gradient(60%_60%_at_50%_30%,hsl(var(--brand)/0.18),transparent_70%)]" />
-
-      {/* floating chips */}
-      <div className="rasid-float pointer-events-none absolute -start-4 top-14 z-10 hidden rounded-xl border border-border bg-surface px-3 py-2 shadow-floating sm:block" style={{ animationDelay: "0.4s" }}>
-        <p className="flex items-center gap-2 text-xs font-medium text-text-primary">
-          <ClipboardCheck className="h-4 w-4 text-brand" aria-hidden />
-          حضور حصة اليوم سُجّل
-        </p>
-      </div>
-      <div className="rasid-float pointer-events-none absolute -end-3 bottom-16 z-10 hidden rounded-xl border border-border bg-surface px-3 py-2 shadow-floating sm:block" style={{ animationDelay: "1.4s" }}>
-        <p className="flex items-center gap-2 text-xs font-medium text-text-primary">
-          <Wallet className="h-4 w-4 text-danger" aria-hidden />
-          دفعة متأخرة — تذكير
-        </p>
-      </div>
-
-      <TiltCard>
-        <Card className="overflow-hidden rounded-2xl border-border/80 shadow-floating">
-          <div className="flex">
-            <div className="hidden w-14 shrink-0 flex-col items-center gap-3 bg-shell py-4 sm:flex">
-              <RasidMark size={24} />
-              <span className="h-8 w-8 rounded-md bg-shell-active" />
-              {[Users, Layers, CalendarRange, Wallet].map((Icon, i) => (
-                <Icon key={i} className="h-4 w-4 text-shell-text-muted" aria-hidden />
-              ))}
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between border-b border-border bg-surface-sunken px-4 py-3">
-                <span className="text-xs font-medium text-text-secondary">الرئيسية</span>
-                <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
-                  <Sparkles className="h-3 w-3 text-brand" aria-hidden />
-                  مركز الإجراءات
-                </span>
-              </div>
-              <CardContent className="flex flex-col gap-3 p-4">
-                <div className="flex items-center justify-between rounded-lg border border-brand/25 bg-brand-subtle px-3 py-2.5 text-sm">
-                  <span className="text-brand-subtle-foreground">الحصة القادمة: مجموعة الرياضيات</span>
-                  <span className="rounded-md bg-gradient-cta px-2 py-1 text-xs font-medium text-brand-foreground">فتح الحصة</span>
-                </div>
-                <p className="pt-1 text-xs font-semibold text-text-secondary">يحتاج إجراء الآن</p>
-                {[
-                  { label: "٣ طلاب لم يُسجَّل حضورهم أمس", tone: "warning" as const, badge: "متوسط" },
-                  { label: "دفعة متأخرة من ولي أمر — تذكير مطلوب", tone: "danger" as const, badge: "عاجل" },
-                  { label: "متابعة مستحقة لحالة انتباه مفتوحة", tone: "neutral" as const, badge: "سياقي" },
-                ].map((row) => (
-                  <div key={row.label} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5 text-sm">
-                    <span className="text-text-primary">{row.label}</span>
-                    <Badge tone={row.tone}>{row.badge}</Badge>
-                  </div>
-                ))}
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  <MiniStat icon={Users} label="الطلاب" />
-                  <MiniStat icon={Wallet} label="المالية" />
-                  <MiniStat icon={FileBarChart} label="التقارير" />
-                </div>
-              </CardContent>
-            </div>
-          </div>
-        </Card>
-      </TiltCard>
-    </div>
-  );
-}
-
-function MiniStat({ icon: Icon, label }: { icon: typeof Users; label: string }) {
-  return (
-    <div className="flex flex-col items-center gap-1 rounded-lg border border-border py-3 text-xs text-text-secondary">
-      <Icon className="h-4 w-4 text-brand" aria-hidden />
-      {label}
-    </div>
-  );
-}
 
 /** SoftwareApplication + Organization + FAQPage JSON-LD — safe to render on the server, no PII. */
 function StructuredData() {

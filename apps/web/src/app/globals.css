@@ -570,3 +570,155 @@ body * {
     transition: none !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Landing Motion Language — Detection → Focus → Action → Resolution.
+ * Reuses the signature easing cubic-bezier(0.16,1,0.3,1). transform/opacity/CSS
+ * vars only (no layout thrash). Pointer effects gate on a real fine pointer;
+ * everything collapses to its final static state under prefers-reduced-motion.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Reveal — FOCUS variant: content settles INTO focus (blur → sharp) for the Hero. */
+.js-motion [data-reveal="focus"] {
+  filter: blur(7px);
+  transform: translateY(14px) scale(0.985);
+  transition:
+    opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.js-motion [data-reveal="focus"].is-visible {
+  filter: blur(0);
+  transform: none;
+}
+/* Reveal — RISE variant: a slightly longer travel that settles (Pricing / Final CTA). */
+.js-motion [data-reveal="rise"] {
+  transform: translateY(26px);
+}
+
+/* Feature-card local pointer highlight — a soft radial that tracks the cursor
+ * INSIDE the card (no global mousemove). Sits over the card, subtle, brand-tinted. */
+.spotlight-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 0%), hsl(var(--brand) / 0.14), transparent 60%);
+  z-index: 1;
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight-card:hover .spotlight-glow { opacity: 1; }
+  /* Border clarity + a touch more lift, in addition to each card's own hover. */
+  .spotlight-card:hover { --spot-border: 1; }
+}
+
+/* Primary CTA — a subtle one-pass highlight sweep on hover + a real press. */
+.cta-sweep { position: relative; overflow: hidden; }
+.cta-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, hsl(0 0% 100% / 0.18) 50%, transparent 70%);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cta-sweep:hover::after { animation: cta-sweep 0.85s cubic-bezier(0.16, 1, 0.3, 1); }
+}
+.cta-sweep:active { transform: scale(0.98); }
+@keyframes cta-sweep {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
+}
+
+/* Nav links — a focus line that grows from the center (logical, RTL-safe). */
+.nav-underline { position: relative; }
+.nav-underline::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: -3px;
+  height: 2px;
+  border-radius: 2px;
+  background: hsl(var(--brand));
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.nav-underline:hover::after,
+.nav-underline:focus-visible::after,
+.nav-underline[data-active="true"]::after { transform: scaleX(1); }
+
+/* Pricing — a single sheen sweep across the highlighted card as it reveals. */
+.price-sheen { position: relative; overflow: hidden; }
+.price-sheen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, hsl(var(--brand) / 0.12) 50%, transparent 65%);
+  transform: translateX(-120%);
+}
+.is-visible.price-sheen::before,
+.is-visible .price-sheen::before { animation: price-sheen 1.15s cubic-bezier(0.16, 1, 0.3, 1) 0.25s 1; }
+@keyframes price-sheen {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
+}
+
+/* Workflow (How it works) — the connecting line DRAWS from the center and a
+ * focus dot travels along it as the section enters view (no scroll-jacking). */
+.workflow-line { transform: scaleX(0); transform-origin: center; }
+.is-visible .workflow-line { animation: workflow-draw 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both; }
+@keyframes workflow-draw { to { transform: scaleX(1); } }
+.workflow-dot {
+  position: absolute;
+  top: calc(2.25rem - 3px);
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 999px;
+  background: hsl(var(--brand));
+  box-shadow: 0 0 0 4px hsl(var(--brand) / 0.18);
+  opacity: 0;
+}
+.is-visible .workflow-dot { animation: workflow-travel 2.6s cubic-bezier(0.16, 1, 0.3, 1) 0.7s both; }
+@keyframes workflow-travel {
+  0% { inset-inline-start: 16%; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { inset-inline-start: 84%; opacity: 0; }
+}
+
+/* Final CTA — a calm scanning ring that expands once and settles (resolution). */
+.cta-scan-ring {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  inline-size: 220px;
+  block-size: 220px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--brand) / 0.35);
+  opacity: 0;
+  pointer-events: none;
+}
+.is-visible .cta-scan-ring { animation: cta-scan 1.6s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
+@keyframes cta-scan {
+  0% { transform: scale(0.6); opacity: 0; }
+  35% { opacity: 0.9; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+/* Reduced motion — no loops/sweeps/blur/scan; everything rests at its final state. */
+@media (prefers-reduced-motion: reduce) {
+  .js-motion [data-reveal="focus"] { filter: none !important; transform: translateY(14px); }
+  .js-motion [data-reveal="focus"].is-visible { filter: none !important; }
+  .spotlight-glow { display: none !important; }
+  .cta-sweep::after,
+  .price-sheen::before { display: none !important; }
+  .nav-underline::after { transition: none !important; }
+  .workflow-line { transform: none !important; animation: none !important; }
+  .workflow-dot,
+  .cta-scan-ring { display: none !important; }
+}

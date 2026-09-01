@@ -29,12 +29,15 @@ export function Reveal({
   children,
   as: Tag = "div",
   delay = 0,
+  variant = "",
   className,
   ...rest
 }: {
   children: ReactNode;
   as?: ElementType;
   delay?: number;
+  /** Reveal flavour: "" = translateY (default), "focus" = blur-settle (Hero), "rise" = longer travel (Pricing/CTA). */
+  variant?: "" | "focus" | "rise";
   className?: string;
 } & Record<string, unknown>) {
   const ref = useRef<HTMLElement | null>(null);
@@ -65,7 +68,7 @@ export function Reveal({
   return (
     <Tag
       ref={ref as never}
-      data-reveal=""
+      data-reveal={variant}
       className={className}
       style={delay ? { transitionDelay: `${delay}ms` } : undefined}
       {...rest}
