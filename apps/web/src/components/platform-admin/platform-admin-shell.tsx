@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Building2, CreditCard, ListChecks, Activity, UserCog } from "lucide-react";
+import { LayoutDashboard, Users, Building2, CreditCard, ListChecks, Activity, UserCog, Receipt } from "lucide-react";
 import { cn } from "@academic-precision/ui";
 import { hasPlatformPermission, type PlatformPermission } from "@academic-precision/contracts";
 import { useWorkspace } from "../../lib/workspace-provider";
@@ -16,6 +16,7 @@ const NAV_ITEMS: { href: string; label: string; icon: typeof LayoutDashboard; pe
   { href: "/platform-admin/users", label: "المستخدمون", icon: Users, permission: "platform.customers.view" },
   { href: "/platform-admin/workspaces", label: "مساحات العمل", icon: Building2, permission: "platform.customers.view" },
   { href: "/platform-admin/subscriptions", label: "الاشتراكات", icon: CreditCard, permission: "platform.subscriptions.view" },
+  { href: "/platform-admin/payment-requests", label: "طلبات الدفع", icon: Receipt, permission: "platform.billing.view" },
   { href: "/platform-admin/staff", label: "فريق راصد", icon: UserCog, permission: "platform.staff.manage" },
 ];
 

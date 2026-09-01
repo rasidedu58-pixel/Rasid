@@ -26,6 +26,7 @@ import type { SessionRow } from "./scheduling.repository";
 // tx, exactly like session-mode.repository.ts's own cross-file reuse of
 // scheduling.repository.ts's idempotency helpers.
 import { upsertObligationForEnrollment, type FinancialObligationRow, type ObligationTerms } from "./finance.repository";
+import { assertStudentCapacityForEnrollment } from "../billing/capacity";
 
 export type StudentRow = typeof students.$inferSelect;
 export type GuardianRow = typeof guardians.$inferSelect;
@@ -582,6 +583,19 @@ export async function createOrReactivateEnrollmentTransaction(
   input: CreateOrReactivateEnrollmentInput,
 ): Promise<{ enrollment: EnrollmentRow; reactivated: boolean; obligation: FinancialObligationRow }> {
   return db.transaction(async (tx) => {
+    // Billing Phase 2 — capacity is enforced first, inside the tx, only when the
+    // join becomes ACTIVE (PENDING adds no active-student usage). Takes the
+    // per-workspace subscription row lock, so concurrent joins can't both slip
+    // past the limit. A student already active this month (another group) adds
+    // no unique usage and is allowed even at the cap.
+    if (input.status === "ACTIVE") {
+      await assertStudentCapacityForEnrollment(tx, {
+        workspaceId: input.workspaceId,
+        studentId: input.studentId,
+        targetGroupMonthId: input.groupMonthId,
+      });
+    }
+
     const [existing] = await tx
       .select()
       .from(enrollments)
@@ -690,6 +704,18 @@ export async function transferEnrollmentTransaction(
       .where(eq(enrollments.id, input.sourceEnrollmentId))
       .limit(1);
     if (!source) return undefined;
+
+    // Billing Phase 2 — capacity check BEFORE ending the source, so a within-
+    // month transfer (student already active in the current month) is net-zero
+    // and always allowed; only a transfer that makes the student newly active
+    // in the current month beyond the cap is refused.
+    if (input.status === "ACTIVE") {
+      await assertStudentCapacityForEnrollment(tx, {
+        workspaceId: input.targetWorkspaceId,
+        studentId: source.studentId,
+        targetGroupMonthId: input.targetGroupMonthId,
+      });
+    }
 
     const now = new Date();
     const [updatedSource] = await tx

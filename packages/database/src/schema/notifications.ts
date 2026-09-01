@@ -56,7 +56,7 @@ export const notifications = pgTable(
   (table) => [
     check(
       "notifications_type_check",
-      sql`${table.type} IN ('SUBSCRIPTION_EXPIRING', 'FOLLOWUP_DUE', 'MISSING_RECORDS')`,
+      sql`${table.type} IN ('SUBSCRIPTION_EXPIRING', 'FOLLOWUP_DUE', 'MISSING_RECORDS', 'PAYMENT_CONFIRMED', 'PAYMENT_REJECTED')`,
     ),
     // The DB-level dedup invariant itself — see module doc comment.
     unique("notifications_dedup_unique").on(

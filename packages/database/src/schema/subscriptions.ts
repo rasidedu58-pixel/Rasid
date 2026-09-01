@@ -24,7 +24,7 @@
  * migration 0037's own comment for why it carries no RLS policy).
  */
 import { sql } from "drizzle-orm";
-import { boolean, check, index, integer, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, char, check, index, integer, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { workspaces } from "./workspaces";
 import { users } from "./identity";
 
@@ -46,6 +46,23 @@ export const subscriptions = pgTable(
     periodStart: timestamp("period_start", { withTimezone: true }),
     periodEnd: timestamp("period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    // ── Commercial plan + price snapshot (Billing Engine, Phase 1) ──────────
+    // The plan the workspace is on. NULL while TRIAL / never-converted; a
+    // standard code or 'CUSTOM' once paid. Limits/prices for standard codes are
+    // owned by the Plan Catalog (packages/contracts/billing-catalog.ts).
+    planCode: text("plan_code"),
+    billingCycle: text("billing_cycle"),
+    // Per-subscription capacity — used ONLY when planCode = 'CUSTOM'.
+    customMaxActiveStudents: integer("custom_max_active_students"),
+    customMaxTeamMembers: integer("custom_max_team_members"),
+    // The COMMERCIAL PRICE SNAPSHOT actually agreed with THIS customer — integer
+    // minor units (ADR-022, never a float). Deliberately NOT derived from the
+    // catalog at read time: a future catalog price change must never silently
+    // re-price an existing customer on deploy. `planPriceVersion` records which
+    // catalog price generation was locked (NULL for a hand-priced CUSTOM deal).
+    currentPriceMinor: bigint("current_price_minor", { mode: "number" }),
+    priceCurrencyCode: char("price_currency_code", { length: 3 }),
+    planPriceVersion: integer("plan_price_version"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
     version: integer("version").notNull().default(1),
@@ -54,6 +71,31 @@ export const subscriptions = pgTable(
     check(
       "subscriptions_state_check",
       sql`${table.state} IN ('TRIAL', 'ACTIVE', 'EXPIRING', 'EXPIRED', 'PAYMENT_FAILED', 'CANCELLED_AT_PERIOD_END')`,
+    ),
+    // Commercial-plan integrity (Phase 1). Mirrors migration 0062 exactly.
+    check(
+      "subscriptions_plan_code_check",
+      sql`${table.planCode} IS NULL OR ${table.planCode} IN ('STARTER', 'GROWTH', 'PROFESSIONAL', 'ADVANCED', 'BUSINESS', 'BUSINESS_PLUS', 'CUSTOM')`,
+    ),
+    check("subscriptions_billing_cycle_check", sql`${table.billingCycle} IS NULL OR ${table.billingCycle} IN ('MONTHLY', 'ANNUAL')`),
+    // CUSTOM requires both custom limits; every non-CUSTOM plan (and NULL) must carry neither.
+    check(
+      "subscriptions_custom_requires_custom_limits_check",
+      sql`${table.planCode} IS DISTINCT FROM 'CUSTOM' OR (${table.customMaxActiveStudents} IS NOT NULL AND ${table.customMaxTeamMembers} IS NOT NULL)`,
+    ),
+    check(
+      "subscriptions_noncustom_no_custom_limits_check",
+      sql`COALESCE(${table.planCode}, '') = 'CUSTOM' OR (${table.customMaxActiveStudents} IS NULL AND ${table.customMaxTeamMembers} IS NULL)`,
+    ),
+    check(
+      "subscriptions_custom_limits_positive_check",
+      sql`(${table.customMaxActiveStudents} IS NULL OR ${table.customMaxActiveStudents} > 0) AND (${table.customMaxTeamMembers} IS NULL OR ${table.customMaxTeamMembers} >= 0)`,
+    ),
+    check("subscriptions_price_nonnegative_check", sql`${table.currentPriceMinor} IS NULL OR ${table.currentPriceMinor} >= 0`),
+    // A price implies a plan + cycle + currency (but NOT a version — a CUSTOM price is hand-set, planPriceVersion NULL).
+    check(
+      "subscriptions_price_implies_plan_check",
+      sql`${table.currentPriceMinor} IS NULL OR (${table.planCode} IS NOT NULL AND ${table.billingCycle} IS NOT NULL AND ${table.priceCurrencyCode} IS NOT NULL)`,
     ),
     // One commercial record per workspace in V1 — no subscription history/
     // multiple-plan modeling (§10.1 describes a single evolving row,

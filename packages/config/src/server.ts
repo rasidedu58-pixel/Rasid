@@ -54,6 +54,19 @@ const serverEnvSchema = z.object({
   /** The single V1 subscription price id in Paddle's dashboard — checkout creation attaches it directly (no in-app plan picker in V1). */
   PADDLE_PRICE_ID: z.string().optional(),
 
+  /**
+   * Billing Phase 3 — MANUAL payment channel config (InstaPay / Vodafone Cash +
+   * a WhatsApp number for payment-proof). These are display/config values, NOT
+   * secrets like tokens — but kept central here (never hardcoded in components).
+   * All optional: when unset, the customer billing UI shows a safe "payment
+   * channel unavailable" state instead of crashing, and no payment-request
+   * instructions are rendered.
+   */
+  RASID_INSTAPAY_HANDLE: z.string().optional(),
+  RASID_VODAFONE_CASH_NUMBER: z.string().optional(),
+  /** E.164-ish (digits, optional leading +) WhatsApp number Rasid receives payment proof on. */
+  RASID_BILLING_WHATSAPP_NUMBER: z.string().optional(),
+
   SENTRY_DSN: z.string().optional(),
   POSTHOG_API_KEY: z.string().optional(),
 

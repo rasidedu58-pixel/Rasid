@@ -10,6 +10,9 @@ import type {
   PlatformOperationalSnapshot,
   PlatformStatusResponse,
   PlatformWorkspaceSubscriptionResponse,
+  ListPlatformPaymentRequestsResponse,
+  ResolvePaymentRequestResponse,
+  RejectPaymentRequest,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -67,4 +70,23 @@ export function fetchPlatformWorkspaceSubscription(workspaceId: string): Promise
 /** Platform status + derived active issues (platform.health.view). */
 export function fetchPlatformStatus(): Promise<PlatformStatusResponse> {
   return apiRequest<PlatformStatusResponse>("/platform-admin/platform-status");
+}
+
+// --- Billing Phase 3: payment requests (Billing Center) ----------------------
+
+/** platform.billing.view */
+export function fetchPlatformPaymentRequests(
+  params: { status?: string; cursor?: string; limit?: number } = {},
+): Promise<ListPlatformPaymentRequestsResponse> {
+  return apiRequest<ListPlatformPaymentRequestsResponse>("/platform-admin/payment-requests", { query: params });
+}
+
+/** platform.billing.manage — confirm creates an immutable payment + activates the subscription. */
+export function confirmPaymentRequest(id: string): Promise<ResolvePaymentRequestResponse> {
+  return apiRequest<ResolvePaymentRequestResponse>(`/platform-admin/payment-requests/${id}/confirm`, { method: "POST", body: {} });
+}
+
+/** platform.billing.manage — reject (reason mandatory), no payment, no subscription change. */
+export function rejectPaymentRequest(id: string, body: RejectPaymentRequest): Promise<ResolvePaymentRequestResponse> {
+  return apiRequest<ResolvePaymentRequestResponse>(`/platform-admin/payment-requests/${id}/reject`, { method: "POST", body });
 }

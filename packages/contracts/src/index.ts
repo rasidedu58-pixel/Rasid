@@ -11,6 +11,8 @@ export * from "./students";
 export * from "./session-mode";
 export * from "./attention";
 export * from "./billing";
+export * from "./billing-catalog";
+export * from "./billing-payment-requests";
 export * from "./reports";
 export * from "./platform-admin";
 export * from "./platform-operations";

@@ -16,6 +16,7 @@ import { workspaces } from "../schema/workspaces";
 import { memberships } from "../schema/permissions";
 import { replaceMembershipGrants, insertAuditEvent, type DesiredGrantInput } from "./permissions.repository";
 import type { Db } from "./identity.repository";
+import { assertTeamCapacityForActivation } from "../billing/capacity";
 
 export type InvitationRow = typeof workspaceInvitations.$inferSelect;
 
@@ -183,6 +184,13 @@ export async function acceptInvitationTx(
     .limit(1)
     .then((rows) => rows[0]);
   if (existingMembership) return { ok: false, reason: "ALREADY_MEMBER" };
+
+  // Billing Phase 2 — team capacity is checked BEFORE the invite is consumed, so
+  // a limit failure leaves the invite PENDING (acceptable again after an upgrade)
+  // instead of burning it. Locks the workspace subscription row, so two invitees
+  // accepting at the same instant cannot both push active team members past the
+  // limit (the Owner is never counted).
+  await assertTeamCapacityForActivation(db, { workspaceId: invite.workspaceId });
 
   // Atomic single-use guard — only the transaction that flips PENDING → ACCEPTED
   // proceeds; any concurrent accept of the same token matches 0 rows here.

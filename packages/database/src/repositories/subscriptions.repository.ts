@@ -285,6 +285,17 @@ export interface UpdateSubscriptionStateInput {
   cancelAtPeriodEnd?: boolean;
   providerSubscriptionId?: string;
   providerCustomerId?: string;
+  /**
+   * Commercial snapshot fields (Billing Phase 3) — written ONLY by the confirmed-
+   * payment path (a paid activation/renewal), never by the webhook/expiry/admin
+   * paths (which leave them undefined). The caller's role must hold the column
+   * grant for these (app_platform_admin, per 0062).
+   */
+  planCode?: string;
+  billingCycle?: string;
+  currentPriceMinor?: number;
+  priceCurrencyCode?: string;
+  planPriceVersion?: number;
   sourceType: "SUBSCRIPTION" | "TRIAL" | "ADMIN";
   sourceId: string | null;
   actorUserId: string | null;
@@ -305,11 +316,17 @@ function outboxEventTypeFor(nextState: SubscriptionState): string {
   return "SubscriptionStateChanged";
 }
 
-export async function updateSubscriptionStateTransaction(
-  db: Db,
+/**
+ * The transition applied on a GIVEN tx (no own transaction) — so it composes
+ * inside a larger transaction (e.g. the Phase 3 payment-confirm). Both the
+ * public `updateSubscriptionStateTransaction` and `confirmPaymentRequestTransaction`
+ * call this ONE implementation — no duplicated subscription-write logic.
+ */
+export async function applySubscriptionTransitionOnTx(
+  tx: Db,
   input: UpdateSubscriptionStateInput,
 ): Promise<SubscriptionRow | typeof SUBSCRIPTION_VERSION_CONFLICT> {
-  return db.transaction(async (tx) => {
+  {
     // ONE instant shared by the Subscription row's own `updated_at` AND the
     // entitlement close/insert pair below — the close's `effective_to` and
     // the new row's `effective_from` must be the exact same value, not
@@ -325,6 +342,11 @@ export async function updateSubscriptionStateTransaction(
     if (input.cancelAtPeriodEnd !== undefined) patch.cancelAtPeriodEnd = input.cancelAtPeriodEnd;
     if (input.providerSubscriptionId !== undefined) patch.providerSubscriptionId = input.providerSubscriptionId;
     if (input.providerCustomerId !== undefined) patch.providerCustomerId = input.providerCustomerId;
+    if (input.planCode !== undefined) patch.planCode = input.planCode;
+    if (input.billingCycle !== undefined) patch.billingCycle = input.billingCycle;
+    if (input.currentPriceMinor !== undefined) patch.currentPriceMinor = input.currentPriceMinor;
+    if (input.priceCurrencyCode !== undefined) patch.priceCurrencyCode = input.priceCurrencyCode;
+    if (input.planPriceVersion !== undefined) patch.planPriceVersion = input.planPriceVersion;
 
     const [updated] = await tx
       .update(subscriptions)
@@ -361,7 +383,14 @@ export async function updateSubscriptionStateTransaction(
     });
 
     return updated;
-  });
+  }
+}
+
+export async function updateSubscriptionStateTransaction(
+  db: Db,
+  input: UpdateSubscriptionStateInput,
+): Promise<SubscriptionRow | typeof SUBSCRIPTION_VERSION_CONFLICT> {
+  return db.transaction((tx) => applySubscriptionTransitionOnTx(tx, input));
 }
 
 // ---------------------------------------------------------------------------

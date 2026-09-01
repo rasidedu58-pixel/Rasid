@@ -39,6 +39,9 @@ export const PLATFORM_PERMISSIONS = [
   // --- Customer & Subscription controls ---
   "platform.customers.manage", // suspend / reactivate a customer account; edit operational fields; create a customer via secure invite
   "platform.subscriptions.manage", // extend trial, set end date, suspend / reactivate a subscription
+  // --- Billing (Phase 3): payment requests + manual payment verification ---
+  "platform.billing.view", // read the payment-requests / payments list
+  "platform.billing.manage", // confirm / reject a payment request (a real financial action — never SUPPORT_AGENT)
   // --- Workspace feature overrides ---
   "platform.features.manage", // enable / disable / revoke a per-workspace feature override
   // --- Owner-only: platform staff / role management ---
@@ -65,6 +68,8 @@ export const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[
     "platform.customers.manage",
     "platform.subscriptions.view",
     "platform.subscriptions.manage",
+    "platform.billing.view",
+    "platform.billing.manage",
     "platform.support.view",
     "platform.support.manage",
     "platform.health.view",
@@ -72,6 +77,7 @@ export const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[
     "platform.operating_months.manage",
     "platform.features.manage",
   ],
+  // SUPPORT_AGENT deliberately has NEITHER platform.billing.* — no financial confirm.
   SUPPORT_AGENT: ["platform.customers.view", "platform.support.view", "platform.support.manage", "platform.health.view"],
 };
 

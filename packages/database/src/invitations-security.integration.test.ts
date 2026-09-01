@@ -89,6 +89,16 @@ describe.skipIf(!hasLiveCreds)("Phase 2 Invitations Security (live Postgres)", (
       (${membershipAId}, ${workspaceAId}, ${ownerAId}, 'OWNER', 'ACTIVE', now()),
       (${membershipBId}, ${workspaceBId}, ${ownerBId}, 'OWNER', 'ACTIVE', now())`;
 
+    // Billing Phase 2 — invitation-accept now takes the workspace subscription
+    // row lock for the team-capacity check, so the fixture must provide one.
+    // This suite proves invitation security, not capacity, so it seeds an ACTIVE
+    // CUSTOM plan with an effectively unbounded team limit (catalog test data —
+    // the production resolver is fixed and non-injectable). Requires migration
+    // 0062 (plan_code / custom_* columns) applied to the target DB.
+    await admin`INSERT INTO subscriptions (workspace_id, state, plan_code, custom_max_active_students, custom_max_team_members) VALUES
+      (${workspaceAId}, 'ACTIVE', 'CUSTOM', 1000000, 1000000),
+      (${workspaceBId}, 'ACTIVE', 'CUSTOM', 1000000, 1000000)`;
+
     await admin`INSERT INTO groups (id, workspace_id, name, status) VALUES
       (${groupAId}, ${workspaceAId}, 'Invite Test Group A', 'ACTIVE')`;
   });
@@ -100,6 +110,7 @@ describe.skipIf(!hasLiveCreds)("Phase 2 Invitations Security (live Postgres)", (
       await admin`DELETE FROM permission_grants WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM workspace_invitations WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM groups WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
+      await admin`DELETE FROM subscriptions WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM memberships WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM workspaces WHERE id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM users WHERE id IN (${ownerAId}, ${ownerBId}, ${inviteeCId}, ${inviteeDId})`;

@@ -421,6 +421,34 @@
       "when": 1788900000000,
       "tag": "0061_teacher_profile_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1789000000000,
+      "tag": "0062_billing_plan_and_price_on_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1789100000000,
+      "tag": "0063_payment_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1789200000000,
+      "tag": "0064_subscription_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0065_billing_notifications",
+      "breakpoints": true
     }
   ]
 }

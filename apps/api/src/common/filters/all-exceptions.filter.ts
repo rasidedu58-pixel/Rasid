@@ -15,9 +15,33 @@ const logger = createLogger("api:unhandled-exceptions");
  *   conflict, 429 rate limiting — is normal, caller-driven behaviour and is
  *   deliberately never sent to Sentry.
  */
-export function shouldReportToSentry(status: number, isHttpException: boolean): boolean {
-  if (!isHttpException) return true;
+export function shouldReportToSentry(status: number, isExpected: boolean): boolean {
+  if (!isExpected) return true;
   return status >= 500;
+}
+
+/**
+ * Duck-typed check for a `BillingCapacityError` (thrown from the database layer)
+ * without importing the database package here. These carry a stable marker +
+ * `code` + `httpStatus` + optional `details`, and are EXPECTED product behaviour
+ * (a plan limit / no-current-month), so they must map to their 4xx contract code
+ * and never reach Sentry as a fault.
+ */
+function asBillingCapacityError(
+  exception: unknown,
+): { code: string; httpStatus: number; message: string; details?: Record<string, unknown> } | null {
+  if (typeof exception !== "object" || exception === null) return null;
+  const e = exception as Record<string, unknown>;
+  // Marks a billing-domain error (capacity limits OR payment-request flow) — an
+  // EXPECTED 4xx carrying its own contract code, never an unhandled 500.
+  const isBillingDomain = e.isBillingCapacityError === true || e.isBillingDomainError === true;
+  if (!isBillingDomain || typeof e.code !== "string" || typeof e.httpStatus !== "number") return null;
+  return {
+    code: e.code,
+    httpStatus: e.httpStatus,
+    message: typeof e.message === "string" ? e.message : e.code,
+    details: (e.details as Record<string, unknown> | undefined) ?? undefined,
+  };
 }
 
 /**
@@ -46,9 +70,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const requestId = String(request.headers[REQUEST_ID_HEADER] ?? "req_unknown");
 
     const { status, code, message, details } = this.mapException(exception);
-    const isHttp = exception instanceof HttpException;
+    // Expected, caller-driven outcomes: any HttpException (4xx/…) AND mapped
+    // domain capacity errors — neither is an unhandled server fault.
+    const isExpected = exception instanceof HttpException || asBillingCapacityError(exception) !== null;
 
-    if (!isHttp) {
+    if (!isExpected) {
       logger.error({ err: exception, requestId, path: request.url }, "Unhandled exception");
     }
 
@@ -57,7 +83,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // attached context is safe by construction: requestId, route (query
     // stripped), method, status — no headers, cookies, tokens, or body. The
     // observability `beforeSend` scrubs it again as defence in depth.
-    if (shouldReportToSentry(status, isHttp)) {
+    if (shouldReportToSentry(status, isExpected)) {
       captureException(exception, {
         requestId,
         route: typeof request.url === "string" ? request.url.split("?")[0] : undefined,
@@ -78,6 +104,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     message: string;
     details?: Record<string, unknown>;
   } {
+    const capacity = asBillingCapacityError(exception);
+    if (capacity) {
+      return { status: capacity.httpStatus, code: capacity.code, message: capacity.message, details: capacity.details };
+    }
+
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const body = exception.getResponse();

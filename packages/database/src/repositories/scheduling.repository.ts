@@ -14,6 +14,7 @@
  * race handling, optimistic-concurrency version checks at the SQL level).
  */
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql as rawSql } from "drizzle-orm";
+import { assertCarryForwardStudentCapacity } from "../billing/capacity";
 import { groupMonths, groups, scheduleRules } from "../schema/groups";
 import { locations, operatingMonths } from "../schema/months";
 import { platformOperatingMonthOverrides } from "../schema/platform-admin";
@@ -1013,6 +1014,25 @@ async function runCreateMonthTransactionInner(
       .limit(1);
     if (existing.length > 0) {
       return "MONTH_ALREADY_EXISTS" as const;
+    }
+
+    // Billing Phase 2 — carry-forward capacity check, run BEFORE any writes so
+    // the subscription row lock is taken first (consistent lock order with the
+    // single-enrollment path → no deadlock) and an over-limit month create is
+    // refused atomically. The new month starts empty, so the DISTINCT students
+    // carried in are exactly its active-student count.
+    const sourceGroupMonthIds = input.groupSpecs
+      .map((s) => s.sourceGroupMonthId)
+      .filter((id): id is string => typeof id === "string");
+    if (sourceGroupMonthIds.length > 0) {
+      const carried = await tx
+        .selectDistinct({ studentId: enrollments.studentId })
+        .from(enrollments)
+        .where(and(inArray(enrollments.groupMonthId, sourceGroupMonthIds), eq(enrollments.status, "ACTIVE")));
+      await assertCarryForwardStudentCapacity(tx, {
+        workspaceId: input.workspaceId,
+        distinctStudentCount: carried.length,
+      });
     }
 
     // Only a CURRENT (created-and-started) month archives the previous CURRENT.

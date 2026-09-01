@@ -11,6 +11,9 @@ import { memberships, permissionGrants, permissionGroupScopes } from "../schema/
 import { users } from "../schema/identity";
 import { auditEvents } from "../schema/audit";
 import type { Db, MembershipRow } from "./identity.repository";
+import { assertTeamCapacityForActivation } from "../billing/capacity";
+
+const OWNER_ROLE_LABEL = "OWNER";
 
 export type PermissionGrantRow = typeof permissionGrants.$inferSelect;
 export type PermissionGroupScopeRow = typeof permissionGroupScopes.$inferSelect;
@@ -176,19 +179,43 @@ export async function disableMembership(db: Db, membershipId: string): Promise<M
   return updated;
 }
 
-/** Re-activates a previously disabled membership (inverse of {@link disableMembership}). */
+/**
+ * Re-activates a previously disabled membership (inverse of {@link disableMembership}).
+ * Billing Phase 2 — DISABLED→ACTIVE raises the active team count, so it runs the
+ * same capacity guard as invitation-accept, inside one transaction (locks the
+ * subscription row first). The Owner is never counted, and re-enabling an
+ * already-ACTIVE row consumes no new capacity.
+ */
 export async function enableMembership(db: Db, membershipId: string): Promise<MembershipRow> {
-  const now = new Date();
-  const [updated] = await db
-    .update(memberships)
-    .set({ status: ACTIVE_MEMBERSHIP_STATUS, disabledAt: null, updatedAt: now })
-    .where(eq(memberships.id, membershipId))
-    .returning();
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({
+        workspaceId: memberships.workspaceId,
+        roleLabel: memberships.roleLabel,
+        status: memberships.status,
+      })
+      .from(memberships)
+      .where(eq(memberships.id, membershipId))
+      .limit(1);
+    if (!target) {
+      throw new Error(`Membership ${membershipId} not found while enabling.`);
+    }
 
-  if (!updated) {
-    throw new Error(`Membership ${membershipId} not found while enabling.`);
-  }
-  return updated;
+    if (target.roleLabel !== OWNER_ROLE_LABEL && target.status !== ACTIVE_MEMBERSHIP_STATUS) {
+      await assertTeamCapacityForActivation(tx, { workspaceId: target.workspaceId });
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(memberships)
+      .set({ status: ACTIVE_MEMBERSHIP_STATUS, disabledAt: null, updatedAt: now })
+      .where(eq(memberships.id, membershipId))
+      .returning();
+    if (!updated) {
+      throw new Error(`Membership ${membershipId} not found while enabling.`);
+    }
+    return updated;
+  });
 }
 
 export interface TeamMemberIdentityRow {

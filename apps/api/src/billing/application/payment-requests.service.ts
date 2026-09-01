@@ -1,0 +1,101 @@
+import { Injectable } from "@nestjs/common";
+import {
+  createPaymentRequestTransaction,
+  listPaymentRequestsForWorkspace,
+  withRuntimeContext,
+  type PaymentRequestRow,
+} from "@academic-precision/database";
+import { loadServerEnv } from "@academic-precision/config";
+import type {
+  BillingCycle,
+  BillingPaymentMethod,
+  CreatePaymentRequest,
+  CreatePaymentRequestResponse,
+  ListPaymentRequestsResponse,
+  PaymentRequestDto,
+  StandardPlanCode,
+} from "@academic-precision/contracts";
+import { ForbiddenApiException } from "../../common/exceptions/api.exception";
+import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
+import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
+import { buildPaymentInstructions, type BillingChannelConfig } from "./payment-instructions";
+
+const OWNER_ROLE_LABEL = "OWNER";
+
+/**
+ * Customer-facing payment requests (Billing Phase 3). Owner-only. Price is
+ * SERVER-computed inside the DB transaction from the plan catalog — the client
+ * only sends {planCode, billingCycle, paymentMethod}. Runs under app_runtime.
+ */
+@Injectable()
+export class PaymentRequestsService {
+  private channelConfig(): BillingChannelConfig {
+    const env = loadServerEnv();
+    return {
+      instapayHandle: env.RASID_INSTAPAY_HANDLE,
+      vodafoneCashNumber: env.RASID_VODAFONE_CASH_NUMBER,
+      billingWhatsappNumber: env.RASID_BILLING_WHATSAPP_NUMBER,
+    };
+  }
+
+  private assertOwner(workspaceContext: WorkspaceContext): void {
+    if (workspaceContext.membership.roleLabel !== OWNER_ROLE_LABEL) throw new ForbiddenApiException();
+  }
+
+  async createPaymentRequest(
+    user: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    body: CreatePaymentRequest,
+  ): Promise<CreatePaymentRequestResponse> {
+    this.assertOwner(workspaceContext);
+    const { paymentRequest } = await withRuntimeContext(
+      { userId: user.id, workspaceId: workspaceContext.workspaceId },
+      (db) =>
+        createPaymentRequestTransaction(db, {
+          workspaceId: workspaceContext.workspaceId,
+          requestedByUserId: user.id,
+          planCode: body.planCode as StandardPlanCode,
+          billingCycle: body.billingCycle as BillingCycle,
+          paymentMethod: body.paymentMethod,
+        }),
+    );
+    const instructions = buildPaymentInstructions(this.channelConfig(), {
+      method: paymentRequest.paymentMethod as BillingPaymentMethod,
+      planCode: paymentRequest.targetPlanCode,
+      billingCycle: paymentRequest.billingCycle as BillingCycle,
+      amountMinor: paymentRequest.amountMinor,
+      currencyCode: paymentRequest.currencyCode,
+      humanCode: paymentRequest.humanCode,
+    });
+    return { paymentRequest: this.toDto(paymentRequest), instructions };
+  }
+
+  async listPaymentRequests(
+    user: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+  ): Promise<ListPaymentRequestsResponse> {
+    this.assertOwner(workspaceContext);
+    const rows = await withRuntimeContext(
+      { userId: user.id, workspaceId: workspaceContext.workspaceId },
+      (db) => listPaymentRequestsForWorkspace(db, workspaceContext.workspaceId),
+    );
+    return { paymentRequests: rows.map((r) => this.toDto(r)) };
+  }
+
+  private toDto(row: PaymentRequestRow): PaymentRequestDto {
+    return {
+      id: row.id,
+      humanCode: row.humanCode,
+      actionType: row.actionType as PaymentRequestDto["actionType"],
+      targetPlanCode: row.targetPlanCode,
+      billingCycle: row.billingCycle as BillingCycle,
+      amountMinor: row.amountMinor,
+      currencyCode: row.currencyCode,
+      paymentMethod: row.paymentMethod as BillingPaymentMethod,
+      status: row.status as PaymentRequestDto["status"],
+      rejectReason: row.rejectReason,
+      expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+}

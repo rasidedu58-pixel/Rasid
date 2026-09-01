@@ -89,6 +89,11 @@ describe.skipIf(!hasLiveCreds)("Phase 6 Closure Delta — CreateMonth Carry-Forw
     await admin`INSERT INTO memberships (id, workspace_id, user_id, role_label, status, joined_at) VALUES
       (${membershipAId}, ${workspaceAId}, ${userAId}, 'OWNER', 'ACTIVE', now())`;
 
+    // Billing Phase 2 — every workspace has a subscription in production; month
+    // create now takes its row lock for the carry-forward capacity check, so the
+    // fixture must provide one (defaults to TRIAL).
+    await admin`INSERT INTO subscriptions (workspace_id) VALUES (${workspaceAId}), (${workspaceBId})`;
+
     await admin`INSERT INTO groups (id, workspace_id, name, status) VALUES
       (${groupAId}, ${workspaceAId}, 'CarryForward Test Group A', 'ACTIVE'),
       (${groupBId}, ${workspaceBId}, 'CarryForward Test Group B', 'ACTIVE')`;
@@ -133,6 +138,7 @@ describe.skipIf(!hasLiveCreds)("Phase 6 Closure Delta — CreateMonth Carry-Forw
       await admin`DELETE FROM group_months WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM operating_months WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM groups WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
+      await admin`DELETE FROM subscriptions WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM memberships WHERE workspace_id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM workspaces WHERE id IN (${workspaceAId}, ${workspaceBId})`;
       await admin`DELETE FROM users WHERE id IN (${userAId}, ${userBId})`;

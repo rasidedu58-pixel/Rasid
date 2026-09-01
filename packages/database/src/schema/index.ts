@@ -42,3 +42,5 @@ export * as outbox from "./outbox";
 export * as idempotency from "./idempotency";
 export * as featureFlags from "./feature-flags";
 export * as platformAdmin from "./platform-admin";
+export * as paymentRequests from "./payment-requests";
+export * as subscriptionPayments from "./subscription-payments";
