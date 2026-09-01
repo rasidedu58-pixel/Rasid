@@ -139,7 +139,7 @@ export function PaymentRequestPanel({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function PaymentInstructionsCard({ created }: { created: CreatePaymentRequestResponse }) {
+export function PaymentInstructionsCard({ created }: { created: CreatePaymentRequestResponse }) {
   const { paymentRequest: req, instructions: ins } = created;
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-brand/30 bg-brand-subtle/30 p-4">

@@ -44,3 +44,4 @@ export * as featureFlags from "./feature-flags";
 export * as platformAdmin from "./platform-admin";
 export * as paymentRequests from "./payment-requests";
 export * as subscriptionPayments from "./subscription-payments";
+export * as subscriptionPeriods from "./subscription-periods";

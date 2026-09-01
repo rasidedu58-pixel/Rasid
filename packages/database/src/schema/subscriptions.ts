@@ -63,6 +63,14 @@ export const subscriptions = pgTable(
     currentPriceMinor: bigint("current_price_minor", { mode: "number" }),
     priceCurrencyCode: char("price_currency_code", { length: 3 }),
     planPriceVersion: integer("plan_price_version"),
+    // ── Scheduled downgrade (Billing Engine, Phase 4) — a FUTURE-renewal target
+    // only; NEVER the current plan. Presence of pendingPlanCode = one scheduled
+    // downgrade exists. All-or-nothing (see check). Cleared when a renewal
+    // consumes it or the owner cancels it (migration 0066).
+    pendingPlanCode: text("pending_plan_code"),
+    pendingBillingCycle: text("pending_billing_cycle"),
+    pendingChangeRequestedAt: timestamp("pending_change_requested_at", { withTimezone: true }),
+    pendingChangeRequestedBy: uuid("pending_change_requested_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
     version: integer("version").notNull().default(1),
@@ -92,6 +100,16 @@ export const subscriptions = pgTable(
       sql`(${table.customMaxActiveStudents} IS NULL OR ${table.customMaxActiveStudents} > 0) AND (${table.customMaxTeamMembers} IS NULL OR ${table.customMaxTeamMembers} >= 0)`,
     ),
     check("subscriptions_price_nonnegative_check", sql`${table.currentPriceMinor} IS NULL OR ${table.currentPriceMinor} >= 0`),
+    // Scheduled-downgrade pending state (Phase 4, migration 0066).
+    check(
+      "subscriptions_pending_plan_code_check",
+      sql`${table.pendingPlanCode} IS NULL OR ${table.pendingPlanCode} IN ('STARTER', 'GROWTH', 'PROFESSIONAL', 'ADVANCED', 'BUSINESS', 'BUSINESS_PLUS')`,
+    ),
+    check("subscriptions_pending_billing_cycle_check", sql`${table.pendingBillingCycle} IS NULL OR ${table.pendingBillingCycle} IN ('MONTHLY', 'ANNUAL')`),
+    check(
+      "subscriptions_pending_all_or_none_check",
+      sql`(${table.pendingPlanCode} IS NULL AND ${table.pendingBillingCycle} IS NULL AND ${table.pendingChangeRequestedAt} IS NULL AND ${table.pendingChangeRequestedBy} IS NULL) OR (${table.pendingPlanCode} IS NOT NULL AND ${table.pendingBillingCycle} IS NOT NULL AND ${table.pendingChangeRequestedAt} IS NOT NULL AND ${table.pendingChangeRequestedBy} IS NOT NULL)`,
+    ),
     // A price implies a plan + cycle + currency (but NOT a version — a CUSTOM price is hand-set, planPriceVersion NULL).
     check(
       "subscriptions_price_implies_plan_check",

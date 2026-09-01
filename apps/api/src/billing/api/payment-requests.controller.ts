@@ -1,7 +1,16 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import { createPaymentRequestSchema, type CreatePaymentRequestResponse, type ListPaymentRequestsResponse } from "@academic-precision/contracts";
+import {
+  createPaymentRequestSchema,
+  scheduleDowngradeRequestSchema,
+  upgradeQuoteRequestSchema,
+  type CreatePaymentRequestResponse,
+  type GetBillingPlanStateResponse,
+  type ListPaymentRequestsResponse,
+  type ScheduleDowngradeResponse,
+  type UpgradeQuoteResponse,
+} from "@academic-precision/contracts";
 import { SupabaseAuthGuard } from "../../identity/api/guards/supabase-auth.guard";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import { CurrentUser } from "../../identity/api/decorators/current-user.decorator";
@@ -47,5 +56,54 @@ export class PaymentRequestsController {
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
   ): Promise<ListPaymentRequestsResponse> {
     return this.service.listPaymentRequests(user, workspaceContext);
+  }
+
+  // ── Phase 4: plan state + upgrade quote + scheduled downgrade (owner-only) ──
+
+  @Get("plan-state")
+  @ApiOperation({ summary: "Current plan, usage, limits, period end, and any scheduled downgrade (owner-only)" })
+  getPlanState(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+  ): Promise<GetBillingPlanStateResponse> {
+    return this.service.getPlanState(user, workspaceContext);
+  }
+
+  @Post("upgrade-quote")
+  @Throttle({ default: { limit: RATE_LIMIT.billing.limit, ttl: RATE_LIMIT.billing.ttlMs } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Preview an upgrade's exact server-computed proration (read-only; client sends no amount)" })
+  upgradeQuote(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Body() body: unknown,
+  ): Promise<UpgradeQuoteResponse> {
+    const parsed = upgradeQuoteRequestSchema.safeParse(body);
+    if (!parsed.success) throw new ValidationApiException(toFieldErrors(parsed.error));
+    return this.service.quoteUpgrade(user, workspaceContext, parsed.data);
+  }
+
+  @Post("downgrade/schedule")
+  @Throttle({ default: { limit: RATE_LIMIT.billing.limit, ttl: RATE_LIMIT.billing.ttlMs } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Schedule a downgrade to a lower plan, effective at the next renewal (owner-only)" })
+  scheduleDowngrade(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Body() body: unknown,
+  ): Promise<ScheduleDowngradeResponse> {
+    const parsed = scheduleDowngradeRequestSchema.safeParse(body);
+    if (!parsed.success) throw new ValidationApiException(toFieldErrors(parsed.error));
+    return this.service.scheduleDowngrade(user, workspaceContext, parsed.data);
+  }
+
+  @Post("downgrade/cancel")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Cancel a scheduled downgrade (owner-only)" })
+  cancelDowngrade(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+  ): Promise<ScheduleDowngradeResponse> {
+    return this.service.cancelDowngrade(user, workspaceContext);
   }
 }

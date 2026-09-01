@@ -25,6 +25,10 @@ describe("worker bootstrap — fail-fast on missing app_worker connection", () =
         );
       },
       processPendingOutboxEvents: processedFn,
+      runSubscriptionExpiryCheck: vi.fn(),
+      runNotificationsScan: vi.fn(),
+      runPeriodAdvance: vi.fn(),
+      WORKER_CONSUMED_EVENT_TYPES: ["SessionCompleted"],
       closeDb: vi.fn(),
     }));
     vi.doMock("@academic-precision/observability", () => ({
@@ -61,6 +65,8 @@ describe("worker idle-poll backoff", () => {
       processPendingOutboxEvents: vi.fn(),
       runSubscriptionExpiryCheck: vi.fn(),
       runNotificationsScan: vi.fn(),
+      runPeriodAdvance: vi.fn(),
+      WORKER_CONSUMED_EVENT_TYPES: ["SessionCompleted"],
       closeDb: vi.fn(),
     }));
     vi.doMock("@academic-precision/observability", () => ({

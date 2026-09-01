@@ -8,6 +8,11 @@ import type {
   CreatePaymentRequest,
   CreatePaymentRequestResponse,
   ListPaymentRequestsResponse,
+  GetBillingPlanStateResponse,
+  UpgradeQuoteRequest,
+  UpgradeQuoteResponse,
+  ScheduleDowngradeRequest,
+  ScheduleDowngradeResponse,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -35,4 +40,22 @@ export function createPaymentRequest(workspaceId: string, body: CreatePaymentReq
 
 export function listPaymentRequests(workspaceId: string): Promise<ListPaymentRequestsResponse> {
   return apiRequest<ListPaymentRequestsResponse>("/billing/payment-requests", { workspaceId });
+}
+
+// --- Billing Phase 4: plan state + upgrade quote + scheduled downgrade --------
+
+export function fetchBillingPlanState(workspaceId: string): Promise<GetBillingPlanStateResponse> {
+  return apiRequest<GetBillingPlanStateResponse>("/billing/plan-state", { workspaceId });
+}
+
+export function quoteUpgrade(workspaceId: string, body: UpgradeQuoteRequest): Promise<UpgradeQuoteResponse> {
+  return apiRequest<UpgradeQuoteResponse>("/billing/upgrade-quote", { method: "POST", workspaceId, body });
+}
+
+export function scheduleDowngrade(workspaceId: string, body: ScheduleDowngradeRequest): Promise<ScheduleDowngradeResponse> {
+  return apiRequest<ScheduleDowngradeResponse>("/billing/downgrade/schedule", { method: "POST", workspaceId, body });
+}
+
+export function cancelDowngrade(workspaceId: string): Promise<ScheduleDowngradeResponse> {
+  return apiRequest<ScheduleDowngradeResponse>("/billing/downgrade/cancel", { method: "POST", workspaceId, body: {} });
 }

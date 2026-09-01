@@ -137,8 +137,20 @@ export default function PlatformAdminPaymentRequestsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="font-mono">{r.humanCode}</TableCell>
-                      <TableCell>{r.targetPlanCode} · {r.billingCycle === "ANNUAL" ? "سنوي" : "شهري"}</TableCell>
-                      <TableCell>{formatMoney(r.amountMinor, r.currencyCode)}</TableCell>
+                      <TableCell>
+                        {r.actionType === "UPGRADE" && r.currentPlanCode ? (
+                          <div className="flex flex-col">
+                            <span>{r.currentPlanCode} ← {r.targetPlanCode}</span>
+                            <span className="text-xs text-brand">ترقية · {r.billingCycle === "ANNUAL" ? "سنوي" : "شهري"}</span>
+                          </div>
+                        ) : (
+                          <>{r.targetPlanCode} · {r.billingCycle === "ANNUAL" ? "سنوي" : "شهري"}</>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {formatMoney(r.amountMinor, r.currencyCode)}
+                        {r.actionType === "UPGRADE" ? <span className="block text-xs text-text-tertiary">فرق الترقية</span> : null}
+                      </TableCell>
                       <TableCell>{METHOD_LABEL[r.paymentMethod] ?? r.paymentMethod}</TableCell>
                       <TableCell>{formatDate(r.createdAt)}</TableCell>
                       <TableCell><Badge tone={STATUS_TONE[r.status] ?? "neutral"}>{STATUS_LABEL[r.status] ?? r.status}</Badge></TableCell>

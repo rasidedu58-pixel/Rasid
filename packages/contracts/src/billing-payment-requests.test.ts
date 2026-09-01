@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createPaymentRequestSchema, rejectPaymentRequestSchema, BILLING_PAYMENT_METHODS } from "./billing-payment-requests";
+import {
+  createPaymentRequestSchema,
+  rejectPaymentRequestSchema,
+  scheduleDowngradeRequestSchema,
+  upgradeQuoteRequestSchema,
+  BILLING_PAYMENT_METHODS,
+} from "./billing-payment-requests";
 import { hasPlatformPermission } from "./platform-operations";
 
 describe("createPaymentRequest — price trust boundary", () => {
@@ -33,6 +39,22 @@ describe("rejectPaymentRequest", () => {
   it("requires a non-empty reason", () => {
     expect(rejectPaymentRequestSchema.safeParse({ reason: "" }).success).toBe(false);
     expect(rejectPaymentRequestSchema.safeParse({ reason: "لم يصل التحويل" }).success).toBe(true);
+  });
+});
+
+describe("Phase 4 plan-change request schemas — client never sends a price", () => {
+  it("upgrade quote request accepts only {targetPlanCode, billingCycle}", () => {
+    const parsed = upgradeQuoteRequestSchema.parse({ targetPlanCode: "ADVANCED", billingCycle: "MONTHLY", amountMinor: 999 } as never);
+    expect(parsed).toEqual({ targetPlanCode: "ADVANCED", billingCycle: "MONTHLY" });
+  });
+  it("upgrade quote rejects CUSTOM / invalid plan", () => {
+    expect(upgradeQuoteRequestSchema.safeParse({ targetPlanCode: "CUSTOM", billingCycle: "MONTHLY" }).success).toBe(false);
+    expect(upgradeQuoteRequestSchema.safeParse({ targetPlanCode: "NOPE", billingCycle: "MONTHLY" }).success).toBe(false);
+  });
+  it("schedule downgrade accepts only {targetPlanCode}", () => {
+    const parsed = scheduleDowngradeRequestSchema.parse({ targetPlanCode: "STARTER" });
+    expect(parsed).toEqual({ targetPlanCode: "STARTER" });
+    expect(scheduleDowngradeRequestSchema.safeParse({ targetPlanCode: "CUSTOM" }).success).toBe(false);
   });
 });
 

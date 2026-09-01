@@ -12,9 +12,19 @@ import { randomInt } from "node:crypto";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { DateTime } from "luxon";
 import {
+  assertDowngradeTransition,
+  assertUpgradeTransition,
+  computeUpgradeProrationOverPeriods,
+  evaluateDowngradeUsage,
+  isDowngrade,
+  isStandardPlanCode,
+  isUpgrade,
   resolveCatalogPrice,
+  resolvePlanLimits,
   type BillingCycle,
+  type PlanCode,
   type StandardPlanCode,
+  type SubscriptionStateDto,
 } from "@academic-precision/contracts";
 import type { Db } from "./identity.repository";
 import { paymentRequests } from "../schema/payment-requests";
@@ -25,7 +35,10 @@ import { users } from "../schema/identity";
 import { auditEvents } from "../schema/audit";
 import { outboxEvents } from "../schema/outbox";
 import { notifications } from "../schema/notifications";
-import { applySubscriptionTransitionOnTx, SUBSCRIPTION_VERSION_CONFLICT } from "./subscriptions.repository";
+import { applySubscriptionTransitionOnTx, SUBSCRIPTION_VERSION_CONFLICT, type SubscriptionRow } from "./subscriptions.repository";
+import { appendSubscriptionPeriodOnTx, loadLedgerRowsForSubscription } from "./subscription-periods.repository";
+import { effectiveRowAt, hasFutureDifferentPlanPeriod, paidThroughMs, resolveEffectiveSegments, toProrationSlices } from "../billing/period-ledger";
+import { findCurrentMonthId, getActiveStudentCountForMonth, getActiveTeamUsage } from "../billing/capacity";
 
 export type PaymentRequestRow = typeof paymentRequests.$inferSelect;
 export type SubscriptionPaymentRow = typeof subscriptionPayments.$inferSelect;
@@ -74,6 +87,54 @@ export class NoCatalogPriceError extends BillingRequestError {
   readonly code = "NO_CATALOG_PRICE";
   readonly httpStatus = 400;
   constructor() { super("لا يوجد سعر معتمد لهذه الباقة."); this.name = "NoCatalogPriceError"; }
+}
+// ── Phase 4: plan-change (upgrade / downgrade) domain errors ────────────────
+export class SubscriptionNotActiveError extends BillingRequestError {
+  readonly code = "SUBSCRIPTION_NOT_ACTIVE";
+  readonly httpStatus = 409;
+  constructor() { super("تغيير الباقة متاح فقط لاشتراك فعّال."); this.name = "SubscriptionNotActiveError"; }
+}
+export class NotAnUpgradeError extends BillingRequestError {
+  readonly code = "NOT_AN_UPGRADE";
+  readonly httpStatus = 409;
+  constructor() { super("الباقة المطلوبة ليست ترقية. لخفض الباقة استخدم الجدولة عند التجديد."); this.name = "NotAnUpgradeError"; }
+}
+export class NotADowngradeError extends BillingRequestError {
+  readonly code = "NOT_A_DOWNGRADE";
+  readonly httpStatus = 409;
+  constructor() { super("الباقة المطلوبة ليست خفضًا."); this.name = "NotADowngradeError"; }
+}
+export class CrossCycleUpgradeNotSupportedError extends BillingRequestError {
+  readonly code = "CROSS_CYCLE_UPGRADE_NOT_SUPPORTED";
+  readonly httpStatus = 409;
+  constructor() { super("لا يمكن تغيير دورة الفوترة (شهري/سنوي) أثناء الترقية حاليًا."); this.name = "CrossCycleUpgradeNotSupportedError"; }
+}
+export class UpgradeProrationNonPositiveError extends BillingRequestError {
+  readonly code = "UPGRADE_PRORATION_NON_POSITIVE";
+  readonly httpStatus = 409;
+  constructor() { super("لا يوجد مبلغ فرق مستحق للترقية على الوقت المتبقي."); this.name = "UpgradeProrationNonPositiveError"; }
+}
+export class DowngradeBlockedByUsageError extends BillingRequestError {
+  readonly code = "DOWNGRADE_BLOCKED_BY_USAGE";
+  readonly httpStatus = 409;
+  constructor(details: { currentStudents: number; targetStudentLimit: number; currentTeamMembers: number; targetTeamLimit: number }) {
+    super("استخدامك الحالي يتجاوز حدود الباقة الأقل. قلّل الاستخدام قبل خفض الباقة.");
+    this.name = "DowngradeBlockedByUsageError";
+    (this as { details?: Record<string, unknown> }).details = details;
+  }
+}
+export class NoPendingDowngradeError extends BillingRequestError {
+  readonly code = "NO_PENDING_DOWNGRADE";
+  readonly httpStatus = 409;
+  constructor() { super("لا يوجد خفض باقة مجدول."); this.name = "NoPendingDowngradeError"; }
+}
+export class FuturePlanChangeExistsError extends BillingRequestError {
+  readonly code = "FUTURE_PLAN_CHANGE_EXISTS";
+  readonly httpStatus = 409;
+  constructor() {
+    super("يوجد تغيير مدفوع/مجدول للباقة في فترة قادمة؛ لا يمكن تنفيذ ترقية جديدة قبل بدء/تسوية هذا التغيير.");
+    this.name = "FuturePlanChangeExistsError";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -147,23 +208,25 @@ export async function createPaymentRequestTransaction(
 ): Promise<{ paymentRequest: PaymentRequestRow; reused: boolean }> {
   return db.transaction(async (tx) => {
     const [subscription] = await tx
-      .select({ id: subscriptions.id, version: subscriptions.version, state: subscriptions.state, planCode: subscriptions.planCode })
+      .select({
+        id: subscriptions.id,
+        version: subscriptions.version,
+        state: subscriptions.state,
+        planCode: subscriptions.planCode,
+        billingCycle: subscriptions.billingCycle,
+        currentPriceMinor: subscriptions.currentPriceMinor,
+        periodStart: subscriptions.periodStart,
+        periodEnd: subscriptions.periodEnd,
+        pendingPlanCode: subscriptions.pendingPlanCode,
+        pendingBillingCycle: subscriptions.pendingBillingCycle,
+      })
       .from(subscriptions)
       .where(eq(subscriptions.workspaceId, input.workspaceId))
       .limit(1);
     if (!subscription) throw new PaymentRequestNotFoundError(); // no subscription row = misprovisioned workspace
 
-    // Phase 3 scope: NEW_SUBSCRIPTION from any non-active state; RENEWAL only on
-    // the SAME active plan. A different plan while ACTIVE is upgrade/downgrade —
-    // not available in Phase 3.
     const isActive = subscription.state === ACTIVE_SUBSCRIPTION_STATE;
-    const actionType = isActive ? "RENEWAL" : "NEW_SUBSCRIPTION";
-    if (isActive && subscription.planCode && subscription.planCode !== input.planCode) {
-      throw new PlanChangeNotSupportedError();
-    }
-
-    const price = resolveCatalogPrice(input.planCode, input.billingCycle);
-    if (!price) throw new NoCatalogPriceError();
+    const quote = await resolvePaymentRequestQuote(tx, subscription, input);
 
     // Dedup / anti-spam: reuse an identical PENDING request; otherwise cancel any
     // existing PENDING (the partial-unique index allows only one at a time).
@@ -174,9 +237,10 @@ export async function createPaymentRequestTransaction(
       .limit(1);
     if (existingPending) {
       const sameSelection =
-        existingPending.targetPlanCode === input.planCode &&
+        existingPending.targetPlanCode === quote.targetPlanCode &&
         existingPending.billingCycle === input.billingCycle &&
-        existingPending.paymentMethod === input.paymentMethod;
+        existingPending.paymentMethod === input.paymentMethod &&
+        existingPending.actionType === quote.actionType;
       if (sameSelection) return { paymentRequest: existingPending, reused: true };
       await tx
         .update(paymentRequests)
@@ -184,15 +248,8 @@ export async function createPaymentRequestTransaction(
         .where(eq(paymentRequests.id, existingPending.id));
     }
 
-    const quoteSnapshot = {
-      planCode: input.planCode,
-      billingCycle: input.billingCycle,
-      amountMinor: price.amountMinor,
-      currency: price.currency,
-      planPriceVersion: price.planPriceVersion,
-      subscriptionVersion: subscription.version,
-    };
     const expiresAt = new Date(Date.now() + DEFAULT_REQUEST_TTL_MS);
+    void isActive;
 
     // Insert with a unique human code — retry on the (rare) collision.
     for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -203,15 +260,15 @@ export async function createPaymentRequestTransaction(
             workspaceId: input.workspaceId,
             requestedByUserId: input.requestedByUserId,
             humanCode: generateHumanCode(),
-            actionType,
-            targetPlanCode: input.planCode,
+            actionType: quote.actionType,
+            targetPlanCode: quote.targetPlanCode,
             billingCycle: input.billingCycle,
-            amountMinor: price.amountMinor,
-            currencyCode: price.currency,
+            amountMinor: quote.amountMinor,
+            currencyCode: quote.currencyCode,
             paymentMethod: input.paymentMethod,
             status: "PENDING",
             boundSubscriptionVersion: subscription.version,
-            quoteSnapshotJson: quoteSnapshot,
+            quoteSnapshotJson: quote.snapshot,
             expiresAt,
           })
           .returning();
@@ -222,7 +279,7 @@ export async function createPaymentRequestTransaction(
           eventType: "PaymentRequestCreated",
           aggregateType: "PaymentRequest",
           aggregateId: row.id,
-          payload: { paymentRequestId: row.id, planCode: input.planCode, amountMinor: price.amountMinor },
+          payload: { paymentRequestId: row.id, planCode: quote.targetPlanCode, amountMinor: quote.amountMinor, actionType: quote.actionType },
         });
         await tx.insert(auditEvents).values({
           workspaceId: input.workspaceId,
@@ -231,7 +288,7 @@ export async function createPaymentRequestTransaction(
           action: "billing.payment_request.created",
           entityType: "payment_request",
           entityId: row.id,
-          afterJson: { humanCode: row.humanCode, planCode: input.planCode, billingCycle: input.billingCycle, amountMinor: price.amountMinor, method: input.paymentMethod },
+          afterJson: { humanCode: row.humanCode, actionType: quote.actionType, planCode: quote.targetPlanCode, billingCycle: input.billingCycle, amountMinor: quote.amountMinor, method: input.paymentMethod },
         });
         return { paymentRequest: row, reused: false };
       } catch (err) {
@@ -241,6 +298,137 @@ export async function createPaymentRequestTransaction(
     }
     throw new Error("Failed to allocate a unique payment-request code after several attempts.");
   });
+}
+
+interface QuoteSubscription {
+  id: string;
+  version: number;
+  state: string;
+  planCode: string | null;
+  billingCycle: string | null;
+  currentPriceMinor: number | null;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  pendingPlanCode: string | null;
+  pendingBillingCycle: string | null;
+}
+
+interface ResolvedQuote {
+  actionType: "NEW_SUBSCRIPTION" | "RENEWAL" | "UPGRADE";
+  targetPlanCode: StandardPlanCode;
+  amountMinor: number;
+  currencyCode: string;
+  snapshot: Record<string, unknown>;
+}
+
+/**
+ * Determine {action, target plan, amount, immutable quote snapshot} server-side.
+ * The client sends ONLY {planCode, billingCycle, method} — never a price.
+ *   • Not ACTIVE            → NEW_SUBSCRIPTION at catalog price.
+ *   • ACTIVE, same plan     → RENEWAL at catalog price. If a downgrade is
+ *     scheduled, the renewal instead targets the PENDING (lower) plan (§21),
+ *     after re-validating usage.
+ *   • ACTIVE, higher plan   → UPGRADE, amount = exact ledger proration (§8).
+ *   • ACTIVE, lower plan     → NOT_AN_UPGRADE (downgrade is a schedule, not a payment).
+ */
+async function resolvePaymentRequestQuote(tx: Db, sub: QuoteSubscription, input: CreatePaymentRequestInput): Promise<ResolvedQuote> {
+  const catalog = (plan: StandardPlanCode) => {
+    const p = resolveCatalogPrice(plan, input.billingCycle);
+    if (!p) throw new NoCatalogPriceError();
+    return p;
+  };
+
+  if (sub.state !== ACTIVE_SUBSCRIPTION_STATE) {
+    const price = catalog(input.planCode);
+    return {
+      actionType: "NEW_SUBSCRIPTION",
+      targetPlanCode: input.planCode,
+      amountMinor: price.amountMinor,
+      currencyCode: price.currency,
+      snapshot: { kind: "NEW_SUBSCRIPTION", planCode: input.planCode, billingCycle: input.billingCycle, amountMinor: price.amountMinor, currency: price.currency, planPriceVersion: price.planPriceVersion, subscriptionVersion: sub.version },
+    };
+  }
+
+  const current = sub.planCode;
+  if (!current || !isStandardPlanCode(current)) {
+    // ACTIVE CUSTOM/legacy plan → plan changes here are out of scope.
+    if (current === input.planCode) return renewalQuote(input, sub, input.planCode, catalog);
+    throw new PlanChangeNotSupportedError();
+  }
+
+  // Same plan → RENEWAL (which may be redirected to a scheduled downgrade target).
+  if (current === input.planCode) {
+    if (sub.pendingPlanCode && isStandardPlanCode(sub.pendingPlanCode)) {
+      // §21: a scheduled downgrade makes the NEXT renewal target the pending plan
+      // (same cycle in V1 — the schedule enforces this).
+      await assertDowngradeUsageFitsOnTx(tx, input.workspaceId, sub.pendingPlanCode);
+      return renewalQuote(input, sub, sub.pendingPlanCode, catalog);
+    }
+    return renewalQuote(input, sub, current, catalog);
+  }
+
+  // Different plan while ACTIVE → upgrade or (rejected) downgrade.
+  if (isDowngrade(current, input.planCode)) throw new NotAnUpgradeError();
+  if (!isUpgrade(current, input.planCode)) throw new PlanChangeNotSupportedError();
+
+  // UPGRADE (same-cycle only in V1).
+  assertUpgradeTransition(current, input.planCode);
+  if (sub.billingCycle && sub.billingCycle !== input.billingCycle) throw new CrossCycleUpgradeNotSupportedError();
+  const nowMs = Date.now();
+  const rows = await loadLedgerRowsForSubscription(tx, sub.id);
+  // Block if a plan change is already in flight: a scheduled (pending) downgrade,
+  // OR a PAID future period at a DIFFERENT plan (early-renewed downgrade). We
+  // never silently supersede / cancel / refund that future period in V1.
+  if (sub.pendingPlanCode || hasFutureDifferentPlanPeriod(rows, nowMs)) throw new FuturePlanChangeExistsError();
+  const target = catalog(input.planCode);
+  const slices = toProrationSlices(resolveEffectiveSegments(rows, nowMs));
+  const proration = computeUpgradeProrationOverPeriods({
+    targetPlan: input.planCode,
+    billingCycle: input.billingCycle,
+    targetCatalogPriceMinor: target.amountMinor,
+    nowMs,
+    periods: slices,
+  });
+  if (proration.kind === "NOT_SAME_CYCLE") throw new CrossCycleUpgradeNotSupportedError();
+  if (proration.kind !== "DUE") throw new UpgradeProrationNonPositiveError();
+  return {
+    actionType: "UPGRADE",
+    targetPlanCode: input.planCode,
+    amountMinor: proration.amountDueMinor,
+    currencyCode: target.currency,
+    snapshot: {
+      kind: "UPGRADE",
+      currentPlanCode: current,
+      targetPlanCode: input.planCode,
+      billingCycle: input.billingCycle,
+      currentPriceMinorSnapshot: sub.currentPriceMinor,
+      targetPriceMinor: target.amountMinor,
+      calculatedAmountMinor: proration.amountDueMinor,
+      creditRemainingMinor: proration.creditRemainingMinor,
+      targetRemainingCostMinor: proration.targetRemainingCostMinor,
+      currentPeriodStart: sub.periodStart?.toISOString() ?? null,
+      currentPeriodEnd: sub.periodEnd?.toISOString() ?? null,
+      quoteTimestamp: new Date(nowMs).toISOString(),
+      planPriceVersion: target.planPriceVersion,
+      subscriptionVersion: sub.version,
+    },
+  };
+}
+
+function renewalQuote(
+  input: CreatePaymentRequestInput,
+  sub: QuoteSubscription,
+  targetPlan: StandardPlanCode,
+  catalog: (plan: StandardPlanCode) => { amountMinor: number; currency: string; planPriceVersion: number },
+): ResolvedQuote {
+  const price = catalog(targetPlan);
+  return {
+    actionType: "RENEWAL",
+    targetPlanCode: targetPlan,
+    amountMinor: price.amountMinor,
+    currencyCode: price.currency,
+    snapshot: { kind: "RENEWAL", planCode: targetPlan, billingCycle: input.billingCycle, amountMinor: price.amountMinor, currency: price.currency, planPriceVersion: price.planPriceVersion, subscriptionVersion: sub.version },
+  };
 }
 
 function isHumanCodeCollision(err: unknown): boolean {
@@ -277,7 +465,18 @@ export async function confirmPaymentRequestTransaction(
 
     // 4. Stale-quote guard: the subscription must be exactly the version quoted.
     const [subscription] = await tx
-      .select({ id: subscriptions.id, version: subscriptions.version, periodEnd: subscriptions.periodEnd })
+      .select({
+        id: subscriptions.id,
+        version: subscriptions.version,
+        planCode: subscriptions.planCode,
+        billingCycle: subscriptions.billingCycle,
+        currentPriceMinor: subscriptions.currentPriceMinor,
+        priceCurrencyCode: subscriptions.priceCurrencyCode,
+        planPriceVersion: subscriptions.planPriceVersion,
+        periodStart: subscriptions.periodStart,
+        periodEnd: subscriptions.periodEnd,
+        pendingPlanCode: subscriptions.pendingPlanCode,
+      })
       .from(subscriptions)
       .where(eq(subscriptions.workspaceId, request.workspaceId))
       .limit(1);
@@ -312,27 +511,65 @@ export async function confirmPaymentRequestTransaction(
       .returning();
     if (!confirmedRequest) throw new Error("Failed to update payment_requests row to CONFIRMED.");
 
-    // 8. Activate the subscription with the commercial snapshot + period (ONE shared transition primitive).
-    //    RENEWAL extends from the current paid-through date (early renewal loses no days).
-    const { periodStart, periodEnd } = computeConfirmedPeriod({
-      actionType: request.actionType,
-      currentPeriodEnd: subscription.periodEnd,
-      now,
-      cycle: request.billingCycle as BillingCycle,
-    });
+    // 8. Append the period(s) to the immutable ledger, then sync the aggregate
+    //    from the ledger (source of truth). RENEWAL extends from paid-through;
+    //    UPGRADE appends target-plan rows over the remaining time (period_end
+    //    unchanged); a scheduled-downgrade renewal appends a FUTURE lower-plan
+    //    period without touching the current plan.
+    const nowMs = now.getTime();
+    let clearPending = false;
+
+    if (request.actionType === "UPGRADE") {
+      await appendUpgradePeriodsOnTx(tx, subscription, request, nowMs, payment.id);
+    } else {
+      // NEW_SUBSCRIPTION / RENEWAL — append one full-cycle period. Every paid
+      // subscription's FIRST activation is a NEW_SUBSCRIPTION that seeds its own
+      // ledger row, so a later renewal always has a current period to resolve
+      // against — no read/confirm-time backfill of invented history is needed.
+      const { periodStart, periodEnd } = computeConfirmedPeriod({
+        actionType: request.actionType,
+        currentPeriodEnd: subscription.periodEnd,
+        now,
+        cycle: request.billingCycle as BillingCycle,
+      });
+      await appendSubscriptionPeriodOnTx(tx, {
+        workspaceId: request.workspaceId,
+        subscriptionId: subscription.id,
+        planCode: request.targetPlanCode,
+        billingCycle: request.billingCycle,
+        cyclePriceMinor: request.amountMinor,
+        currencyCode: request.currencyCode,
+        planPriceVersion: quote.planPriceVersion,
+        periodStart,
+        periodEnd,
+        nominalCycleStart: periodStart,
+        nominalCycleEnd: periodEnd,
+        sourceAction: request.actionType === "RENEWAL" ? "RENEWAL" : "NEW_SUBSCRIPTION",
+        sourcePaymentId: payment.id,
+        supersedesPeriodId: null,
+      });
+      clearPending = !!subscription.pendingPlanCode && request.targetPlanCode === subscription.pendingPlanCode;
+    }
+
+    // Sync the aggregate to the ledger's EFFECTIVE state at `now` + paid-through.
+    const ledgerRows = await loadLedgerRowsForSubscription(tx, subscription.id);
+    const effective = effectiveRowAt(ledgerRows, nowMs) ?? ledgerRows[ledgerRows.length - 1];
+    if (!effective) throw new Error("No ledger period after confirm — cannot sync subscription aggregate.");
+    const paidEndMs = paidThroughMs(ledgerRows) ?? effective.periodEndMs;
     const result = await applySubscriptionTransitionOnTx(tx, {
       id: subscription.id,
       workspaceId: request.workspaceId,
       expectedVersion: subscription.version,
       nextState: PAID_STATE,
-      periodStart,
-      periodEnd,
+      periodStart: new Date(effective.periodStartMs),
+      periodEnd: new Date(paidEndMs),
       cancelAtPeriodEnd: false,
-      planCode: request.targetPlanCode,
-      billingCycle: request.billingCycle,
-      currentPriceMinor: request.amountMinor,
+      planCode: effective.planCode,
+      billingCycle: effective.billingCycle,
+      currentPriceMinor: effective.cyclePriceMinor,
       priceCurrencyCode: request.currencyCode,
-      planPriceVersion: quote.planPriceVersion,
+      planPriceVersion: effective.planPriceVersion,
+      clearPending,
       sourceType: "ADMIN",
       sourceId: request.id,
       actorUserId: input.confirmedByUserId,
@@ -340,6 +577,7 @@ export async function confirmPaymentRequestTransaction(
       correlationId: request.humanCode,
     });
     if (result === SUBSCRIPTION_VERSION_CONFLICT) throw new PaymentRequestStaleError();
+    const periodEnd = new Date(paidEndMs);
 
     // 9. Audit (payment-level) + 10. outbox + 11. notification to the customer owner.
     await tx.insert(auditEvents).values({
@@ -371,6 +609,307 @@ export async function confirmPaymentRequestTransaction(
 
     return { paymentRequest: confirmedRequest, payment };
   });
+}
+
+interface ConfirmSubscription {
+  id: string;
+  planCode: string | null;
+  billingCycle: string | null;
+  currentPriceMinor: number | null;
+  priceCurrencyCode: string | null;
+  planPriceVersion: number | null;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+}
+
+/**
+ * Append the UPGRADE period rows: for each EFFECTIVE remaining segment from
+ * `now`, a target-plan row [max(now, segStart), segEnd] winning by higher seq.
+ * The originals are never mutated; `period_end` (paid-through) is unchanged.
+ * The current period always exists (seeded at NEW_SUBSCRIPTION), and the create
+ * path already rejected a mixed future plan (FUTURE_PLAN_CHANGE_EXISTS), so all
+ * remaining segments here are the same plan being upgraded.
+ */
+async function appendUpgradePeriodsOnTx(
+  tx: Db,
+  sub: ConfirmSubscription & { pendingPlanCode?: string | null },
+  request: PaymentRequestRow,
+  nowMs: number,
+  paymentId: string,
+): Promise<void> {
+  const snapshot = request.quoteSnapshotJson as { targetPriceMinor?: number; planPriceVersion?: number };
+  const targetPriceMinor = snapshot.targetPriceMinor ?? request.amountMinor;
+  const rows = await loadLedgerRowsForSubscription(tx, sub.id);
+  const segments = resolveEffectiveSegments(rows, nowMs).filter((s) => s.endMs > nowMs);
+  const workspaceId = request.workspaceId;
+  for (const seg of segments) {
+    await appendSubscriptionPeriodOnTx(tx, {
+      workspaceId,
+      subscriptionId: sub.id,
+      planCode: request.targetPlanCode,
+      billingCycle: request.billingCycle,
+      cyclePriceMinor: targetPriceMinor,
+      currencyCode: request.currencyCode,
+      planPriceVersion: snapshot.planPriceVersion ?? null,
+      periodStart: new Date(Math.max(nowMs, seg.startMs)),
+      periodEnd: new Date(seg.endMs),
+      nominalCycleStart: new Date(seg.nominalCycleStartMs),
+      nominalCycleEnd: new Date(seg.nominalCycleEndMs),
+      sourceAction: "UPGRADE",
+      sourcePaymentId: paymentId,
+      supersedesPeriodId: seg.sourceRowId,
+    });
+  }
+}
+
+/** Throw DOWNGRADE_BLOCKED_BY_USAGE when current usage exceeds the target plan's limits. */
+async function assertDowngradeUsageFitsOnTx(tx: Db, workspaceId: string, targetPlan: string): Promise<void> {
+  if (!isStandardPlanCode(targetPlan)) throw new NotADowngradeError();
+  const currentMonthId = await findCurrentMonthId(tx, workspaceId);
+  const currentActiveStudents = currentMonthId ? await getActiveStudentCountForMonth(tx, workspaceId, currentMonthId) : 0;
+  const currentActiveTeamMembers = await getActiveTeamUsage(tx, workspaceId);
+  const decision = evaluateDowngradeUsage({ targetPlan, currentActiveStudents, currentActiveTeamMembers });
+  if (decision.decision === "BLOCKED_BY_USAGE") {
+    throw new DowngradeBlockedByUsageError({
+      currentStudents: decision.currentStudents,
+      targetStudentLimit: decision.targetStudentLimit,
+      currentTeamMembers: decision.currentTeamMembers,
+      targetTeamLimit: decision.targetTeamLimit,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled downgrade (customer owner, app_runtime) — a FUTURE-renewal target
+// only; the current plan never changes. Validates usage fits the target now,
+// stores the pending state (one max), and audits. No payment involved.
+// ---------------------------------------------------------------------------
+
+export interface ScheduleDowngradeInput {
+  workspaceId: string;
+  requestedByUserId: string;
+  targetPlanCode: StandardPlanCode;
+}
+
+export async function scheduleDowngradeTransaction(db: Db, input: ScheduleDowngradeInput): Promise<SubscriptionRow> {
+  return db.transaction(async (tx) => {
+    const [sub] = await tx
+      .select({ id: subscriptions.id, version: subscriptions.version, state: subscriptions.state, planCode: subscriptions.planCode, billingCycle: subscriptions.billingCycle })
+      .from(subscriptions)
+      .where(eq(subscriptions.workspaceId, input.workspaceId))
+      .limit(1);
+    if (!sub) throw new PaymentRequestNotFoundError();
+    if (sub.state !== ACTIVE_SUBSCRIPTION_STATE) throw new SubscriptionNotActiveError();
+    if (!sub.planCode || !isStandardPlanCode(sub.planCode)) throw new PlanChangeNotSupportedError();
+    assertDowngradeTransition(sub.planCode, input.targetPlanCode); // throws NOT_A_DOWNGRADE / SAME_PLAN / …
+    await assertDowngradeUsageFitsOnTx(tx, input.workspaceId, input.targetPlanCode);
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(subscriptions)
+      .set({
+        pendingPlanCode: input.targetPlanCode,
+        pendingBillingCycle: sub.billingCycle, // V1: downgrade keeps the current cycle
+        pendingChangeRequestedAt: now,
+        pendingChangeRequestedBy: input.requestedByUserId,
+        updatedAt: now,
+        version: sub.version + 1,
+      })
+      .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.version, sub.version)))
+      .returning();
+    if (!updated) throw new PaymentRequestStaleError();
+
+    await tx.insert(auditEvents).values({
+      workspaceId: input.workspaceId,
+      actorUserId: input.requestedByUserId,
+      actorMembershipId: null,
+      action: "billing.downgrade.scheduled",
+      entityType: "subscription",
+      entityId: sub.id,
+      beforeJson: { planCode: sub.planCode },
+      afterJson: { pendingPlanCode: input.targetPlanCode, effective: "NEXT_RENEWAL" },
+    });
+    return updated;
+  });
+}
+
+export async function cancelScheduledDowngradeTransaction(
+  db: Db,
+  input: { workspaceId: string; actorUserId: string },
+): Promise<SubscriptionRow> {
+  return db.transaction(async (tx) => {
+    const [sub] = await tx
+      .select({ id: subscriptions.id, version: subscriptions.version, pendingPlanCode: subscriptions.pendingPlanCode })
+      .from(subscriptions)
+      .where(eq(subscriptions.workspaceId, input.workspaceId))
+      .limit(1);
+    if (!sub) throw new PaymentRequestNotFoundError();
+    if (!sub.pendingPlanCode) throw new NoPendingDowngradeError();
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(subscriptions)
+      .set({
+        pendingPlanCode: null,
+        pendingBillingCycle: null,
+        pendingChangeRequestedAt: null,
+        pendingChangeRequestedBy: null,
+        updatedAt: now,
+        version: sub.version + 1,
+      })
+      .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.version, sub.version)))
+      .returning();
+    if (!updated) throw new PaymentRequestStaleError();
+
+    await tx.insert(auditEvents).values({
+      workspaceId: input.workspaceId,
+      actorUserId: input.actorUserId,
+      actorMembershipId: null,
+      action: "billing.downgrade.cancelled",
+      entityType: "subscription",
+      entityId: sub.id,
+      beforeJson: { pendingPlanCode: sub.pendingPlanCode },
+      afterJson: { pendingPlanCode: null },
+    });
+    return updated;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Read-only views for the customer billing page (owner, app_runtime).
+// ---------------------------------------------------------------------------
+
+export interface BillingPlanState {
+  state: SubscriptionStateDto;
+  currentPlanCode: string | null;
+  billingCycle: string | null;
+  periodEnd: string | null;
+  limits: { maxActiveStudents: number; maxTeamMembers: number };
+  usage: { activeStudents: number; activeTeamMembers: number };
+  pendingDowngrade: { targetPlanCode: string; billingCycle: string } | null;
+}
+
+/** Current commercial state + usage the billing page renders. Read-only. */
+export async function loadBillingPlanState(db: Db, workspaceId: string): Promise<BillingPlanState | null> {
+  const [sub] = await db
+    .select({
+      state: subscriptions.state,
+      planCode: subscriptions.planCode,
+      billingCycle: subscriptions.billingCycle,
+      periodEnd: subscriptions.periodEnd,
+      customMaxActiveStudents: subscriptions.customMaxActiveStudents,
+      customMaxTeamMembers: subscriptions.customMaxTeamMembers,
+      pendingPlanCode: subscriptions.pendingPlanCode,
+      pendingBillingCycle: subscriptions.pendingBillingCycle,
+    })
+    .from(subscriptions)
+    .where(eq(subscriptions.workspaceId, workspaceId))
+    .limit(1);
+  if (!sub) return null;
+
+  let limits = { maxActiveStudents: 0, maxTeamMembers: 0 };
+  try {
+    limits = resolvePlanLimits({
+      subscriptionState: sub.state as SubscriptionStateDto,
+      planCode: (sub.planCode as PlanCode | null) ?? null,
+      customMaxActiveStudents: sub.customMaxActiveStudents,
+      customMaxTeamMembers: sub.customMaxTeamMembers,
+    });
+  } catch {
+    /* unmapped/legacy — display zeros rather than fabricate an allowance */
+  }
+
+  const currentMonthId = await findCurrentMonthId(db, workspaceId);
+  const activeStudents = currentMonthId ? await getActiveStudentCountForMonth(db, workspaceId, currentMonthId) : 0;
+  const activeTeamMembers = await getActiveTeamUsage(db, workspaceId);
+
+  return {
+    state: sub.state as SubscriptionStateDto,
+    currentPlanCode: sub.planCode,
+    billingCycle: sub.billingCycle,
+    periodEnd: sub.periodEnd ? sub.periodEnd.toISOString() : null,
+    limits,
+    usage: { activeStudents, activeTeamMembers },
+    pendingDowngrade: sub.pendingPlanCode && sub.pendingBillingCycle ? { targetPlanCode: sub.pendingPlanCode, billingCycle: sub.pendingBillingCycle } : null,
+  };
+}
+
+export interface UpgradeQuote {
+  eligible: boolean;
+  reason: string | null;
+  currentPlanCode: string | null;
+  targetPlanCode: StandardPlanCode;
+  billingCycle: BillingCycle;
+  normalTargetPriceMinor: number;
+  creditRemainingMinor: number;
+  amountDueMinor: number;
+  currencyCode: string;
+  paidThrough: string | null;
+}
+
+/** Read-only upgrade proration preview (no writes). Same math as the create path. */
+export async function quoteUpgradeForWorkspace(
+  db: Db,
+  input: { workspaceId: string; targetPlanCode: StandardPlanCode; billingCycle: BillingCycle },
+): Promise<UpgradeQuote> {
+  const [sub] = await db
+    .select({
+      id: subscriptions.id,
+      version: subscriptions.version,
+      state: subscriptions.state,
+      planCode: subscriptions.planCode,
+      billingCycle: subscriptions.billingCycle,
+      currentPriceMinor: subscriptions.currentPriceMinor,
+      periodStart: subscriptions.periodStart,
+      periodEnd: subscriptions.periodEnd,
+      pendingPlanCode: subscriptions.pendingPlanCode,
+      pendingBillingCycle: subscriptions.pendingBillingCycle,
+    })
+    .from(subscriptions)
+    .where(eq(subscriptions.workspaceId, input.workspaceId))
+    .limit(1);
+
+  const target = resolveCatalogPrice(input.targetPlanCode, input.billingCycle);
+  const base: UpgradeQuote = {
+    eligible: false,
+    reason: null,
+    currentPlanCode: sub?.planCode ?? null,
+    targetPlanCode: input.targetPlanCode,
+    billingCycle: input.billingCycle,
+    normalTargetPriceMinor: target?.amountMinor ?? 0,
+    creditRemainingMinor: 0,
+    amountDueMinor: 0,
+    currencyCode: target?.currency ?? "EGP",
+    paidThrough: sub?.periodEnd ? sub.periodEnd.toISOString() : null,
+  };
+  if (!sub) return { ...base, reason: "SUBSCRIPTION_NOT_ACTIVE" };
+  if (sub.state !== ACTIVE_SUBSCRIPTION_STATE) return { ...base, reason: "SUBSCRIPTION_NOT_ACTIVE" };
+  const current = sub.planCode;
+  if (!current || !isStandardPlanCode(current)) return { ...base, reason: "PLAN_CHANGE_NOT_SUPPORTED" };
+  if (current === input.targetPlanCode) return { ...base, reason: "SAME_PLAN" };
+  if (!isUpgrade(current, input.targetPlanCode)) return { ...base, reason: "NOT_AN_UPGRADE" };
+  if (sub.billingCycle && sub.billingCycle !== input.billingCycle) return { ...base, reason: "CROSS_CYCLE_UPGRADE_NOT_SUPPORTED" };
+  if (!target) return { ...base, reason: "NO_CATALOG_PRICE" };
+
+  const nowMs = Date.now();
+  const rows = await loadLedgerRowsForSubscription(db, sub.id);
+  if (sub.pendingPlanCode || hasFutureDifferentPlanPeriod(rows, nowMs)) return { ...base, reason: "FUTURE_PLAN_CHANGE_EXISTS" };
+  const slices = toProrationSlices(resolveEffectiveSegments(rows, nowMs));
+  const proration = computeUpgradeProrationOverPeriods({
+    targetPlan: input.targetPlanCode,
+    billingCycle: input.billingCycle,
+    targetCatalogPriceMinor: target.amountMinor,
+    nowMs,
+    periods: slices,
+  });
+  if (proration.kind === "NOT_SAME_CYCLE") return { ...base, reason: "CROSS_CYCLE_UPGRADE_NOT_SUPPORTED" };
+  if (proration.kind !== "DUE") return { ...base, reason: "UPGRADE_PRORATION_NON_POSITIVE" };
+  return {
+    ...base,
+    eligible: true,
+    creditRemainingMinor: proration.creditRemainingMinor,
+    amountDueMinor: proration.amountDueMinor,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import {
+  cancelScheduledDowngradeTransaction,
   createPaymentRequestTransaction,
   listPaymentRequestsForWorkspace,
+  loadBillingPlanState,
+  quoteUpgradeForWorkspace,
+  scheduleDowngradeTransaction,
   withRuntimeContext,
   type PaymentRequestRow,
 } from "@academic-precision/database";
@@ -9,13 +13,19 @@ import { loadServerEnv } from "@academic-precision/config";
 import type {
   BillingCycle,
   BillingPaymentMethod,
+  BillingPlanStateDto,
   CreatePaymentRequest,
   CreatePaymentRequestResponse,
+  GetBillingPlanStateResponse,
   ListPaymentRequestsResponse,
   PaymentRequestDto,
+  ScheduleDowngradeRequest,
+  ScheduleDowngradeResponse,
   StandardPlanCode,
+  UpgradeQuoteRequest,
+  UpgradeQuoteResponse,
 } from "@academic-precision/contracts";
-import { ForbiddenApiException } from "../../common/exceptions/api.exception";
+import { ForbiddenApiException, ResourceNotFoundException } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { buildPaymentInstructions, type BillingChannelConfig } from "./payment-instructions";
@@ -80,6 +90,52 @@ export class PaymentRequestsService {
       (db) => listPaymentRequestsForWorkspace(db, workspaceContext.workspaceId),
     );
     return { paymentRequests: rows.map((r) => this.toDto(r)) };
+  }
+
+  // ── Phase 4: plan state, upgrade quote, downgrade schedule/cancel (owner-only) ──
+
+  async getPlanState(user: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<GetBillingPlanStateResponse> {
+    this.assertOwner(workspaceContext);
+    const planState = await withRuntimeContext(
+      { userId: user.id, workspaceId: workspaceContext.workspaceId },
+      (db) => loadBillingPlanState(db, workspaceContext.workspaceId),
+    );
+    if (!planState) throw new ResourceNotFoundException();
+    return { planState: planState as BillingPlanStateDto };
+  }
+
+  async quoteUpgrade(user: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, body: UpgradeQuoteRequest): Promise<UpgradeQuoteResponse> {
+    this.assertOwner(workspaceContext);
+    const quote = await withRuntimeContext(
+      { userId: user.id, workspaceId: workspaceContext.workspaceId },
+      (db) =>
+        quoteUpgradeForWorkspace(db, {
+          workspaceId: workspaceContext.workspaceId,
+          targetPlanCode: body.targetPlanCode as StandardPlanCode,
+          billingCycle: body.billingCycle as BillingCycle,
+        }),
+    );
+    return quote as UpgradeQuoteResponse;
+  }
+
+  async scheduleDowngrade(user: VerifiedSupabaseToken, workspaceContext: WorkspaceContext, body: ScheduleDowngradeRequest): Promise<ScheduleDowngradeResponse> {
+    this.assertOwner(workspaceContext);
+    const sub = await withRuntimeContext(
+      { userId: user.id, workspaceId: workspaceContext.workspaceId },
+      (db) => scheduleDowngradeTransaction(db, { workspaceId: workspaceContext.workspaceId, requestedByUserId: user.id, targetPlanCode: body.targetPlanCode as StandardPlanCode }),
+    );
+    return {
+      pendingDowngrade: sub.pendingPlanCode && sub.pendingBillingCycle ? { targetPlanCode: sub.pendingPlanCode, billingCycle: sub.pendingBillingCycle as BillingCycle } : null,
+    };
+  }
+
+  async cancelDowngrade(user: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<ScheduleDowngradeResponse> {
+    this.assertOwner(workspaceContext);
+    await withRuntimeContext(
+      { userId: user.id, workspaceId: workspaceContext.workspaceId },
+      (db) => cancelScheduledDowngradeTransaction(db, { workspaceId: workspaceContext.workspaceId, actorUserId: user.id }),
+    );
+    return { pendingDowngrade: null };
   }
 
   private toDto(row: PaymentRequestRow): PaymentRequestDto {

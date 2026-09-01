@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BILLING_CYCLES, STANDARD_PLAN_CODES, type BillingCycle, type StandardPlanCode } from "./billing-catalog";
+import { subscriptionStateSchema } from "./billing";
 
 /**
  * Payment Requests + manual payment verification — Billing Engine, Phase 3.
@@ -89,6 +90,8 @@ export const platformPaymentRequestSchema = paymentRequestSchema.extend({
   workspaceName: z.string().nullable(),
   customerName: z.string().nullable(),
   customerPhone: z.string().nullable(),
+  /** For an UPGRADE row: the plan being upgraded FROM (from the immutable quote snapshot). */
+  currentPlanCode: z.string().nullable(),
 });
 export type PlatformPaymentRequestDto = z.infer<typeof platformPaymentRequestSchema>;
 
@@ -111,3 +114,55 @@ export const resolvePaymentRequestResponseSchema = z.object({
   paymentRequest: platformPaymentRequestSchema,
 });
 export type ResolvePaymentRequestResponse = z.infer<typeof resolvePaymentRequestResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Phase 4 — plan changes (upgrade / downgrade) + billing plan state.
+// ---------------------------------------------------------------------------
+
+/** Current commercial state the customer billing page needs (owner-only). */
+export const billingPlanStateSchema = z.object({
+  state: subscriptionStateSchema,
+  currentPlanCode: z.string().nullable(),
+  billingCycle: billingCycleSchema.nullable(),
+  periodEnd: z.string().nullable(),
+  limits: z.object({ maxActiveStudents: z.number().int(), maxTeamMembers: z.number().int() }),
+  usage: z.object({ activeStudents: z.number().int(), activeTeamMembers: z.number().int() }),
+  /** A scheduled downgrade that becomes effective at the next renewal, or null. */
+  pendingDowngrade: z.object({ targetPlanCode: z.string(), billingCycle: billingCycleSchema }).nullable(),
+});
+export type BillingPlanStateDto = z.infer<typeof billingPlanStateSchema>;
+
+export const getBillingPlanStateResponseSchema = z.object({ planState: billingPlanStateSchema });
+export type GetBillingPlanStateResponse = z.infer<typeof getBillingPlanStateResponseSchema>;
+
+/** Read-only upgrade quote preview (server-priced; the client sends no amount). */
+export const upgradeQuoteRequestSchema = z.object({
+  targetPlanCode: standardPlanCodeSchema,
+  billingCycle: billingCycleSchema,
+});
+export type UpgradeQuoteRequest = z.infer<typeof upgradeQuoteRequestSchema>;
+
+export const upgradeQuoteResponseSchema = z.object({
+  eligible: z.boolean(),
+  /** Typed reason when not eligible (e.g. NOT_AN_UPGRADE, CROSS_CYCLE_UPGRADE_NOT_SUPPORTED, UPGRADE_PRORATION_NON_POSITIVE). */
+  reason: z.string().nullable(),
+  currentPlanCode: z.string().nullable(),
+  targetPlanCode: standardPlanCodeSchema,
+  billingCycle: billingCycleSchema,
+  normalTargetPriceMinor: z.number().int(),
+  creditRemainingMinor: z.number().int(),
+  amountDueMinor: z.number().int(),
+  currencyCode: z.string(),
+  /** period_end stays the same after an upgrade. */
+  paidThrough: z.string().nullable(),
+});
+export type UpgradeQuoteResponse = z.infer<typeof upgradeQuoteResponseSchema>;
+
+/** Schedule a downgrade to a lower plan, effective at the next renewal (owner-only). */
+export const scheduleDowngradeRequestSchema = z.object({ targetPlanCode: standardPlanCodeSchema });
+export type ScheduleDowngradeRequest = z.infer<typeof scheduleDowngradeRequestSchema>;
+
+export const scheduleDowngradeResponseSchema = z.object({
+  pendingDowngrade: z.object({ targetPlanCode: z.string(), billingCycle: billingCycleSchema }).nullable(),
+});
+export type ScheduleDowngradeResponse = z.infer<typeof scheduleDowngradeResponseSchema>;

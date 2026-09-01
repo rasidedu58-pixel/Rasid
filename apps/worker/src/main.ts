@@ -1,6 +1,6 @@
 import { createLogger, runWithContext, initErrorTracking, flushErrorTracking, captureException } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
-import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan, WORKER_CONSUMED_EVENT_TYPES } from "@academic-precision/database";
+import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan, runPeriodAdvance, WORKER_CONSUMED_EVENT_TYPES } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
 
 /**
@@ -64,6 +64,14 @@ const SUBSCRIPTION_EXPIRY_INTERVAL_MS = 60_000;
 // records) is never a sub-second concern.
 const NOTIFICATIONS_SCAN_INTERVAL_MS = 300_000; // 5 minutes
 
+// Phase 4 (Billing) — promote a DUE future paid period (e.g. a scheduled
+// downgrade paid early) into the current subscription aggregate at its boundary.
+// A period_end-granularity concern like expiry, so it shares the SAME serial
+// loop on its own coarse cadence; `runPeriodAdvance` is idempotent (no-ops when
+// the aggregate already matches the effective ledger period) and only copies an
+// already-committed, already-PAID ledger period — it never grants a free cycle.
+const PERIOD_ADVANCE_INTERVAL_MS = 60_000;
+
 function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -84,6 +92,7 @@ function sleep(ms: number, signal: { stopped: boolean }): Promise<void> {
 async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<typeof getWorkerDb>): Promise<void> {
   let lastSubscriptionExpiryCheckAt = 0;
   let lastNotificationsScanAt = 0;
+  let lastPeriodAdvanceAt = 0;
   let emptyPollStreak = 0;
 
   while (!state.stopped) {
@@ -105,6 +114,18 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
           // never take down outbox dispatch, which already succeeded above.
           logger.error({ error }, "Subscription expiry scan failed unexpectedly — will retry next interval.");
           captureException(error, { job: "subscription-expiry-scan", jobId: bootId });
+        }
+      }
+
+      if (Date.now() - lastPeriodAdvanceAt >= PERIOD_ADVANCE_INTERVAL_MS) {
+        lastPeriodAdvanceAt = Date.now();
+        try {
+          const advanced = await runWithContext({ jobId: bootId }, () => runPeriodAdvance(workerDb));
+          if (advanced > 0) logger.info({ advanced }, "Subscription period-advance promoted due future periods.");
+        } catch (error) {
+          // Same isolation rationale as the subscription-expiry check above.
+          logger.error({ error }, "Subscription period-advance failed unexpectedly — will retry next interval.");
+          captureException(error, { job: "subscription-period-advance", jobId: bootId });
         }
       }
 

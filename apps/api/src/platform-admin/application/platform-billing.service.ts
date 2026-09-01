@@ -69,7 +69,15 @@ function toPlatformDto(row: PlatformPaymentRequestListRow): PlatformPaymentReque
     workspaceName: row.workspaceName,
     customerName: row.customerName,
     customerPhone: row.customerPhone,
+    currentPlanCode: upgradeCurrentPlan(row),
   };
+}
+
+/** For an UPGRADE row, the plan being upgraded FROM (from the immutable quote snapshot). */
+function upgradeCurrentPlan(row: PlatformPaymentRequestListRow): string | null {
+  if (row.actionType !== "UPGRADE") return null;
+  const snap = row.quoteSnapshotJson as { currentPlanCode?: unknown } | null;
+  return snap && typeof snap === "object" && typeof snap.currentPlanCode === "string" ? snap.currentPlanCode : null;
 }
 
 function encodeCursor(c: { createdAt: string; id: string }): string {

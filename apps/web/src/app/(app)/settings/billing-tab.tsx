@@ -7,6 +7,7 @@ import { useWorkspace } from "../../../lib/workspace-provider";
 import { fetchSubscription } from "../../../lib/api/billing";
 import { SubscriptionStatusBadge } from "../../../components/billing/subscription-status-badge";
 import { PaymentRequestPanel } from "../../../components/billing/payment-request-panel";
+import { PlanManagementPanel } from "../../../components/billing/plan-management-panel";
 
 /**
  * §25 — the workspace's own subscription state banner + billing entry
@@ -48,7 +49,10 @@ export function BillingTab() {
         ) : null}
       </Card>
 
-      {/* Billing Phase 3 — manual payment (InstaPay / Vodafone Cash + WhatsApp proof). */}
+      {/* Billing Phase 4 — current plan + usage + upgrade (immediate, prorated) + scheduled downgrade. */}
+      <PlanManagementPanel workspaceId={workspaceId!} />
+
+      {/* Billing Phase 3 — manual payment for a NEW subscription / renewal (InstaPay / Vodafone Cash + WhatsApp proof). */}
       <PaymentRequestPanel workspaceId={workspaceId!} />
     </div>
   );

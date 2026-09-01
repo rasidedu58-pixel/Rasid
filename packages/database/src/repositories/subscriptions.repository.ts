@@ -11,8 +11,11 @@
  * scheduled expiry scan (the latter called by the outbox dispatcher's own
  * worker polling loop, `app_worker` role, never `app_runtime`).
  */
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, lte, ne } from "drizzle-orm";
 import { entitlements, ownerTrialGrants, subscriptions } from "../schema/subscriptions";
+import { subscriptionPeriods } from "../schema/subscription-periods";
+import { loadLedgerRowsForSubscription } from "./subscription-periods.repository";
+import { effectiveRowAt, paidThroughMs } from "../billing/period-ledger";
 import { auditEvents } from "../schema/audit";
 import { outboxEvents } from "../schema/outbox";
 import type { Db } from "./identity.repository";
@@ -295,7 +298,9 @@ export interface UpdateSubscriptionStateInput {
   billingCycle?: string;
   currentPriceMinor?: number;
   priceCurrencyCode?: string;
-  planPriceVersion?: number;
+  planPriceVersion?: number | null;
+  /** Phase 4: clear a consumed scheduled-downgrade (pending_*) in the same UPDATE. */
+  clearPending?: boolean;
   sourceType: "SUBSCRIPTION" | "TRIAL" | "ADMIN";
   sourceId: string | null;
   actorUserId: string | null;
@@ -347,6 +352,12 @@ export async function applySubscriptionTransitionOnTx(
     if (input.currentPriceMinor !== undefined) patch.currentPriceMinor = input.currentPriceMinor;
     if (input.priceCurrencyCode !== undefined) patch.priceCurrencyCode = input.priceCurrencyCode;
     if (input.planPriceVersion !== undefined) patch.planPriceVersion = input.planPriceVersion;
+    if (input.clearPending) {
+      patch.pendingPlanCode = null;
+      patch.pendingBillingCycle = null;
+      patch.pendingChangeRequestedAt = null;
+      patch.pendingChangeRequestedBy = null;
+    }
 
     const [updated] = await tx
       .update(subscriptions)
@@ -406,4 +417,80 @@ export function findExpirableSubscriptions(workerDb: Db, now: Date = new Date())
     .select()
     .from(subscriptions)
     .where(and(inArray(subscriptions.state, ["TRIAL", "CANCELLED_AT_PERIOD_END"]), lt(subscriptions.periodEnd, now)));
+}
+
+// ---------------------------------------------------------------------------
+// Period-boundary advance (Billing Engine, Phase 4) — promote a DUE future
+// ledger period (e.g. a scheduled downgrade paid early) into the current
+// aggregate at its boundary. The worker only COPIES an already-committed ledger
+// period's plan/price into the aggregate — it never invents commercial data or
+// grants a free cycle (a future period exists only because it was PAID for).
+// ---------------------------------------------------------------------------
+
+/** ACTIVE subscriptions whose EFFECTIVE ledger period at `now` differs from the stored aggregate plan (candidate filter; the advance recomputes authoritatively). */
+export async function findSubscriptionsDuePeriodAdvance(workerDb: Db, now: Date = new Date()): Promise<string[]> {
+  const rows = await workerDb
+    .selectDistinct({ id: subscriptions.id })
+    .from(subscriptions)
+    .innerJoin(subscriptionPeriods, eq(subscriptionPeriods.subscriptionId, subscriptions.id))
+    .where(
+      and(
+        eq(subscriptions.state, "ACTIVE"),
+        lte(subscriptionPeriods.periodStart, now),
+        gt(subscriptionPeriods.periodEnd, now),
+        ne(subscriptionPeriods.planCode, subscriptions.planCode),
+      ),
+    );
+  return rows.map((r) => r.id);
+}
+
+/** Advance ONE subscription's aggregate to its effective ledger period at `now`. No-op if already current. Runs inside the caller's tx (worker). */
+export async function advanceSubscriptionToCurrentPeriodOnTx(
+  tx: Db,
+  subscriptionId: string,
+  now: Date = new Date(),
+): Promise<SubscriptionRow | typeof SUBSCRIPTION_VERSION_CONFLICT | null> {
+  const [sub] = await tx
+    .select({ id: subscriptions.id, version: subscriptions.version, planCode: subscriptions.planCode, pendingPlanCode: subscriptions.pendingPlanCode })
+    .from(subscriptions)
+    .where(eq(subscriptions.id, subscriptionId))
+    .for("update");
+  if (!sub) return null;
+
+  const ledger = await loadLedgerRowsForSubscription(tx, subscriptionId);
+  const effective = effectiveRowAt(ledger, now.getTime());
+  if (!effective || effective.planCode === sub.planCode) return null; // already current
+  const paidEndMs = paidThroughMs(ledger) ?? effective.periodEndMs;
+
+  return applySubscriptionTransitionOnTx(tx, {
+    id: sub.id,
+    workspaceId: "", // derived from RETURNING; worker has no ambient workspace context
+    expectedVersion: sub.version,
+    nextState: "ACTIVE",
+    periodStart: new Date(effective.periodStartMs),
+    periodEnd: new Date(paidEndMs),
+    planCode: effective.planCode,
+    billingCycle: effective.billingCycle,
+    currentPriceMinor: effective.cyclePriceMinor,
+    priceCurrencyCode: "EGP",
+    planPriceVersion: effective.planPriceVersion,
+    // Clear the scheduled downgrade once the plan it targeted becomes effective.
+    clearPending: sub.pendingPlanCode != null && sub.pendingPlanCode === effective.planCode,
+    sourceType: "SUBSCRIPTION",
+    sourceId: effective.id,
+    actorUserId: null,
+    actorMembershipId: null,
+    correlationId: "period-advance",
+  });
+}
+
+/** Worker batch: advance every due subscription (each in its own tx). Returns how many advanced. */
+export async function runPeriodAdvance(workerDb: Db, now: Date = new Date()): Promise<number> {
+  const ids = await findSubscriptionsDuePeriodAdvance(workerDb, now);
+  let advanced = 0;
+  for (const id of ids) {
+    const result = await workerDb.transaction((tx) => advanceSubscriptionToCurrentPeriodOnTx(tx, id, now));
+    if (result && result !== SUBSCRIPTION_VERSION_CONFLICT) advanced += 1;
+  }
+  return advanced;
 }
