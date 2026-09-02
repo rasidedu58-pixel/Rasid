@@ -299,6 +299,14 @@ export interface UpdateSubscriptionStateInput {
   currentPriceMinor?: number;
   priceCurrencyCode?: string;
   planPriceVersion?: number | null;
+  /**
+   * Phase 5: CUSTOM capacity. Pass BOTH when transitioning TO a CUSTOM plan.
+   * The transition ALWAYS sets custom_max_* explicitly from `nextState`'s plan:
+   * CUSTOM → the given values (required); any non-CUSTOM plan → NULL (so stale
+   * custom limits never survive a CUSTOM→standard transition).
+   */
+  customMaxActiveStudents?: number | null;
+  customMaxTeamMembers?: number | null;
   /** Phase 4: clear a consumed scheduled-downgrade (pending_*) in the same UPDATE. */
   clearPending?: boolean;
   sourceType: "SUBSCRIPTION" | "TRIAL" | "ADMIN";
@@ -352,6 +360,18 @@ export async function applySubscriptionTransitionOnTx(
     if (input.currentPriceMinor !== undefined) patch.currentPriceMinor = input.currentPriceMinor;
     if (input.priceCurrencyCode !== undefined) patch.priceCurrencyCode = input.priceCurrencyCode;
     if (input.planPriceVersion !== undefined) patch.planPriceVersion = input.planPriceVersion;
+    // CUSTOM capacity is set ONLY when the plan is explicitly written this
+    // transition — CUSTOM keeps the agreed limits, any other plan clears them
+    // (no stale custom limits survive a CUSTOM→standard transition).
+    if (input.planCode !== undefined) {
+      if (input.planCode === "CUSTOM") {
+        patch.customMaxActiveStudents = input.customMaxActiveStudents ?? null;
+        patch.customMaxTeamMembers = input.customMaxTeamMembers ?? null;
+      } else {
+        patch.customMaxActiveStudents = null;
+        patch.customMaxTeamMembers = null;
+      }
+    }
     if (input.clearPending) {
       patch.pendingPlanCode = null;
       patch.pendingBillingCycle = null;
@@ -474,6 +494,8 @@ export async function advanceSubscriptionToCurrentPeriodOnTx(
     currentPriceMinor: effective.cyclePriceMinor,
     priceCurrencyCode: "EGP",
     planPriceVersion: effective.planPriceVersion,
+    customMaxActiveStudents: effective.customMaxActiveStudents,
+    customMaxTeamMembers: effective.customMaxTeamMembers,
     // Clear the scheduled downgrade once the plan it targeted becomes effective.
     clearPending: sub.pendingPlanCode != null && sub.pendingPlanCode === effective.planCode,
     sourceType: "SUBSCRIPTION",

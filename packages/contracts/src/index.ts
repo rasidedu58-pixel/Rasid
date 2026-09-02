@@ -14,6 +14,7 @@ export * from "./billing";
 export * from "./billing-catalog";
 export * from "./billing-payment-requests";
 export * from "./billing-plan-changes";
+export * from "./billing-custom";
 export * from "./reports";
 export * from "./platform-admin";
 export * from "./platform-operations";

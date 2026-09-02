@@ -12,6 +12,7 @@ export * from "./repositories/attention.repository";
 export * from "./repositories/subscriptions.repository";
 export * from "./repositories/payment-requests.repository";
 export * from "./repositories/subscription-periods.repository";
+export * from "./repositories/custom-plans.repository";
 export * from "./reports/reports.repository";
 export * from "./reports/action-center.repository";
 export * from "./repositories/notifications.repository";

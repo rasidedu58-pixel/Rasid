@@ -13,6 +13,11 @@ import type {
   UpgradeQuoteResponse,
   ScheduleDowngradeRequest,
   ScheduleDowngradeResponse,
+  CreateCustomRequest,
+  CreateCustomPaymentRequest,
+  GetCustomPlanStateResponse,
+  CustomOfferDto,
+  CustomRequestDto,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -58,4 +63,25 @@ export function scheduleDowngrade(workspaceId: string, body: ScheduleDowngradeRe
 
 export function cancelDowngrade(workspaceId: string): Promise<ScheduleDowngradeResponse> {
   return apiRequest<ScheduleDowngradeResponse>("/billing/downgrade/cancel", { method: "POST", workspaceId, body: {} });
+}
+
+// --- Billing Phase 5: custom plans -------------------------------------------
+
+export function fetchCustomState(workspaceId: string): Promise<GetCustomPlanStateResponse> {
+  return apiRequest<GetCustomPlanStateResponse>("/billing/custom/state", { workspaceId });
+}
+export function createCustomRequest(workspaceId: string, body: CreateCustomRequest): Promise<{ request: CustomRequestDto }> {
+  return apiRequest<{ request: CustomRequestDto }>("/billing/custom/requests", { method: "POST", workspaceId, body });
+}
+export function cancelCustomRequest(workspaceId: string): Promise<{ request: CustomRequestDto }> {
+  return apiRequest<{ request: CustomRequestDto }>("/billing/custom/requests/cancel", { method: "POST", workspaceId, body: {} });
+}
+export function acceptCustomOffer(workspaceId: string, offerId: string): Promise<{ offer: CustomOfferDto }> {
+  return apiRequest<{ offer: CustomOfferDto }>(`/billing/custom/offers/${offerId}/accept`, { method: "POST", workspaceId, body: {} });
+}
+export function rejectCustomOffer(workspaceId: string, offerId: string): Promise<{ offer: CustomOfferDto }> {
+  return apiRequest<{ offer: CustomOfferDto }>(`/billing/custom/offers/${offerId}/reject`, { method: "POST", workspaceId, body: {} });
+}
+export function createCustomPayment(workspaceId: string, body: CreateCustomPaymentRequest): Promise<CreatePaymentRequestResponse> {
+  return apiRequest<CreatePaymentRequestResponse>("/billing/custom/payment-request", { method: "POST", workspaceId, body });
 }

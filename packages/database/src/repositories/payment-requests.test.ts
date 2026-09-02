@@ -7,6 +7,7 @@ import {
   PlanChangeNotSupportedError,
   computeConfirmedPeriod,
   computePeriodEnd,
+  customRenewalPlanPriceVersion,
   generateHumanCode,
 } from "./payment-requests.repository";
 
@@ -131,5 +132,23 @@ describe("payment request errors — typed, business-safe (mapped to 4xx, never 
     expect(new PaymentRequestNotPendingError().code).toBe("PAYMENT_REQUEST_NOT_PENDING");
     expect(new PaymentRequestExpiredError().httpStatus).toBe(409);
     expect(new PlanChangeNotSupportedError().code).toBe("PLAN_CHANGE_NOT_SUPPORTED");
+  });
+});
+
+// Regression: a KEEP_CURRENT custom renewal used to stamp plan_price_version =
+// NULL on the renewed CUSTOM period (offerVersion was null with no scheduled
+// offer). It must carry the subscription's governing offer version forward.
+describe("customRenewalPlanPriceVersion — CUSTOM renewal offer version (Phase 5 fix)", () => {
+  it("KEEP_CURRENT (no scheduled offer) carries the subscription's offer version forward — never NULL", () => {
+    expect(customRenewalPlanPriceVersion(null, 1)).toBe(1);
+    expect(customRenewalPlanPriceVersion(null, 3)).toBe(3);
+  });
+
+  it("a scheduled NEXT_RENEWAL offer supplies its own version (wins over the subscription's)", () => {
+    expect(customRenewalPlanPriceVersion(2, 1)).toBe(2);
+  });
+
+  it("passes NULL through only when the subscription itself has none (e.g. a TRIAL row, not a live CUSTOM)", () => {
+    expect(customRenewalPlanPriceVersion(null, null)).toBeNull();
   });
 });

@@ -15,6 +15,8 @@ function row(over: Partial<LedgerPeriodRow> & Pick<LedgerPeriodRow, "id" | "seq"
     billingCycle: "MONTHLY",
     cyclePriceMinor: 30000,
     planPriceVersion: 1,
+    customMaxActiveStudents: null,
+    customMaxTeamMembers: null,
     nominalCycleStartMs: over.periodStartMs,
     nominalCycleEndMs: over.periodEndMs,
     ...over,

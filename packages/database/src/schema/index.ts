@@ -45,3 +45,4 @@ export * as platformAdmin from "./platform-admin";
 export * as paymentRequests from "./payment-requests";
 export * as subscriptionPayments from "./subscription-payments";
 export * as subscriptionPeriods from "./subscription-periods";
+export * as customPlans from "./custom-plans";

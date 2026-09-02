@@ -92,6 +92,10 @@ export const platformPaymentRequestSchema = paymentRequestSchema.extend({
   customerPhone: z.string().nullable(),
   /** For an UPGRADE row: the plan being upgraded FROM (from the immutable quote snapshot). */
   currentPlanCode: z.string().nullable(),
+  /** For a CUSTOM row (target CUSTOM): the accepted offer version + agreed capacities (from the immutable snapshot). */
+  offerVersion: z.number().int().nullable(),
+  customMaxActiveStudents: z.number().int().nullable(),
+  customMaxTeamMembers: z.number().int().nullable(),
 });
 export type PlatformPaymentRequestDto = z.infer<typeof platformPaymentRequestSchema>;
 

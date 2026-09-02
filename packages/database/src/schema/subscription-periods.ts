@@ -47,6 +47,9 @@ export const subscriptionPeriods = pgTable(
     nominalCycleStart: timestamp("nominal_cycle_start", { withTimezone: true }).notNull(),
     nominalCycleEnd: timestamp("nominal_cycle_end", { withTimezone: true }).notNull(),
     sourceAction: text("source_action").notNull(),
+    /** Agreed CUSTOM capacity for this period — set only when plan_code = 'CUSTOM' (0069); NULL for standard plans (catalog-driven). */
+    customMaxActiveStudents: integer("custom_max_active_students"),
+    customMaxTeamMembers: integer("custom_max_team_members"),
     /** The payment that funded this period — nullable only for backfill of pre-ledger paid subscriptions. */
     sourcePaymentId: uuid("source_payment_id").references(() => subscriptionPayments.id, { onDelete: "restrict" }),
     /** Explicit lineage for an UPGRADE row: the period it upgrades from. */
@@ -75,5 +78,13 @@ export const subscriptionPeriods = pgTable(
     priceNonNegativeCheck: check("subscription_periods_price_nonnegative_check", sql`${table.cyclePriceMinor} >= 0`),
     spanCheck: check("subscription_periods_span_check", sql`${table.periodEnd} > ${table.periodStart}`),
     nominalSpanCheck: check("subscription_periods_nominal_span_check", sql`${table.nominalCycleEnd} > ${table.nominalCycleStart}`),
+    customLimitsCheck: check(
+      "subscription_periods_custom_limits_check",
+      sql`(${table.planCode} = 'CUSTOM' AND ${table.customMaxActiveStudents} IS NOT NULL AND ${table.customMaxTeamMembers} IS NOT NULL) OR (${table.planCode} <> 'CUSTOM' AND ${table.customMaxActiveStudents} IS NULL AND ${table.customMaxTeamMembers} IS NULL)`,
+    ),
+    customLimitsPositiveCheck: check(
+      "subscription_periods_custom_limits_positive_check",
+      sql`(${table.customMaxActiveStudents} IS NULL OR ${table.customMaxActiveStudents} > 3000) AND (${table.customMaxTeamMembers} IS NULL OR ${table.customMaxTeamMembers} >= 0)`,
+    ),
   }),
 );

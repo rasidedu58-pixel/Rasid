@@ -138,7 +138,14 @@ export default function PlatformAdminPaymentRequestsPage() {
                       </TableCell>
                       <TableCell className="font-mono">{r.humanCode}</TableCell>
                       <TableCell>
-                        {r.actionType === "UPGRADE" && r.currentPlanCode ? (
+                        {r.targetPlanCode === "CUSTOM" ? (
+                          <div className="flex flex-col">
+                            <span>مخصصة{r.offerVersion ? ` (v${r.offerVersion})` : ""}</span>
+                            <span className="text-xs text-brand">
+                              {r.customMaxActiveStudents ?? "؟"} طالب · {r.customMaxTeamMembers ?? "؟"} فريق · {r.actionType === "UPGRADE" ? "ترقية" : r.actionType === "RENEWAL" ? "تجديد" : "جديد"}
+                            </span>
+                          </div>
+                        ) : r.actionType === "UPGRADE" && r.currentPlanCode ? (
                           <div className="flex flex-col">
                             <span>{r.currentPlanCode} ← {r.targetPlanCode}</span>
                             <span className="text-xs text-brand">ترقية · {r.billingCycle === "ANNUAL" ? "سنوي" : "شهري"}</span>

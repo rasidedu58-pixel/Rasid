@@ -30,6 +30,7 @@ import type { Db } from "./identity.repository";
 import { paymentRequests } from "../schema/payment-requests";
 import { subscriptionPayments, subscriptionPaymentReversals } from "../schema/subscription-payments";
 import { subscriptions } from "../schema/subscriptions";
+import { customPlanOffers } from "../schema/custom-plans";
 import { workspaces } from "../schema/workspaces";
 import { users } from "../schema/identity";
 import { auditEvents } from "../schema/audit";
@@ -39,6 +40,7 @@ import { applySubscriptionTransitionOnTx, SUBSCRIPTION_VERSION_CONFLICT, type Su
 import { appendSubscriptionPeriodOnTx, loadLedgerRowsForSubscription } from "./subscription-periods.repository";
 import { effectiveRowAt, hasFutureDifferentPlanPeriod, paidThroughMs, resolveEffectiveSegments, toProrationSlices } from "../billing/period-ledger";
 import { findCurrentMonthId, getActiveStudentCountForMonth, getActiveTeamUsage } from "../billing/capacity";
+import { findCustomOfferForWorkspace, markOfferAppliedOnTx, CustomOfferNotAcceptableError, CustomOfferNotFoundError, CustomOfferAlreadyAppliedError } from "./custom-plans.repository";
 
 export type PaymentRequestRow = typeof paymentRequests.$inferSelect;
 export type SubscriptionPaymentRow = typeof subscriptionPayments.$inferSelect;
@@ -437,6 +439,266 @@ function isHumanCodeCollision(err: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// CUSTOM payment requests — Phase 5. Always server-priced from an ACCEPTED,
+// authoritative custom_plan_offer (the client never sends amount/limits). The
+// generic confirm path then activates CUSTOM (custom limits carried in the
+// immutable quote snapshot + the ledger period).
+// ---------------------------------------------------------------------------
+
+interface ServerPricedRequestInput {
+  workspaceId: string;
+  requestedByUserId: string;
+  actionType: "NEW_SUBSCRIPTION" | "RENEWAL" | "UPGRADE";
+  targetPlanCode: string;
+  billingCycle: string;
+  amountMinor: number;
+  currencyCode: string;
+  paymentMethod: "INSTAPAY" | "VODAFONE_CASH";
+  boundSubscriptionVersion: number;
+  quoteSnapshot: Record<string, unknown>;
+}
+
+/** Shared insert: cancel any prior PENDING, insert with a unique human code, emit outbox + audit. */
+async function insertServerPricedRequestOnTx(tx: Db, input: ServerPricedRequestInput): Promise<PaymentRequestRow> {
+  const [existingPending] = await tx.select().from(paymentRequests).where(and(eq(paymentRequests.workspaceId, input.workspaceId), eq(paymentRequests.status, "PENDING"))).limit(1);
+  if (existingPending) {
+    await tx.update(paymentRequests).set({ status: "CANCELLED", updatedAt: new Date(), version: existingPending.version + 1 }).where(eq(paymentRequests.id, existingPending.id));
+  }
+  const expiresAt = new Date(Date.now() + DEFAULT_REQUEST_TTL_MS);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const [row] = await tx
+        .insert(paymentRequests)
+        .values({
+          workspaceId: input.workspaceId,
+          requestedByUserId: input.requestedByUserId,
+          humanCode: generateHumanCode(),
+          actionType: input.actionType,
+          targetPlanCode: input.targetPlanCode,
+          billingCycle: input.billingCycle,
+          amountMinor: input.amountMinor,
+          currencyCode: input.currencyCode,
+          paymentMethod: input.paymentMethod,
+          status: "PENDING",
+          boundSubscriptionVersion: input.boundSubscriptionVersion,
+          quoteSnapshotJson: input.quoteSnapshot,
+          expiresAt,
+        })
+        .returning();
+      if (!row) throw new Error("Failed to insert payment_requests row.");
+      await tx.insert(outboxEvents).values({ workspaceId: input.workspaceId, eventType: "PaymentRequestCreated", aggregateType: "PaymentRequest", aggregateId: row.id, payload: { paymentRequestId: row.id, planCode: input.targetPlanCode, amountMinor: input.amountMinor, actionType: input.actionType } });
+      await tx.insert(auditEvents).values({ workspaceId: input.workspaceId, actorUserId: input.requestedByUserId, actorMembershipId: null, action: "billing.custom_payment_request.created", entityType: "payment_request", entityId: row.id, afterJson: { humanCode: row.humanCode, actionType: input.actionType, planCode: input.targetPlanCode, amountMinor: input.amountMinor, method: input.paymentMethod } });
+      return row;
+    } catch (err) {
+      if (isHumanCodeCollision(err) && attempt < 5) continue;
+      throw err;
+    }
+  }
+  throw new Error("Failed to allocate a unique payment-request code after several attempts.");
+}
+
+export interface CreateCustomPaymentRequestInput {
+  workspaceId: string;
+  requestedByUserId: string;
+  acceptedOfferId: string;
+  paymentMethod: "INSTAPAY" | "VODAFONE_CASH";
+}
+
+/**
+ * Create the CUSTOM payment request from an ACCEPTED, IMMEDIATE offer. Determines
+ * the action server-side: not ACTIVE → NEW_SUBSCRIPTION; ACTIVE → UPGRADE
+ * (standard→custom or custom→custom INCREASE) priced by exact ledger proration.
+ * A NEXT_RENEWAL offer applies at renewal, not here. Blocks on an in-flight
+ * plan change (FUTURE_PLAN_CHANGE_EXISTS). Same-cycle only in V1.
+ */
+export async function createCustomPaymentRequestFromAcceptedOffer(db: Db, input: CreateCustomPaymentRequestInput): Promise<PaymentRequestRow> {
+  return db.transaction(async (tx) => {
+    const offer = await findCustomOfferForWorkspace(tx, input.workspaceId, input.acceptedOfferId);
+    if (!offer) throw new CustomOfferNotFoundError();
+    if (offer.status === "APPLIED") throw new CustomOfferAlreadyAppliedError();
+    if (offer.status !== "ACCEPTED") throw new CustomOfferNotAcceptableError();
+    if (offer.effectiveMode !== "IMMEDIATE") throw new CustomOfferNotAcceptableError(); // NEXT_RENEWAL applies at renewal
+
+    const [sub] = await tx
+      .select({ id: subscriptions.id, version: subscriptions.version, state: subscriptions.state, planCode: subscriptions.planCode, billingCycle: subscriptions.billingCycle, currentPriceMinor: subscriptions.currentPriceMinor, periodStart: subscriptions.periodStart, periodEnd: subscriptions.periodEnd, pendingPlanCode: subscriptions.pendingPlanCode })
+      .from(subscriptions).where(eq(subscriptions.workspaceId, input.workspaceId)).limit(1);
+    if (!sub) throw new PaymentRequestNotFoundError();
+
+    const isActive = sub.state === ACTIVE_SUBSCRIPTION_STATE;
+    const cycle = offer.billingCycle as BillingCycle;
+    let actionType: "NEW_SUBSCRIPTION" | "UPGRADE";
+    let amountMinor: number;
+
+    if (!isActive) {
+      actionType = "NEW_SUBSCRIPTION";
+      amountMinor = offer.priceMinor;
+    } else {
+      actionType = "UPGRADE";
+      if (sub.billingCycle && sub.billingCycle !== cycle) throw new CrossCycleUpgradeNotSupportedError();
+      const nowMs = Date.now();
+      const rows = await loadLedgerRowsForSubscription(tx, sub.id);
+      if (sub.pendingPlanCode || hasFutureDifferentPlanPeriod(rows, nowMs)) throw new FuturePlanChangeExistsError();
+      const proration = computeUpgradeProrationOverPeriods({ targetPlan: "CUSTOM", billingCycle: cycle, targetCatalogPriceMinor: offer.priceMinor, nowMs, periods: toProrationSlices(resolveEffectiveSegments(rows, nowMs)) });
+      if (proration.kind === "NOT_SAME_CYCLE") throw new CrossCycleUpgradeNotSupportedError();
+      if (proration.kind !== "DUE") throw new UpgradeProrationNonPositiveError();
+      amountMinor = proration.amountDueMinor;
+    }
+
+    const quoteSnapshot = {
+      kind: "CUSTOM",
+      offerId: offer.id,
+      offerVersion: offer.offerVersion,
+      requestId: offer.customRequestId,
+      currentPlanCode: sub.planCode,
+      targetPlanCode: "CUSTOM",
+      customMaxActiveStudents: offer.maxActiveStudents,
+      customMaxTeamMembers: offer.maxTeamMembers,
+      billingCycle: cycle,
+      agreedPriceMinor: offer.priceMinor,
+      targetPriceMinor: offer.priceMinor,
+      recommendationPriceMinor: offer.recommendationPriceMinor,
+      adjustmentReason: offer.adjustmentReason,
+      // For CUSTOM ledger rows, plan_price_version carries the OFFER version (documented; see decision 2/23).
+      planPriceVersion: offer.offerVersion,
+      subscriptionVersion: sub.version,
+      currentPeriodStart: sub.periodStart?.toISOString() ?? null,
+      currentPeriodEnd: sub.periodEnd?.toISOString() ?? null,
+      quoteTimestamp: new Date().toISOString(),
+      effectiveMode: offer.effectiveMode,
+    };
+
+    return insertServerPricedRequestOnTx(tx, {
+      workspaceId: input.workspaceId,
+      requestedByUserId: input.requestedByUserId,
+      actionType,
+      targetPlanCode: "CUSTOM",
+      billingCycle: cycle,
+      amountMinor,
+      currencyCode: "EGP",
+      paymentMethod: input.paymentMethod,
+      boundSubscriptionVersion: sub.version,
+      quoteSnapshot,
+    });
+  });
+}
+
+/**
+ * CUSTOM renewal payment request. KEEP_CURRENT_PRICE by default (the customer's
+ * agreed snapshot); if an ACCEPTED NEXT_RENEWAL offer exists it governs the next
+ * period (its price/limits/cycle), after usage revalidation. Never re-prices
+ * from a fresh recommendation.
+ */
+/**
+ * The `plan_price_version` stamped on a CUSTOM renewal period. A scheduled
+ * NEXT_RENEWAL offer supplies its own offer version; a KEEP_CURRENT renewal
+ * (no scheduled offer) carries the currently-governing offer version forward
+ * from the subscription so the renewed CUSTOM period keeps a non-null offer
+ * version rather than NULL. Pure so it is unit-tested without a live DB.
+ */
+export function customRenewalPlanPriceVersion(scheduledOfferVersion: number | null, subscriptionPlanPriceVersion: number | null): number | null {
+  return scheduledOfferVersion ?? subscriptionPlanPriceVersion;
+}
+
+export async function createCustomRenewalPaymentRequest(db: Db, input: { workspaceId: string; requestedByUserId: string; paymentMethod: "INSTAPAY" | "VODAFONE_CASH" }): Promise<PaymentRequestRow> {
+  return db.transaction(async (tx) => {
+    const [sub] = await tx
+      .select({ id: subscriptions.id, version: subscriptions.version, state: subscriptions.state, planCode: subscriptions.planCode, billingCycle: subscriptions.billingCycle, currentPriceMinor: subscriptions.currentPriceMinor, planPriceVersion: subscriptions.planPriceVersion, customMaxActiveStudents: subscriptions.customMaxActiveStudents, customMaxTeamMembers: subscriptions.customMaxTeamMembers, pendingPlanCode: subscriptions.pendingPlanCode, pendingBillingCycle: subscriptions.pendingBillingCycle, periodStart: subscriptions.periodStart, periodEnd: subscriptions.periodEnd })
+      .from(subscriptions).where(eq(subscriptions.workspaceId, input.workspaceId)).limit(1);
+    if (!sub) throw new PaymentRequestNotFoundError();
+    if (sub.state !== ACTIVE_SUBSCRIPTION_STATE || sub.planCode !== "CUSTOM") throw new SubscriptionNotActiveError();
+
+    // A scheduled CUSTOM→standard downgrade: the renewal targets the STANDARD
+    // plan at its catalog price (usage revalidated), and confirm clears pending +
+    // the custom limits. Takes precedence over any custom NEXT_RENEWAL offer.
+    if (sub.pendingPlanCode && isStandardPlanCode(sub.pendingPlanCode)) {
+      const stdCycle = (sub.pendingBillingCycle as BillingCycle) ?? (sub.billingCycle as BillingCycle);
+      await assertDowngradeUsageFitsOnTx(tx, input.workspaceId, sub.pendingPlanCode);
+      const price = resolveCatalogPrice(sub.pendingPlanCode, stdCycle);
+      if (!price) throw new NoCatalogPriceError();
+      return insertServerPricedRequestOnTx(tx, {
+        workspaceId: input.workspaceId,
+        requestedByUserId: input.requestedByUserId,
+        actionType: "RENEWAL",
+        targetPlanCode: sub.pendingPlanCode,
+        billingCycle: stdCycle,
+        amountMinor: price.amountMinor,
+        currencyCode: price.currency,
+        paymentMethod: input.paymentMethod,
+        boundSubscriptionVersion: sub.version,
+        quoteSnapshot: { kind: "RENEWAL", planCode: sub.pendingPlanCode, billingCycle: stdCycle, amountMinor: price.amountMinor, currency: price.currency, planPriceVersion: price.planPriceVersion, subscriptionVersion: sub.version },
+      });
+    }
+
+    // Accepted NEXT_RENEWAL offer (custom→custom change scheduled for renewal), if any.
+    const scheduled = await findAcceptedNextRenewalOffer(tx, input.workspaceId);
+
+    let maxStudents = sub.customMaxActiveStudents!;
+    let maxTeam = sub.customMaxTeamMembers!;
+    let priceMinor = sub.currentPriceMinor!;
+    let cycle = sub.billingCycle as BillingCycle;
+    let offerId: string | null = null;
+    let offerVersion: number | null = null;
+    let recommendationPriceMinor: number | null = null;
+    let adjustmentReason: string | null = null;
+
+    if (scheduled) {
+      if (scheduled.billingCycle !== sub.billingCycle) throw new CrossCycleUpgradeNotSupportedError(); // cross-cycle commercial change deferred
+      // Revalidate usage against the scheduled (possibly lower) limits.
+      await assertCustomUsageFitsOnTx(tx, input.workspaceId, scheduled.maxActiveStudents, scheduled.maxTeamMembers);
+      maxStudents = scheduled.maxActiveStudents; maxTeam = scheduled.maxTeamMembers; priceMinor = scheduled.priceMinor; cycle = scheduled.billingCycle as BillingCycle;
+      offerId = scheduled.id; offerVersion = scheduled.offerVersion; recommendationPriceMinor = scheduled.recommendationPriceMinor; adjustmentReason = scheduled.adjustmentReason;
+    }
+
+    const quoteSnapshot = {
+      kind: "CUSTOM",
+      offerId, offerVersion,
+      currentPlanCode: "CUSTOM",
+      targetPlanCode: "CUSTOM",
+      customMaxActiveStudents: maxStudents,
+      customMaxTeamMembers: maxTeam,
+      billingCycle: cycle,
+      agreedPriceMinor: priceMinor,
+      targetPriceMinor: priceMinor,
+      recommendationPriceMinor,
+      adjustmentReason,
+      planPriceVersion: customRenewalPlanPriceVersion(offerVersion, sub.planPriceVersion),
+      subscriptionVersion: sub.version,
+      currentPeriodEnd: sub.periodEnd?.toISOString() ?? null,
+      quoteTimestamp: new Date().toISOString(),
+    };
+
+    return insertServerPricedRequestOnTx(tx, {
+      workspaceId: input.workspaceId,
+      requestedByUserId: input.requestedByUserId,
+      actionType: "RENEWAL",
+      targetPlanCode: "CUSTOM",
+      billingCycle: cycle,
+      amountMinor: priceMinor,
+      currencyCode: "EGP",
+      paymentMethod: input.paymentMethod,
+      boundSubscriptionVersion: sub.version,
+      quoteSnapshot,
+    });
+  });
+}
+
+/** The single ACCEPTED NEXT_RENEWAL custom offer for a workspace (scheduled future custom terms), if any. */
+async function findAcceptedNextRenewalOffer(tx: Db, workspaceId: string) {
+  const rows = await tx.select().from(customPlanOffers).where(and(eq(customPlanOffers.workspaceId, workspaceId), eq(customPlanOffers.status, "ACCEPTED"), eq(customPlanOffers.effectiveMode, "NEXT_RENEWAL"))).orderBy(desc(customPlanOffers.acceptedAt)).limit(1);
+  return rows[0];
+}
+
+/** Throw DOWNGRADE_BLOCKED_BY_USAGE when current usage exceeds given CUSTOM limits (custom→custom decrease guard). */
+async function assertCustomUsageFitsOnTx(tx: Db, workspaceId: string, maxStudents: number, maxTeam: number): Promise<void> {
+  const currentMonthId = await findCurrentMonthId(tx, workspaceId);
+  const students = currentMonthId ? await getActiveStudentCountForMonth(tx, workspaceId, currentMonthId) : 0;
+  const team = await getActiveTeamUsage(tx, workspaceId);
+  if (students > maxStudents || team > maxTeam) {
+    throw new DowngradeBlockedByUsageError({ currentStudents: students, targetStudentLimit: maxStudents, currentTeamMembers: team, targetTeamLimit: maxTeam });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Confirm (platform admin, app_platform_admin) — the critical race-safe,
 // idempotent transaction.
 // ---------------------------------------------------------------------------
@@ -484,7 +746,16 @@ export async function confirmPaymentRequestTransaction(
     if (subscription.version !== request.boundSubscriptionVersion) throw new PaymentRequestStaleError();
 
     const now = new Date();
-    const quote = request.quoteSnapshotJson as { planPriceVersion: number };
+    const quote = request.quoteSnapshotJson as {
+      planPriceVersion: number;
+      customMaxActiveStudents?: number;
+      customMaxTeamMembers?: number;
+      offerId?: string;
+    };
+    const isCustom = request.targetPlanCode === "CUSTOM";
+    const customLimits = isCustom
+      ? { customMaxActiveStudents: quote.customMaxActiveStudents ?? null, customMaxTeamMembers: quote.customMaxTeamMembers ?? null }
+      : { customMaxActiveStudents: null, customMaxTeamMembers: null };
 
     // 6. Immutable payment (UNIQUE(payment_request_id) + UNIQUE(workspace, idempotency_key) block a double-confirm).
     const [payment] = await tx
@@ -545,6 +816,8 @@ export async function confirmPaymentRequestTransaction(
         nominalCycleStart: periodStart,
         nominalCycleEnd: periodEnd,
         sourceAction: request.actionType === "RENEWAL" ? "RENEWAL" : "NEW_SUBSCRIPTION",
+        customMaxActiveStudents: customLimits.customMaxActiveStudents,
+        customMaxTeamMembers: customLimits.customMaxTeamMembers,
         sourcePaymentId: payment.id,
         supersedesPeriodId: null,
       });
@@ -569,6 +842,8 @@ export async function confirmPaymentRequestTransaction(
       currentPriceMinor: effective.cyclePriceMinor,
       priceCurrencyCode: request.currencyCode,
       planPriceVersion: effective.planPriceVersion,
+      customMaxActiveStudents: effective.customMaxActiveStudents,
+      customMaxTeamMembers: effective.customMaxTeamMembers,
       clearPending,
       sourceType: "ADMIN",
       sourceId: request.id,
@@ -578,6 +853,11 @@ export async function confirmPaymentRequestTransaction(
     });
     if (result === SUBSCRIPTION_VERSION_CONFLICT) throw new PaymentRequestStaleError();
     const periodEnd = new Date(paidEndMs);
+
+    // CUSTOM: consume the accepted offer atomically (ACCEPTED → APPLIED + close
+    // request). Exactly-once — a rollback keeps it ACCEPTED (retryable); a
+    // duplicate confirm returned early above, so this runs once per offer.
+    if (isCustom && quote.offerId) await markOfferAppliedOnTx(tx, quote.offerId, input.confirmedByUserId);
 
     // 9. Audit (payment-level) + 10. outbox + 11. notification to the customer owner.
     await tx.insert(auditEvents).values({
@@ -637,8 +917,9 @@ async function appendUpgradePeriodsOnTx(
   nowMs: number,
   paymentId: string,
 ): Promise<void> {
-  const snapshot = request.quoteSnapshotJson as { targetPriceMinor?: number; planPriceVersion?: number };
+  const snapshot = request.quoteSnapshotJson as { targetPriceMinor?: number; planPriceVersion?: number; customMaxActiveStudents?: number; customMaxTeamMembers?: number };
   const targetPriceMinor = snapshot.targetPriceMinor ?? request.amountMinor;
+  const isCustom = request.targetPlanCode === "CUSTOM";
   const rows = await loadLedgerRowsForSubscription(tx, sub.id);
   const segments = resolveEffectiveSegments(rows, nowMs).filter((s) => s.endMs > nowMs);
   const workspaceId = request.workspaceId;
@@ -651,6 +932,8 @@ async function appendUpgradePeriodsOnTx(
       cyclePriceMinor: targetPriceMinor,
       currencyCode: request.currencyCode,
       planPriceVersion: snapshot.planPriceVersion ?? null,
+      customMaxActiveStudents: isCustom ? snapshot.customMaxActiveStudents ?? null : null,
+      customMaxTeamMembers: isCustom ? snapshot.customMaxTeamMembers ?? null : null,
       periodStart: new Date(Math.max(nowMs, seg.startMs)),
       periodEnd: new Date(seg.endMs),
       nominalCycleStart: new Date(seg.nominalCycleStartMs),
@@ -700,8 +983,14 @@ export async function scheduleDowngradeTransaction(db: Db, input: ScheduleDowngr
       .limit(1);
     if (!sub) throw new PaymentRequestNotFoundError();
     if (sub.state !== ACTIVE_SUBSCRIPTION_STATE) throw new SubscriptionNotActiveError();
-    if (!sub.planCode || !isStandardPlanCode(sub.planCode)) throw new PlanChangeNotSupportedError();
-    assertDowngradeTransition(sub.planCode, input.targetPlanCode); // throws NOT_A_DOWNGRADE / SAME_PLAN / …
+    if (!isStandardPlanCode(input.targetPlanCode)) throw new NotADowngradeError();
+    if (sub.planCode === "CUSTOM") {
+      // CUSTOM → standard: always a downgrade (CUSTOM sits above every standard
+      // plan). Only usage vs the target standard limits gates it.
+    } else {
+      if (!sub.planCode || !isStandardPlanCode(sub.planCode)) throw new PlanChangeNotSupportedError();
+      assertDowngradeTransition(sub.planCode, input.targetPlanCode); // throws NOT_A_DOWNGRADE / SAME_PLAN / …
+    }
     await assertDowngradeUsageFitsOnTx(tx, input.workspaceId, input.targetPlanCode);
 
     const now = new Date();

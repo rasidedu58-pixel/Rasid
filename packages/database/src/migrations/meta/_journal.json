@@ -456,6 +456,27 @@
       "when": 1789400000000,
       "tag": "0066_subscription_periods",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1789500000000,
+      "tag": "0067_custom_plan_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1789600000000,
+      "tag": "0068_custom_plan_offers",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1789700000000,
+      "tag": "0069_period_custom_limits",
+      "breakpoints": true
     }
   ]
 }

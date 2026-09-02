@@ -26,6 +26,9 @@ export interface AppendPeriodInput {
   sourceAction: "NEW_SUBSCRIPTION" | "RENEWAL" | "UPGRADE";
   sourcePaymentId: string | null;
   supersedesPeriodId: string | null;
+  /** Agreed CUSTOM capacity — required for a CUSTOM period, must be null otherwise (0069). */
+  customMaxActiveStudents?: number | null;
+  customMaxTeamMembers?: number | null;
 }
 
 /** Append one immutable period row on the caller's tx. */
@@ -45,6 +48,8 @@ export async function appendSubscriptionPeriodOnTx(tx: Db, input: AppendPeriodIn
       nominalCycleStart: input.nominalCycleStart,
       nominalCycleEnd: input.nominalCycleEnd,
       sourceAction: input.sourceAction,
+      customMaxActiveStudents: input.customMaxActiveStudents ?? null,
+      customMaxTeamMembers: input.customMaxTeamMembers ?? null,
       sourcePaymentId: input.sourcePaymentId,
       supersedesPeriodId: input.supersedesPeriodId,
     })
@@ -71,6 +76,8 @@ export function toLedgerRow(r: SubscriptionPeriodRow): LedgerPeriodRow {
     billingCycle: r.billingCycle,
     cyclePriceMinor: Number(r.cyclePriceMinor),
     planPriceVersion: r.planPriceVersion ?? null,
+    customMaxActiveStudents: r.customMaxActiveStudents ?? null,
+    customMaxTeamMembers: r.customMaxTeamMembers ?? null,
     periodStartMs: r.periodStart.getTime(),
     periodEndMs: r.periodEnd.getTime(),
     nominalCycleStartMs: r.nominalCycleStart.getTime(),

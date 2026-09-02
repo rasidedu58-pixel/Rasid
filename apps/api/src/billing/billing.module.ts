@@ -11,8 +11,10 @@ import { BillingController } from "./api/billing.controller";
 import { EntitlementsController } from "./api/entitlements.controller";
 import { WebhooksController } from "./api/webhooks.controller";
 import { PaymentRequestsController } from "./api/payment-requests.controller";
+import { CustomPlansController } from "./api/custom-plans.controller";
 import { BillingService } from "./application/billing.service";
 import { PaymentRequestsService } from "./application/payment-requests.service";
+import { CustomPlansService } from "./application/custom-plans.service";
 import { BILLING_PROVIDER } from "./application/ports/billing-provider.port";
 import { BILLING_REPOSITORY } from "./application/ports/billing-repository.port";
 import { ENTITLEMENT_REPOSITORY } from "./application/ports/entitlement-repository.port";
@@ -36,10 +38,11 @@ import { PaddleBillingProvider } from "./infrastructure/paddle-billing.provider"
  * themselves.
  */
 @Module({
-  controllers: [BillingController, EntitlementsController, WebhooksController, PaymentRequestsController],
+  controllers: [BillingController, EntitlementsController, WebhooksController, PaymentRequestsController, CustomPlansController],
   providers: [
     BillingService,
     PaymentRequestsService,
+    CustomPlansService,
     PermissionResolverService,
     PermissionGuard,
     SupabaseAuthGuard,

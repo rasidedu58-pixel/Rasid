@@ -70,6 +70,9 @@ function toPlatformDto(row: PlatformPaymentRequestListRow): PlatformPaymentReque
     customerName: row.customerName,
     customerPhone: row.customerPhone,
     currentPlanCode: upgradeCurrentPlan(row),
+    offerVersion: snapNumber(row, "offerVersion"),
+    customMaxActiveStudents: row.targetPlanCode === "CUSTOM" ? snapNumber(row, "customMaxActiveStudents") : null,
+    customMaxTeamMembers: row.targetPlanCode === "CUSTOM" ? snapNumber(row, "customMaxTeamMembers") : null,
   };
 }
 
@@ -78,6 +81,12 @@ function upgradeCurrentPlan(row: PlatformPaymentRequestListRow): string | null {
   if (row.actionType !== "UPGRADE") return null;
   const snap = row.quoteSnapshotJson as { currentPlanCode?: unknown } | null;
   return snap && typeof snap === "object" && typeof snap.currentPlanCode === "string" ? snap.currentPlanCode : null;
+}
+
+function snapNumber(row: PlatformPaymentRequestListRow, key: string): number | null {
+  const snap = row.quoteSnapshotJson as Record<string, unknown> | null;
+  const v = snap && typeof snap === "object" ? snap[key] : undefined;
+  return typeof v === "number" ? v : null;
 }
 
 function encodeCursor(c: { createdAt: string; id: string }): string {

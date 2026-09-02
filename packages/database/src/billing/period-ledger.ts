@@ -19,6 +19,8 @@ export interface LedgerPeriodRow {
   billingCycle: string;
   cyclePriceMinor: number;
   planPriceVersion: number | null;
+  customMaxActiveStudents: number | null;
+  customMaxTeamMembers: number | null;
   periodStartMs: number;
   periodEndMs: number;
   nominalCycleStartMs: number;

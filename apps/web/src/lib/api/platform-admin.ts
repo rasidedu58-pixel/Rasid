@@ -13,6 +13,9 @@ import type {
   ListPlatformPaymentRequestsResponse,
   ResolvePaymentRequestResponse,
   RejectPaymentRequest,
+  ListPlatformCustomRequestsResponse,
+  CreateCustomOffer,
+  PlatformCustomOfferDto,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -89,4 +92,16 @@ export function confirmPaymentRequest(id: string): Promise<ResolvePaymentRequest
 /** platform.billing.manage — reject (reason mandatory), no payment, no subscription change. */
 export function rejectPaymentRequest(id: string, body: RejectPaymentRequest): Promise<ResolvePaymentRequestResponse> {
   return apiRequest<ResolvePaymentRequestResponse>(`/platform-admin/payment-requests/${id}/reject`, { method: "POST", body });
+}
+
+// --- Billing Phase 5: platform custom plans ----------------------------------
+
+export function fetchPlatformCustomRequests(status?: string): Promise<ListPlatformCustomRequestsResponse> {
+  return apiRequest<ListPlatformCustomRequestsResponse>(`/platform-admin/custom/requests${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+}
+export function fetchCustomOfferHistory(requestId: string): Promise<{ offers: PlatformCustomOfferDto[] }> {
+  return apiRequest<{ offers: PlatformCustomOfferDto[] }>(`/platform-admin/custom/requests/${requestId}/offers`);
+}
+export function createCustomOffer(body: CreateCustomOffer): Promise<{ offer: PlatformCustomOfferDto }> {
+  return apiRequest<{ offer: PlatformCustomOfferDto }>("/platform-admin/custom/offers", { method: "POST", body });
 }

@@ -202,10 +202,11 @@ export interface ProrationPeriodSlice {
 }
 
 export interface UpgradeProrationOverPeriodsInput {
-  targetPlan: StandardPlanCode;
+  /** The target plan — a standard code, or "CUSTOM" for an accepted custom offer. Informational only; the math uses `targetCatalogPriceMinor` as the rate. */
+  targetPlan: StandardPlanCode | "CUSTOM";
   /** The upgrade cycle (V1: same as the subscription's current cycle). */
   billingCycle: BillingCycle;
-  /** Target plan's CURRENT official catalog price for `billingCycle`. */
+  /** The target's per-cycle RATE: a standard plan's catalog price, or an accepted CUSTOM offer's agreed price. */
   targetCatalogPriceMinor: number;
   nowMs: number;
   /** Effective remaining period slices (period_end > now), from the ledger. */

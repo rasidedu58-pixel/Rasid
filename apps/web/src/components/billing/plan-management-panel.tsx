@@ -62,7 +62,8 @@ export function PlanManagementPanel({ workspaceId }: { workspaceId: string }) {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["billing", "plan-state", workspaceId] });
   const current = ps.currentPlanCode;
   const higher = current && isStandardPlanCode(current) ? STANDARD_PLAN_LIST.filter((p) => isUpgrade(current, p.code)) : [];
-  const lower = current && isStandardPlanCode(current) ? STANDARD_PLAN_LIST.filter((p) => isDowngrade(current, p.code)) : [];
+  // CUSTOM sits above every standard plan → every standard plan is a downgrade target.
+  const lower = current === "CUSTOM" ? [...STANDARD_PLAN_LIST] : current && isStandardPlanCode(current) ? STANDARD_PLAN_LIST.filter((p) => isDowngrade(current, p.code)) : [];
 
   return (
     <div className="flex flex-col gap-4">
