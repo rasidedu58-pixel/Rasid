@@ -36,6 +36,7 @@ import {
   toast,
 } from "@academic-precision/ui";
 import { hasPlatformPermission, type PlatformPaymentRequestDto } from "@academic-precision/contracts";
+import { whatsappHref } from "../../../lib/whatsapp";
 import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { fetchPlatformPaymentRequests, confirmPaymentRequest, rejectPaymentRequest } from "../../../lib/api/platform-admin";
@@ -51,13 +52,7 @@ const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> 
 const STATUS_LABEL: Record<string, string> = { PENDING: "بانتظار", CONFIRMED: "مؤكَّد", REJECTED: "مرفوض", CANCELLED: "ملغى", EXPIRED: "منتهي" };
 const METHOD_LABEL: Record<string, string> = { INSTAPAY: "إنستاباي", VODAFONE_CASH: "فودافون كاش" };
 
-function customerWhatsapp(phone: string | null): string | null {
-  if (!phone) return null;
-  const digits = phone.replace(/[^\d]/g, "");
-  if (digits.length < 8) return null;
-  const intl = digits.startsWith("00") ? digits.slice(2) : digits.startsWith("0") && digits.length === 11 ? `20${digits.slice(1)}` : digits;
-  return `https://wa.me/${intl}`;
-}
+const customerWhatsapp = (phone: string | null): string | null => whatsappHref(phone);
 
 export default function PlatformAdminPaymentRequestsPage() {
   const { platformRole } = useWorkspace();

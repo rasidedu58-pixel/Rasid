@@ -6,6 +6,7 @@ import type { ContactOutcome, GuardianLink } from "@academic-precision/contracts
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Field, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@academic-precision/ui";
 import { createContactLog } from "../../lib/api/attention";
 import { useWorkspace } from "../../lib/workspace-provider";
+import { whatsappHref } from "../../lib/whatsapp";
 
 const OUTCOME_LABEL: Record<ContactOutcome, string> = {
   CONTACTED: "تم التواصل",
@@ -41,7 +42,9 @@ export function ContactGuardianDialog({
   const [notes, setNotes] = useState("");
   const [followUpAt, setFollowUpAt] = useState("");
 
-  const waLink = `https://wa.me/${guardian.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(draft)}`;
+  // Normalizes an Egyptian local number (01227958232) to international
+  // (201227958232) so WhatsApp opens without the teacher typing a country code.
+  const waLink = whatsappHref(guardian.phone, draft);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -74,11 +77,15 @@ export function ContactGuardianDialog({
           <Textarea id="draft" value={draft} onChange={(e) => setDraft(e.target.value)} rows={5} />
         </Field>
 
-        <Button asChild variant="outline">
-          <a href={waLink} target="_blank" rel="noreferrer">
-            فتح في واتساب
-          </a>
-        </Button>
+        {waLink ? (
+          <Button asChild variant="outline">
+            <a href={waLink} target="_blank" rel="noreferrer">
+              فتح في واتساب
+            </a>
+          </Button>
+        ) : (
+          <p className="text-sm text-text-tertiary">رقم ولي الأمر غير صالح لفتح واتساب — تأكّد من الرقم.</p>
+        )}
 
         <div className="border-t border-border pt-4">
           <Field label="نتيجة التواصل" htmlFor="outcome" hint="بعد محاولة التواصل الفعلية">

@@ -25,6 +25,7 @@ import {
   toast,
 } from "@academic-precision/ui";
 import { hasPlatformPermission } from "@academic-precision/contracts";
+import { whatsappHref } from "../../lib/whatsapp";
 import type {
   CreateFollowUpRequest,
   CreatePlatformContactLogRequest,
@@ -413,16 +414,8 @@ function NewFollowUpDialog({ workspaceId, open, onOpenChange }: { workspaceId: s
   );
 }
 
-/**
- * Best-effort wa.me link. Strips non-digits; a local Egyptian 0-prefixed
- * 11-digit number is normalized to +20. Anything already international is used
- * as-is. Returns null if there aren't enough digits to be a real number.
- */
+/** Delegates to the shared wa.me builder (single source of truth for the
+ *  Egyptian 0-prefix → +20 normalization). */
 function whatsappLink(phone: string): string | null {
-  const digits = phone.replace(/[^\d]/g, "");
-  if (digits.length < 8) return null;
-  let intl = digits;
-  if (digits.startsWith("00")) intl = digits.slice(2);
-  else if (digits.startsWith("0") && digits.length === 11) intl = `20${digits.slice(1)}`;
-  return `https://wa.me/${intl}`;
+  return whatsappHref(phone);
 }
