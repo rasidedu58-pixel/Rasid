@@ -4,15 +4,24 @@ import {
   findPlatformPaymentRequestById,
   getPlatformAdminDb,
   listPlatformPaymentRequests,
+  loadBillingReadinessDbChecks,
+  loadPlatformBillingAttention,
+  loadPlatformBillingHistory,
   rejectPaymentRequestTransaction,
   type PlatformPaymentRequestListRow,
 } from "@academic-precision/database";
-import type {
-  BillingCycle,
-  BillingPaymentMethod,
-  ListPlatformPaymentRequestsResponse,
-  PlatformPaymentRequestDto,
-  ResolvePaymentRequestResponse,
+import { loadServerEnv } from "@academic-precision/config";
+import {
+  computeLaunchReady,
+  type BillingCycle,
+  type BillingPaymentMethod,
+  type LaunchReadinessItem,
+  type LaunchReadinessResponse,
+  type ListBillingAttentionResponse,
+  type ListPlatformBillingHistoryResponse,
+  type ListPlatformPaymentRequestsResponse,
+  type PlatformPaymentRequestDto,
+  type ResolvePaymentRequestResponse,
 } from "@academic-precision/contracts";
 import { ResourceNotFoundException } from "../../common/exceptions/api.exception";
 
@@ -32,6 +41,40 @@ export class PlatformBillingService {
       items: result.items.map(toPlatformDto),
       page: { nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null, hasNext: result.hasNext },
     };
+  }
+
+  /** The deterministic platform triage queue (severity + age). */
+  async getAttention(): Promise<ListBillingAttentionResponse> {
+    const items = await loadPlatformBillingAttention(getPlatformAdminDb());
+    return { items };
+  }
+
+  /** Cross-customer curated billing history (read-only; never raw audit JSON / internal notes / recommendation). */
+  async getHistory(params: { workspaceId?: string; category?: string; cursor?: string; limit?: number }): Promise<ListPlatformBillingHistoryResponse> {
+    const page = await loadPlatformBillingHistory(getPlatformAdminDb(), {
+      workspaceId: params.workspaceId ?? null,
+      category: params.category ?? null,
+      cursor: params.cursor ?? null,
+      limit: params.limit,
+    });
+    return page as ListPlatformBillingHistoryResponse;
+  }
+
+  /**
+   * Launch readiness — the DB-derived checks plus the env-derived payment-channel
+   * check (booleans only, never a secret). Distinct from app health: a missing
+   * payment channel makes launch-readiness false but never fails app health.
+   */
+  async getReadiness(): Promise<LaunchReadinessResponse> {
+    const dbChecks = await loadBillingReadinessDbChecks(getPlatformAdminDb());
+    const env = loadServerEnv();
+    const channelsOk = Boolean(env.RASID_INSTAPAY_HANDLE && env.RASID_VODAFONE_CASH_NUMBER && env.RASID_BILLING_WHATSAPP_NUMBER);
+    const envChecks: LaunchReadinessItem[] = [
+      { check: "PAYMENT_CHANNELS_CONFIGURED", ok: channelsOk, detail: channelsOk ? "قنوات الدفع مهيّأة" : "قنوات الدفع (إنستاباي/فودافون/واتساب) غير مكتملة" },
+      { check: "CUSTOM_FLOWS_ENABLED", ok: true, detail: "تدفقات الباقات المخصّصة مفعّلة" },
+    ];
+    const checks = [...dbChecks, ...envChecks];
+    return { ready: computeLaunchReady(checks), checks };
   }
 
   async confirm(paymentRequestId: string, confirmedByUserId: string): Promise<ResolvePaymentRequestResponse> {

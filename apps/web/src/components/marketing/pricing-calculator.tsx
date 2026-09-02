@@ -5,15 +5,13 @@ import Link from "next/link";
 import { Users, ArrowLeft } from "lucide-react";
 import { PRICING_PLANS, TRIAL_DAYS, type PricingPlan } from "../../lib/marketing/pricing-config";
 
-/** Numeric capacity ceiling for a plan, derived from its id (`up-to-250` → 250); the custom tier is unbounded. */
+/** Numeric capacity ceiling for a plan (from the catalog-sourced config); the custom tier is unbounded. */
 function planCap(plan: PricingPlan): number {
-  if (plan.isCustom) return Infinity;
-  const n = Number(plan.id.replace(/[^0-9]/g, ""));
-  return Number.isFinite(n) && n > 0 ? n : Infinity;
+  return plan.maxActiveStudents;
 }
 
 const SORTED = [...PRICING_PLANS].sort((a, b) => planCap(a) - planCap(b));
-const MAX_SLIDER = 1000;
+const MAX_SLIDER = 3000; // the largest standard plan (BUSINESS_PLUS); above this → custom
 
 /**
  * Interactive pricing calculator — the viewer picks how many students they
@@ -45,7 +43,7 @@ export function PricingCalculator() {
 
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-4xl font-bold tabular-nums text-text-primary">
-              {atMax ? "+1000" : count}
+              {atMax ? "+3000" : count}
             </span>
             <span className="text-sm text-text-secondary">طالب</span>
           </div>
@@ -62,7 +60,7 @@ export function PricingCalculator() {
           />
           <div className="mt-1 flex justify-between text-xs text-text-tertiary">
             <span>10</span>
-            <span>+1000</span>
+            <span>+3000</span>
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
@@ -7,6 +7,7 @@ import {
   upgradeQuoteRequestSchema,
   type CreatePaymentRequestResponse,
   type GetBillingPlanStateResponse,
+  type ListBillingHistoryResponse,
   type ListPaymentRequestsResponse,
   type ScheduleDowngradeResponse,
   type UpgradeQuoteResponse,
@@ -56,6 +57,18 @@ export class PaymentRequestsController {
     @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
   ): Promise<ListPaymentRequestsResponse> {
     return this.service.listPaymentRequests(user, workspaceContext);
+  }
+
+  @Get("history")
+  @ApiOperation({ summary: "Customer-safe unified billing history timeline (owner-only, cursor-paginated)" })
+  getBillingHistory(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ): Promise<ListBillingHistoryResponse> {
+    const parsedLimit = limit ? Number(limit) : undefined;
+    return this.service.getBillingHistory(user, workspaceContext, { cursor, limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined });
   }
 
   // ── Phase 4: plan state + upgrade quote + scheduled downgrade (owner-only) ──

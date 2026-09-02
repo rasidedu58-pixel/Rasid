@@ -1,6 +1,6 @@
 import { createLogger, runWithContext, initErrorTracking, flushErrorTracking, captureException } from "@academic-precision/observability";
 import { randomUUID } from "node:crypto";
-import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan, runPeriodAdvance, WORKER_CONSUMED_EVENT_TYPES } from "@academic-precision/database";
+import { closeDb, getWorkerDb, processPendingOutboxEvents, runSubscriptionExpiryCheck, runNotificationsScan, runBillingLifecycleScan, runPeriodAdvance, WORKER_CONSUMED_EVENT_TYPES } from "@academic-precision/database";
 import { registerGracefulShutdown } from "./shutdown";
 
 /**
@@ -140,6 +140,19 @@ async function runPollingLoop(state: { stopped: boolean }, workerDb: ReturnType<
           // Same isolation rationale as the subscription-expiry check above.
           logger.error({ error }, "Notifications scan failed unexpectedly — will retry next interval.");
           captureException(error, { job: "notifications-scan", jobId: bootId });
+        }
+
+        // Phase 6 billing lifecycle scan runs on the SAME coarse cadence as the
+        // notifications scan (payment/offer expiry + capacity thresholds — all
+        // idempotent and deduped). Isolated in its own try/catch.
+        try {
+          const billingResult = await runWithContext({ jobId: bootId }, () => runBillingLifecycleScan(workerDb));
+          if (billingResult.paymentExpired > 0 || billingResult.paymentExpiring > 0 || billingResult.offerExpired > 0 || billingResult.offerExpiring > 0 || billingResult.capacityCreated > 0) {
+            logger.info({ ...billingResult }, "Billing lifecycle scan completed.");
+          }
+        } catch (error) {
+          logger.error({ error }, "Billing lifecycle scan failed unexpectedly — will retry next interval.");
+          captureException(error, { job: "billing-lifecycle-scan", jobId: bootId });
         }
       }
 

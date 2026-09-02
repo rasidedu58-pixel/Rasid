@@ -14,6 +14,7 @@ import type {
   PlatformCustomOfferDto,
   PlatformCustomRequestDto,
 } from "@academic-precision/contracts";
+import { effectiveCustomOfferStatus } from "@academic-precision/contracts";
 
 /**
  * Platform-admin Custom Plans (Phase 5). Runs on app_platform_admin. The
@@ -78,7 +79,8 @@ function toPlatformOfferDto(o: CustomPlanOfferRow): PlatformCustomOfferDto {
     billingCycle: o.billingCycle as BillingCycle,
     priceMinor: o.priceMinor,
     currencyCode: o.currencyCode,
-    status: o.status as PlatformCustomOfferDto["status"],
+    // Derive-on-read: a PENDING_CUSTOMER offer past valid_until shows as EXPIRED even before the worker flip.
+    status: effectiveCustomOfferStatus({ status: o.status, validUntilMs: o.validUntil.getTime(), nowMs: Date.now() }) as PlatformCustomOfferDto["status"],
     effectiveMode: o.effectiveMode as PlatformCustomOfferDto["effectiveMode"],
     validUntil: o.validUntil.toISOString(),
     createdAt: o.createdAt.toISOString(),

@@ -123,14 +123,24 @@ export type ResolvePaymentRequestResponse = z.infer<typeof resolvePaymentRequest
 // Phase 4 — plan changes (upgrade / downgrade) + billing plan state.
 // ---------------------------------------------------------------------------
 
-/** Current commercial state the customer billing page needs (owner-only). */
+/** Current commercial state the customer billing page needs (owner-only). Phase 6 enriched: price snapshot, period start, trial-days, near-capacity band, future-paid flag. */
 export const billingPlanStateSchema = z.object({
   state: subscriptionStateSchema,
   currentPlanCode: z.string().nullable(),
   billingCycle: billingCycleSchema.nullable(),
+  periodStart: z.string().nullable(),
   periodEnd: z.string().nullable(),
+  /** The subscription's own MONTHLY snapshot price (never the catalog price), or null for TRIAL/legacy. */
+  currentPriceMinor: z.number().int().nullable(),
+  currencyCode: z.string().nullable(),
+  /** For a TRIAL: whole days remaining until period_end (never negative), else null. */
+  trialDaysRemaining: z.number().int().nullable(),
   limits: z.object({ maxActiveStudents: z.number().int(), maxTeamMembers: z.number().int() }),
   usage: z.object({ activeStudents: z.number().int(), activeTeamMembers: z.number().int() }),
+  /** Highest crossed capacity band across students+team (90/95/100), or null below 90%. */
+  capacityBand: z.union([z.literal(90), z.literal(95), z.literal(100)]).nullable(),
+  /** True when a paid period already covers beyond period_end (prepaid renewal / future plan) — suppresses false "ending"/renew CTAs. */
+  hasFuturePaidPeriod: z.boolean(),
   /** A scheduled downgrade that becomes effective at the next renewal, or null. */
   pendingDowngrade: z.object({ targetPlanCode: z.string(), billingCycle: billingCycleSchema }).nullable(),
 });

@@ -16,6 +16,9 @@ import type {
   ListPlatformCustomRequestsResponse,
   CreateCustomOffer,
   PlatformCustomOfferDto,
+  ListBillingAttentionResponse,
+  ListPlatformBillingHistoryResponse,
+  LaunchReadinessResponse,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -104,4 +107,21 @@ export function fetchCustomOfferHistory(requestId: string): Promise<{ offers: Pl
 }
 export function createCustomOffer(body: CreateCustomOffer): Promise<{ offer: PlatformCustomOfferDto }> {
   return apiRequest<{ offer: PlatformCustomOfferDto }>("/platform-admin/custom/offers", { method: "POST", body });
+}
+
+// --- Billing Phase 6: Billing Center (attention queue + launch readiness) -----
+
+/** platform.billing.view — prioritized cross-domain billing attention queue (already sorted). */
+export function fetchPlatformBillingAttention(): Promise<ListBillingAttentionResponse> {
+  return apiRequest<ListBillingAttentionResponse>("/platform-admin/billing/attention");
+}
+
+/** platform.billing.view — launch-readiness checks (booleans + Arabic detail, never secrets). */
+export function fetchPlatformBillingReadiness(): Promise<LaunchReadinessResponse> {
+  return apiRequest<LaunchReadinessResponse>("/platform-admin/billing/readiness");
+}
+
+/** platform.billing.view — curated cross-customer billing history (paginated; no raw audit JSON / notes / recommendation). */
+export function fetchPlatformBillingHistory(params: { workspaceId?: string; category?: string; cursor?: string; limit?: number } = {}): Promise<ListPlatformBillingHistoryResponse> {
+  return apiRequest<ListPlatformBillingHistoryResponse>("/platform-admin/billing/history", { query: params });
 }

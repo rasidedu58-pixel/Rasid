@@ -425,10 +425,16 @@ export async function updateSubscriptionStateTransaction(
 }
 
 // ---------------------------------------------------------------------------
-// Scheduled expiry check (app_worker) — TRIAL/CANCELLED_AT_PERIOD_END rows
-// whose period_end has passed, per §44.2's own rule ("No Grace Period in
-// V1") and the user's stated policy ("Cancelled-at-period-end = Active
-// until period_end, then Expired").
+// Scheduled expiry check (app_worker) — a subscription whose paid-through /
+// trial period_end has passed transitions to EXPIRED, per §44.2's own rule
+// ("No Grace Period in V1"). Phase 6: this now covers ACTIVE/EXPIRING too (a
+// manual customer who simply stops renewing must eventually EXPIRE — there is
+// no Paddle cancel event in the manual world). The aggregate `period_end`
+// equals the ledger paid-through (synced at confirm + period-advance), so
+// `period_end < now` already means nothing is prepaid beyond it; the worker
+// additionally re-checks the ledger defensively before expiring (see
+// `shouldExpireByLedger`). EXPIRING is never persisted (display-only) but is
+// included here so any legacy/externally-set EXPIRING row still resolves.
 // ---------------------------------------------------------------------------
 
 /** Runs on the WORKER connection with NO workspace context set — relies on 0038's worker-only broad SELECT policy (mirrors outbox_events' own claim policy from Phase 7), since discovering which workspaces need checking is inherently cross-tenant. */
@@ -436,7 +442,7 @@ export function findExpirableSubscriptions(workerDb: Db, now: Date = new Date())
   return workerDb
     .select()
     .from(subscriptions)
-    .where(and(inArray(subscriptions.state, ["TRIAL", "CANCELLED_AT_PERIOD_END"]), lt(subscriptions.periodEnd, now)));
+    .where(and(inArray(subscriptions.state, ["TRIAL", "CANCELLED_AT_PERIOD_END", "ACTIVE", "EXPIRING"]), lt(subscriptions.periodEnd, now)));
 }
 
 // ---------------------------------------------------------------------------

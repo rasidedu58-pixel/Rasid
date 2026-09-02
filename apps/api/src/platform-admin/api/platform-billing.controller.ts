@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import { rejectPaymentRequestSchema, type ListPlatformPaymentRequestsResponse, type ResolvePaymentRequestResponse } from "@academic-precision/contracts";
+import { rejectPaymentRequestSchema, type LaunchReadinessResponse, type ListBillingAttentionResponse, type ListPlatformBillingHistoryResponse, type ListPlatformPaymentRequestsResponse, type ResolvePaymentRequestResponse } from "@academic-precision/contracts";
 import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { CurrentUser } from "../../identity/api/decorators/current-user.decorator";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
@@ -36,6 +36,33 @@ export class PlatformBillingController {
     @Query("limit") limit?: string,
   ): Promise<ListPlatformPaymentRequestsResponse> {
     return this.service.listPaymentRequests({ status, cursor, limit: limit ? Number(limit) : undefined });
+  }
+
+  @Get("billing/attention")
+  @RequirePlatformPermission("platform.billing.view")
+  @ApiOperation({ summary: "Deterministic billing attention queue (severity + age) — Billing Center" })
+  attention(): Promise<ListBillingAttentionResponse> {
+    return this.service.getAttention();
+  }
+
+  @Get("billing/readiness")
+  @RequirePlatformPermission("platform.billing.view")
+  @ApiOperation({ summary: "Launch readiness (booleans only, never secrets) — distinct from app health" })
+  readiness(): Promise<LaunchReadinessResponse> {
+    return this.service.getReadiness();
+  }
+
+  @Get("billing/history")
+  @RequirePlatformPermission("platform.billing.view")
+  @ApiOperation({ summary: "Curated cross-customer billing history (read-only, paginated) — no raw audit JSON / notes / recommendation" })
+  history(
+    @Query("workspaceId") workspaceId?: string,
+    @Query("category") category?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ): Promise<ListPlatformBillingHistoryResponse> {
+    const parsedLimit = limit ? Number(limit) : undefined;
+    return this.service.getHistory({ workspaceId, category, cursor, limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined });
   }
 
   @Post("payment-requests/:id/confirm")

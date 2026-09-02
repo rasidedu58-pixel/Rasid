@@ -9,11 +9,13 @@
  * `worker/notifications-scan.ts`.
  */
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import type { NotificationTypeValue } from "@academic-precision/contracts";
 import { notifications } from "../schema/notifications";
 import type { Db } from "./identity.repository";
 
 export type NotificationRow = typeof notifications.$inferSelect;
-export type NotificationType = "SUBSCRIPTION_EXPIRING" | "FOLLOWUP_DUE" | "MISSING_RECORDS";
+/** Every notification `type` the DB CHECK permits (legacy + Phase-6 billing lifecycle) — the widened worker insert accepts all of them. */
+export type NotificationType = NotificationTypeValue;
 
 export async function listNotificationsForUser(
   db: Db,

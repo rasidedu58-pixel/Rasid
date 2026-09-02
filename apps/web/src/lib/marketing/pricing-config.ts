@@ -1,41 +1,65 @@
 /**
- * Central, editable pricing configuration — Phase 12.
+ * Marketing pricing — Billing Engine, Phase 6 pricing-consistency.
  *
- * Marketing-only. The real backend billing model (Phase 8) supports
- * exactly ONE Paddle price (`PADDLE_PRICE_ID`) and ONE subscription per
- * workspace — there is no plan/tier/capacity concept anywhere in the
- * schema or contracts (verified before writing this file). Every tier's
- * CTA therefore starts the SAME 14-day trial via the real signup flow;
- * none of them are wired to a distinct Paddle price. This is a deliberate,
- * documented, temporary state — see `docs/RELEASE_GATES.md`'s "Commercial
- * Billing Gap" entry — not a bug and not a dark pattern: nothing here
- * claims a specific price is being charged today, only what the plan
- * WILL cost once multi-tier billing exists.
+ * Derives ENTIRELY from the billing catalog (`STANDARD_PLAN_LIST` in
+ * `@academic-precision/contracts`), which is the single source of truth for
+ * plan capacity + price. No duplicated/stale price constants live here anymore.
  *
- * To change pricing later: edit this file only. No page/component needs
- * to change.
+ * V1 commercial policy: MONTHLY ONLY — there is no annual price, no annual
+ * toggle, and no "pay-10-get-12" wording anywhere on the marketing surface. The
+ * only badge is the catalog's own (PROFESSIONAL → "الأنسب لمعظم المدرّسين"); no
+ * unverifiable popularity/best-seller claim is used.
+ *
+ * To change pricing later: edit the catalog in contracts — this file follows.
  */
+import { STANDARD_PLAN_LIST } from "@academic-precision/contracts";
 
 export interface PricingPlan {
   id: string;
-  /** Short evocative label shown above the capacity — never implies a final/committed price on its own. */
+  /** Short evocative label shown above the capacity — never a price claim on its own. */
   tagline: string;
-  /** The actual sold unit, per explicit product decision: capacity, never "price per student". */
+  /** The actual sold unit: capacity, never "price per student". */
   studentCapacityLabel: string;
-  /** Null for the custom/contact-us tier (no fixed monthly price exists). */
+  /** Numeric capacity ceiling (Infinity for the custom/contact tier) — drives the calculator match. */
+  maxActiveStudents: number;
+  /** Null for the custom tier (no fixed monthly price). MONTHLY-only — never an annual price. */
   monthlyPriceEGP: number | null;
+  /** The catalog badge (only PROFESSIONAL: "الأنسب لمعظم المدرّسين"), or null. */
+  badge?: string | null;
   highlighted?: boolean;
-  /** True only for the top "contact us" tier — routes to Support instead of Signup. */
+  /** True only for the "أكثر من 3000 طالب" tier — routes to Support instead of Signup. */
   isCustom?: boolean;
 }
 
+/** Evocative taglines per catalog code (marketing copy; capacity + price stay catalog-sourced). */
+const TAGLINES: Record<string, string> = {
+  STARTER: "للبداية",
+  GROWTH: "للنمو",
+  PROFESSIONAL: "للاحتراف",
+  ADVANCED: "للتوسّع",
+  BUSINESS: "للأعمال",
+  BUSINESS_PLUS: "للمؤسسات",
+};
+
 export const PRICING_PLANS: PricingPlan[] = [
-  { id: "up-to-50", tagline: "للبداية", studentCapacityLabel: "حتى 50 طالبًا", monthlyPriceEGP: 99 },
-  { id: "up-to-100", tagline: "للنمو", studentCapacityLabel: "حتى 100 طالب", monthlyPriceEGP: 179 },
-  { id: "up-to-250", tagline: "الأكثر اختيارًا", studentCapacityLabel: "حتى 250 طالبًا", monthlyPriceEGP: 299, highlighted: true },
-  { id: "up-to-500", tagline: "للمجموعات الكبيرة", studentCapacityLabel: "حتى 500 طالب", monthlyPriceEGP: 449 },
-  { id: "up-to-1000", tagline: "للنطاق الموسّع", studentCapacityLabel: "حتى 1000 طالب", monthlyPriceEGP: 699 },
-  { id: "custom", tagline: "تسعير خاص", studentCapacityLabel: "أكثر من 1000 طالب", monthlyPriceEGP: null, isCustom: true },
+  ...STANDARD_PLAN_LIST.map((p) => ({
+    id: p.code,
+    tagline: TAGLINES[p.code] ?? p.nameAr,
+    studentCapacityLabel: `حتى ${p.maxActiveStudents} طالب`,
+    maxActiveStudents: p.maxActiveStudents,
+    monthlyPriceEGP: p.monthlyPriceMinor / 100, // MONTHLY-only, from the catalog
+    badge: p.badgeAr,
+    highlighted: p.badgeAr !== null,
+  })),
+  {
+    id: "custom",
+    tagline: "باقة مخصّصة",
+    studentCapacityLabel: "أكثر من 3000 طالب — اطلب عرضًا مخصصًا",
+    maxActiveStudents: Number.POSITIVE_INFINITY,
+    monthlyPriceEGP: null,
+    isCustom: true,
+    badge: null,
+  },
 ];
 
 export const TRIAL_DAYS = 14;

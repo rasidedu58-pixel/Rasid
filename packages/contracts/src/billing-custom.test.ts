@@ -44,12 +44,13 @@ describe("system recommendation — internal, deterministic, integer", () => {
     expect(recommendCustomTeamMembers(4000)).toBe(20);
     expect(recommendCustomTeamMembers(10000)).toBe(50);
   });
-  it("recommendCustom: annual = monthly × 10; flags team above recommendation", () => {
+  it("recommendCustom: MONTHLY-only — recommended price equals the monthly price; flags team above recommendation", () => {
+    // Even when a legacy caller passes billingCycle: 'ANNUAL', the recommendation stays monthly (V1 MONTHLY-only).
     const r = recommendCustom({ requestedMaxActiveStudents: 4000, requestedMaxTeamMembers: 30, billingCycle: "ANNUAL" });
     expect(r.eligible).toBe(true);
     expect(r.recommendedMonthlyMinor).toBe(110000);
-    expect(r.recommendedAnnualMinor).toBe(1100000);
-    expect(r.recommendedPriceMinor).toBe(1100000); // annual requested
+    expect(r.recommendedPriceMinor).toBe(110000); // monthly, never ×10
+    expect((r as Record<string, unknown>).recommendedAnnualMinor).toBeUndefined();
     expect(r.recommendedMaxTeamMembers).toBe(20);
     expect(r.teamAboveRecommendation).toBe(true);
     expect(r.recommendationVersion).toBe(1);

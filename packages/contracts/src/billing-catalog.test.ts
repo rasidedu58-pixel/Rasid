@@ -18,41 +18,42 @@ import {
   resolveCatalogPrice,
   resolvePlanLimits,
   resolveRenewalPrice,
+  isCreatableBillingCycle,
+  CREATABLE_BILLING_CYCLES,
   type StandardPlanCode,
 } from "./billing-catalog";
 
-/** The approved V1 pricing table (A. Product Pricing — source of truth). */
-const EXPECTED: Record<StandardPlanCode, { students: number; team: number; monthly: number; annual: number }> = {
-  STARTER: { students: 100, team: 0, monthly: 10000, annual: 100000 },
-  GROWTH: { students: 250, team: 1, monthly: 18000, annual: 180000 },
-  PROFESSIONAL: { students: 500, team: 2, monthly: 30000, annual: 300000 },
-  ADVANCED: { students: 1000, team: 5, monthly: 45000, annual: 450000 },
-  BUSINESS: { students: 2000, team: 10, monthly: 70000, annual: 700000 },
-  BUSINESS_PLUS: { students: 3000, team: 15, monthly: 90000, annual: 900000 },
+/** The approved V1 pricing table — MONTHLY ONLY (source of truth). */
+const EXPECTED: Record<StandardPlanCode, { students: number; team: number; monthly: number }> = {
+  STARTER: { students: 100, team: 0, monthly: 10000 },
+  GROWTH: { students: 250, team: 1, monthly: 18000 },
+  PROFESSIONAL: { students: 500, team: 2, monthly: 30000 },
+  ADVANCED: { students: 1000, team: 5, monthly: 45000 },
+  BUSINESS: { students: 2000, team: 10, monthly: 70000 },
+  BUSINESS_PLUS: { students: 3000, team: 15, monthly: 90000 },
 };
 
-describe("Plan Catalog — the six standard plans", () => {
-  it.each(STANDARD_PLAN_CODES)("%s matches the approved capacity + price", (code) => {
+describe("Plan Catalog — the six standard plans (MONTHLY only)", () => {
+  it.each(STANDARD_PLAN_CODES)("%s matches the approved capacity + monthly price", (code) => {
     const plan = STANDARD_PLANS[code];
     const want = EXPECTED[code];
     expect(plan.maxActiveStudents).toBe(want.students);
     expect(plan.maxTeamMembers).toBe(want.team);
     expect(plan.monthlyPriceMinor).toBe(want.monthly);
-    expect(plan.annualPriceMinor).toBe(want.annual);
+    // No annual price exists on the plan (MONTHLY-only policy).
+    expect((plan as Record<string, unknown>).annualPriceMinor).toBeUndefined();
   });
 
-  it("prices annual as exactly 10× monthly (pay 10 months, receive 12)", () => {
-    for (const code of STANDARD_PLAN_CODES) {
-      const plan = STANDARD_PLANS[code];
-      expect(plan.annualPriceMinor).toBe(plan.monthlyPriceMinor * 10);
-    }
+  it("sells MONTHLY only — ANNUAL is not a creatable cycle", () => {
+    expect([...CREATABLE_BILLING_CYCLES]).toEqual(["MONTHLY"]);
+    expect(isCreatableBillingCycle("MONTHLY")).toBe(true);
+    expect(isCreatableBillingCycle("ANNUAL")).toBe(false);
   });
 
   it("keeps every money value a positive integer minor-unit (never a float)", () => {
     for (const code of STANDARD_PLAN_CODES) {
       const plan = STANDARD_PLANS[code];
       expect(Number.isInteger(plan.monthlyPriceMinor)).toBe(true);
-      expect(Number.isInteger(plan.annualPriceMinor)).toBe(true);
       expect(plan.monthlyPriceMinor).toBeGreaterThan(0);
     }
   });
@@ -74,10 +75,14 @@ describe("Plan Catalog — the six standard plans", () => {
 });
 
 describe("resolveCatalogPrice", () => {
-  it("returns the monthly / annual catalog price tagged with the current version", () => {
+  it("returns the MONTHLY catalog price tagged with the current version", () => {
     expect(resolveCatalogPrice("STARTER", "MONTHLY")).toEqual({ amountMinor: 10000, currency: BILLING_CURRENCY, planPriceVersion: PLAN_PRICE_VERSION });
-    expect(resolveCatalogPrice("STARTER", "ANNUAL")).toEqual({ amountMinor: 100000, currency: BILLING_CURRENCY, planPriceVersion: PLAN_PRICE_VERSION });
-    expect(resolveCatalogPrice("PROFESSIONAL", "ANNUAL")).toEqual({ amountMinor: 300000, currency: "EGP", planPriceVersion: PLAN_PRICE_VERSION });
+    expect(resolveCatalogPrice("PROFESSIONAL", "MONTHLY")).toEqual({ amountMinor: 30000, currency: "EGP", planPriceVersion: PLAN_PRICE_VERSION });
+  });
+
+  it("has NO annual catalog price (MONTHLY-only) — annual resolves to null so no trusted flow can price it", () => {
+    expect(resolveCatalogPrice("STARTER", "ANNUAL")).toBeNull();
+    expect(resolveCatalogPrice("PROFESSIONAL", "ANNUAL")).toBeNull();
   });
 
   it("has no catalog price for CUSTOM (negotiated per offer)", () => {
@@ -152,7 +157,7 @@ describe("resolveRenewalPrice", () => {
   it("keeps a CUSTOM deal at its agreed snapshot regardless of policy", () => {
     for (const policy of RENEWAL_PRICE_POLICIES) {
       expect(
-        resolveRenewalPrice({ policy, planCode: "CUSTOM", billingCycle: "ANNUAL", currentPriceMinor: 1234500, currentPriceCurrency: "EGP", currentPlanPriceVersion: null }),
+        resolveRenewalPrice({ policy, planCode: "CUSTOM", billingCycle: "MONTHLY", currentPriceMinor: 1234500, currentPriceCurrency: "EGP", currentPlanPriceVersion: null }),
       ).toEqual({ amountMinor: 1234500, currency: "EGP", planPriceVersion: null, source: "SUBSCRIPTION_SNAPSHOT" });
     }
   });

@@ -18,7 +18,7 @@ import {
   formatMoney,
   toast,
 } from "@academic-precision/ui";
-import type { BillingCycle, BillingPaymentMethod, CreatePaymentRequestResponse, CustomOfferDto } from "@academic-precision/contracts";
+import type { BillingPaymentMethod, CreatePaymentRequestResponse, CustomOfferDto } from "@academic-precision/contracts";
 import {
   acceptCustomOffer,
   cancelCustomRequest,
@@ -70,19 +70,18 @@ export function CustomPlanPanel({ workspaceId }: { workspaceId: string }) {
 function RequestForm({ workspaceId, onChanged }: { workspaceId: string; onChanged: () => void }) {
   const [students, setStudents] = useState<string>("3500");
   const [team, setTeam] = useState<string>("15");
-  const [cycle, setCycle] = useState<BillingCycle>("MONTHLY");
   const [note, setNote] = useState<string>("");
 
   const mutation = useMutation({
     mutationFn: () =>
-      createCustomRequest(workspaceId, { requestedMaxActiveStudents: Number(students), requestedMaxTeamMembers: Number(team), preferredBillingCycle: cycle, customerNote: note || undefined }),
+      createCustomRequest(workspaceId, { requestedMaxActiveStudents: Number(students), requestedMaxTeamMembers: Number(team), preferredBillingCycle: "MONTHLY", customerNote: note || undefined }),
     onSuccess: () => { toast.success("تم إرسال طلب الباقة المخصصة."); onChanged(); },
     onError: () => toast.error("تعذّر إرسال الطلب (تأكد أن عدد الطلاب أكثر من 3000)."),
   });
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-text-secondary">عدد الطلاب المطلوب</span>
           <Input type="number" min={3001} value={students} onChange={(e) => setStudents(e.target.value)} />
@@ -90,16 +89,6 @@ function RequestForm({ workspaceId, onChanged }: { workspaceId: string; onChange
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-text-secondary">أعضاء الفريق المطلوب</span>
           <Input type="number" min={0} value={team} onChange={(e) => setTeam(e.target.value)} />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-text-secondary">الدورة</span>
-          <Select value={cycle} onValueChange={(v) => setCycle(v as BillingCycle)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="MONTHLY">شهري</SelectItem>
-              <SelectItem value="ANNUAL">سنوي</SelectItem>
-            </SelectContent>
-          </Select>
         </label>
       </div>
       <label className="flex flex-col gap-1 text-sm">

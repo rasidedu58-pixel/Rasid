@@ -5,11 +5,11 @@ import { PRICING_PLANS, TRIAL_DAYS } from "../../lib/marketing/pricing-config";
 
 /**
  * Shared pricing grid — used on both the landing page (teaser) and the full
- * `/pricing` page, driven entirely by `pricing-config.ts`. Every button starts
- * the SAME real trial signup (see that file's own comment — no multi-tier
- * Paddle billing exists yet); only the custom ("أكثر من 1000 طالب") tier routes
- * to Support instead. On lg the six plans lay out as two rows of three, with
- * the highlighted "الأكثر اختيارًا" plan sitting in the first row.
+ * `/pricing` page, driven entirely by `pricing-config.ts` (which derives from
+ * the billing catalog — MONTHLY-only, single source of truth). Every button
+ * starts the SAME real trial signup; only the custom ("أكثر من 3000 طالب") tier
+ * routes to Support. On lg the six plans lay out as two rows of three, with the
+ * badged PROFESSIONAL plan ("الأنسب لمعظم المدرّسين") sitting in the first row.
  */
 export function PricingTable() {
   return (
@@ -25,9 +25,9 @@ export function PricingTable() {
                 : "border-border bg-surface shadow-sm hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md"
             }`}
           >
-            {highlighted ? (
+            {plan.badge ? (
               <span className="absolute -top-3 start-6">
-                <Badge tone="brand" className="border border-brand/20 shadow-sm">الأكثر اختيارًا</Badge>
+                <Badge tone="brand" className="border border-brand/20 shadow-sm">{plan.badge}</Badge>
               </span>
             ) : null}
 
@@ -53,7 +53,6 @@ export function PricingTable() {
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />
                 <span>كل مزايا راصد • تجربة {TRIAL_DAYS} يومًا مجانًا</span>
               </p>
-              {highlighted ? <p className="text-xs font-medium text-brand">الأنسب لأغلب المدرّسين</p> : null}
             </div>
 
             <Link

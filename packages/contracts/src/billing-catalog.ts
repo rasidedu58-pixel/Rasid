@@ -20,8 +20,9 @@ import type { SubscriptionStateDto } from "./billing";
  *     "price/version behavior" section of the Phase-1 report).
  *
  * Money is integer MINOR units (piastres) everywhere — never a float
- * (ADR-022). 100 EGP = 10000. Annual = monthly × 10 ("pay for 10 months,
- * receive 12").
+ * (ADR-022). 100 EGP = 10000. V1 is MONTHLY-only — no annual cycle is sold
+ * (commercial policy: MONTHLY ONLY). `BILLING_CYCLES` still lists `ANNUAL`
+ * ONLY so historical/legacy rows parse on read; nothing new is ever annual.
  *
  * Trial is intentionally NOT a sellable plan (it is a near-PROFESSIONAL
  * capacity grant while `state = 'TRIAL'`), and CUSTOM has NO catalog price
@@ -40,8 +41,22 @@ export type StandardPlanCode = (typeof STANDARD_PLAN_CODES)[number];
 export const PLAN_CODES = [...STANDARD_PLAN_CODES, "CUSTOM"] as const;
 export type PlanCode = (typeof PLAN_CODES)[number];
 
+/**
+ * Retained cycle vocabulary. `ANNUAL` remains ONLY for historical read/parse
+ * compatibility (a handful of legacy/test rows carry it); it is NOT sellable —
+ * see `CREATABLE_BILLING_CYCLES`. No trusted flow ever creates an annual row.
+ */
 export const BILLING_CYCLES = ["MONTHLY", "ANNUAL"] as const;
 export type BillingCycle = (typeof BILLING_CYCLES)[number];
+
+/** The cycles a NEW subscription/renewal/upgrade/offer may be created with. V1 commercial policy: MONTHLY ONLY. */
+export const CREATABLE_BILLING_CYCLES = ["MONTHLY"] as const;
+export type CreatableBillingCycle = (typeof CREATABLE_BILLING_CYCLES)[number];
+
+/** True for a cycle a trusted creation flow may accept. Everything else (i.e. ANNUAL) is rejected at the trust boundary — never silently converted. */
+export function isCreatableBillingCycle(cycle: string): cycle is CreatableBillingCycle {
+  return cycle === "MONTHLY";
+}
 
 export interface StandardPlan {
   code: StandardPlanCode;
@@ -52,9 +67,8 @@ export interface StandardPlan {
   maxActiveStudents: number;
   /** Max ACTIVE non-owner team members. The Owner is never counted. */
   maxTeamMembers: number;
+  /** The official monthly sell price (minor units). V1 is MONTHLY-only — there is no annual price. */
   monthlyPriceMinor: number;
-  /** = monthlyPriceMinor × 10 (pay 10 months, receive 12). */
-  annualPriceMinor: number;
 }
 
 /**
@@ -63,12 +77,12 @@ export interface StandardPlan {
  * unlimited; students + team capacity are the only levers.
  */
 export const STANDARD_PLANS: Record<StandardPlanCode, StandardPlan> = {
-  STARTER: { code: "STARTER", nameAr: "بداية", badgeAr: null, maxActiveStudents: 100, maxTeamMembers: 0, monthlyPriceMinor: 10000, annualPriceMinor: 100000 },
-  GROWTH: { code: "GROWTH", nameAr: "نمو", badgeAr: null, maxActiveStudents: 250, maxTeamMembers: 1, monthlyPriceMinor: 18000, annualPriceMinor: 180000 },
-  PROFESSIONAL: { code: "PROFESSIONAL", nameAr: "احترافي", badgeAr: "الأنسب لمعظم المدرّسين", maxActiveStudents: 500, maxTeamMembers: 2, monthlyPriceMinor: 30000, annualPriceMinor: 300000 },
-  ADVANCED: { code: "ADVANCED", nameAr: "متقدم", badgeAr: null, maxActiveStudents: 1000, maxTeamMembers: 5, monthlyPriceMinor: 45000, annualPriceMinor: 450000 },
-  BUSINESS: { code: "BUSINESS", nameAr: "أعمال", badgeAr: null, maxActiveStudents: 2000, maxTeamMembers: 10, monthlyPriceMinor: 70000, annualPriceMinor: 700000 },
-  BUSINESS_PLUS: { code: "BUSINESS_PLUS", nameAr: "أعمال بلس", badgeAr: null, maxActiveStudents: 3000, maxTeamMembers: 15, monthlyPriceMinor: 90000, annualPriceMinor: 900000 },
+  STARTER: { code: "STARTER", nameAr: "بداية", badgeAr: null, maxActiveStudents: 100, maxTeamMembers: 0, monthlyPriceMinor: 10000 },
+  GROWTH: { code: "GROWTH", nameAr: "نمو", badgeAr: null, maxActiveStudents: 250, maxTeamMembers: 1, monthlyPriceMinor: 18000 },
+  PROFESSIONAL: { code: "PROFESSIONAL", nameAr: "احترافي", badgeAr: "الأنسب لمعظم المدرّسين", maxActiveStudents: 500, maxTeamMembers: 2, monthlyPriceMinor: 30000 },
+  ADVANCED: { code: "ADVANCED", nameAr: "متقدم", badgeAr: null, maxActiveStudents: 1000, maxTeamMembers: 5, monthlyPriceMinor: 45000 },
+  BUSINESS: { code: "BUSINESS", nameAr: "أعمال", badgeAr: null, maxActiveStudents: 2000, maxTeamMembers: 10, monthlyPriceMinor: 70000 },
+  BUSINESS_PLUS: { code: "BUSINESS_PLUS", nameAr: "أعمال بلس", badgeAr: null, maxActiveStudents: 3000, maxTeamMembers: 15, monthlyPriceMinor: 90000 },
 };
 
 /** Ordered list (STARTER → BUSINESS_PLUS) for rendering. */
@@ -161,17 +175,18 @@ export interface CatalogPrice {
 }
 
 /**
- * The OFFICIAL current catalog price for a standard plan on a cycle, tagged with
- * the current `PLAN_PRICE_VERSION`. CUSTOM has no catalog price → `null` (its
- * price is negotiated on the offer / stored on the subscription). This is what a
- * NEW subscription or an explicit re-price locks into its own snapshot; it is
- * never read to display an existing customer's price.
+ * The OFFICIAL current catalog price for a standard plan, tagged with the
+ * current `PLAN_PRICE_VERSION`. V1 is MONTHLY-only: a non-monthly cycle has no
+ * catalog price → `null` (so no trusted flow can ever price an annual row).
+ * CUSTOM also has no catalog price → `null` (negotiated on the offer). This is
+ * what a NEW subscription or an explicit re-price locks into its own snapshot;
+ * it is never read to display an existing customer's price.
  */
 export function resolveCatalogPrice(planCode: PlanCode, cycle: BillingCycle): CatalogPrice | null {
   if (planCode === "CUSTOM") return null;
+  if (cycle !== "MONTHLY") return null; // MONTHLY-only — annual is not sellable
   const plan = STANDARD_PLANS[planCode];
-  const amountMinor = cycle === "ANNUAL" ? plan.annualPriceMinor : plan.monthlyPriceMinor;
-  return { amountMinor, currency: BILLING_CURRENCY, planPriceVersion: PLAN_PRICE_VERSION };
+  return { amountMinor: plan.monthlyPriceMinor, currency: BILLING_CURRENCY, planPriceVersion: PLAN_PRICE_VERSION };
 }
 
 /** True when a workspace of this active-student count can only be served by a CUSTOM plan (strictly more than the largest standard plan — 3001+). */

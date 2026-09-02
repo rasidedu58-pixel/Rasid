@@ -7,13 +7,15 @@
  * their 4xx code (never a 500), matching the Phase-3/4 convention.
  */
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { recommendCustom, validateCustomOffer, type BillingCycle, type CustomOfferEffectiveMode } from "@academic-precision/contracts";
+import { recommendCustom, validateCustomOffer, customOfferReadyContent, customOfferAppliedContent, customOfferDedupKey, type BillingCycle, type CustomOfferEffectiveMode } from "@academic-precision/contracts";
 import type { Db } from "./identity.repository";
 import { customPlanRequests, customPlanOffers } from "../schema/custom-plans";
 import { workspaces } from "../schema/workspaces";
 import { users } from "../schema/identity";
 import { auditEvents } from "../schema/audit";
 import { outboxEvents } from "../schema/outbox";
+import { assertMonthlyBillingCycle } from "../billing/billing-cycle";
+import { insertDedupedNotification } from "./notifications.repository";
 
 export type CustomPlanRequestRow = typeof customPlanRequests.$inferSelect;
 export type CustomPlanOfferRow = typeof customPlanOffers.$inferSelect;
@@ -51,6 +53,7 @@ export interface CreateCustomRequestInput {
 
 /** Owner creates a custom-plan lead. Deterministic dedup: an existing PENDING_REVIEW is REUSED (never a spam row). Recommendation is server-computed. */
 export async function createCustomRequestTransaction(db: Db, input: CreateCustomRequestInput): Promise<{ request: CustomPlanRequestRow; reused: boolean }> {
+  assertMonthlyBillingCycle(input.preferredBillingCycle); // V1 MONTHLY-only
   return db.transaction(async (tx) => {
     const rec = recommendCustom({ requestedMaxActiveStudents: input.requestedMaxActiveStudents, requestedMaxTeamMembers: input.requestedMaxTeamMembers, billingCycle: input.preferredBillingCycle });
     if (!rec.eligible) throw new CustomRequestNotEligibleError();
@@ -115,6 +118,7 @@ export interface CreateCustomOfferInput {
 
 /** Platform admin authors an offer (or a revised version). Recomputes the recommendation for the offered capacity, validates the authorized price (reason mandatory on any difference), supersedes a prior PENDING_CUSTOMER offer, and marks the request OFFERED. */
 export async function createCustomOfferTransaction(db: Db, input: CreateCustomOfferInput): Promise<CustomPlanOfferRow> {
+  assertMonthlyBillingCycle(input.billingCycle); // V1 MONTHLY-only
   return db.transaction(async (tx) => {
     const [req] = await tx.select().from(customPlanRequests).where(eq(customPlanRequests.id, input.customRequestId)).for("update");
     if (!req) throw new CustomRequestNotFoundError();
@@ -171,6 +175,13 @@ export async function createCustomOfferTransaction(db: Db, input: CreateCustomOf
 
     await tx.insert(auditEvents).values({ workspaceId: req.workspaceId, actorUserId: input.createdByUserId, actorMembershipId: null, action: "billing.custom_offer.created", entityType: "custom_plan_offer", entityId: offer.id, afterJson: { offerVersion: nextVersion, maxActiveStudents: input.maxActiveStudents, maxTeamMembers: input.maxTeamMembers, priceMinor: input.priceMinor, recommendationPriceMinor: rec.recommendedPriceMinor, priceDifferenceMinor, adjustmentReason: input.adjustmentReason ?? null, effectiveMode: input.effectiveMode } });
     await tx.insert(outboxEvents).values({ workspaceId: req.workspaceId, eventType: "CustomOfferCreated", aggregateType: "CustomPlanOffer", aggregateId: offer.id, payload: { offerId: offer.id, offerVersion: nextVersion } });
+
+    // Phase 6: notify the customer owner that an offer is ready to review (deduped per offer). Admin connection has the notifications INSERT grant.
+    const [wsRow] = await tx.select({ ownerUserId: workspaces.ownerUserId }).from(workspaces).where(eq(workspaces.id, req.workspaceId)).limit(1);
+    if (wsRow) {
+      const content = customOfferReadyContent();
+      await insertDedupedNotification(tx, { workspaceId: req.workspaceId, userId: wsRow.ownerUserId, type: "CUSTOM_OFFER_READY", title: content.title, body: content.body, entityType: "custom_plan_offer", entityId: offer.id, dedupKey: customOfferDedupKey(offer.id) });
+    }
     return offer;
   });
 }
@@ -248,6 +259,13 @@ export async function markOfferAppliedOnTx(tx: Db, offerId: string, actorUserId:
   if (!applied) return; // already APPLIED (idempotent) or not ACCEPTED
   await tx.update(customPlanRequests).set({ status: "CLOSED", updatedAt: new Date() }).where(and(eq(customPlanRequests.id, applied.customRequestId), inArray(customPlanRequests.status, ["PENDING_REVIEW", "OFFERED"])));
   await tx.insert(auditEvents).values({ workspaceId: applied.workspaceId, actorUserId, actorMembershipId: null, action: "billing.custom_offer.applied", entityType: "custom_plan_offer", entityId: applied.id, afterJson: { status: "APPLIED", offerVersion: applied.offerVersion } });
+
+  // Phase 6: notify the customer owner that the custom plan is now active (deduped per offer).
+  const [wsRow] = await tx.select({ ownerUserId: workspaces.ownerUserId }).from(workspaces).where(eq(workspaces.id, applied.workspaceId)).limit(1);
+  if (wsRow) {
+    const content = customOfferAppliedContent();
+    await insertDedupedNotification(tx, { workspaceId: applied.workspaceId, userId: wsRow.ownerUserId, type: "CUSTOM_OFFER_APPLIED", title: content.title, body: content.body, entityType: "custom_plan_offer", entityId: applied.id, dedupKey: `applied:${applied.id}` });
+  }
 }
 
 export function listOffersForRequest(db: Db, customRequestId: string): Promise<CustomPlanOfferRow[]> {

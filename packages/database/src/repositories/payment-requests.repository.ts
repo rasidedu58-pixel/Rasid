@@ -19,6 +19,7 @@ import {
   isDowngrade,
   isStandardPlanCode,
   isUpgrade,
+  resolveCapacityThresholdBand,
   resolveCatalogPrice,
   resolvePlanLimits,
   type BillingCycle,
@@ -39,6 +40,7 @@ import { notifications } from "../schema/notifications";
 import { applySubscriptionTransitionOnTx, SUBSCRIPTION_VERSION_CONFLICT, type SubscriptionRow } from "./subscriptions.repository";
 import { appendSubscriptionPeriodOnTx, loadLedgerRowsForSubscription } from "./subscription-periods.repository";
 import { effectiveRowAt, hasFutureDifferentPlanPeriod, paidThroughMs, resolveEffectiveSegments, toProrationSlices } from "../billing/period-ledger";
+import { assertMonthlyBillingCycle } from "../billing/billing-cycle";
 import { findCurrentMonthId, getActiveStudentCountForMonth, getActiveTeamUsage } from "../billing/capacity";
 import { findCustomOfferForWorkspace, markOfferAppliedOnTx, CustomOfferNotAcceptableError, CustomOfferNotFoundError, CustomOfferAlreadyAppliedError } from "./custom-plans.repository";
 
@@ -208,6 +210,9 @@ export async function createPaymentRequestTransaction(
   db: Db,
   input: CreatePaymentRequestInput,
 ): Promise<{ paymentRequest: PaymentRequestRow; reused: boolean }> {
+  // MONTHLY-only trust boundary (V1) — reject a new subscription/renewal/upgrade
+  // request on any non-monthly cycle with a typed 4xx, never a silent convert.
+  assertMonthlyBillingCycle(input.billingCycle);
   return db.transaction(async (tx) => {
     const [subscription] = await tx
       .select({
@@ -1072,20 +1077,32 @@ export interface BillingPlanState {
   state: SubscriptionStateDto;
   currentPlanCode: string | null;
   billingCycle: string | null;
+  periodStart: string | null;
   periodEnd: string | null;
+  currentPriceMinor: number | null;
+  currencyCode: string | null;
+  trialDaysRemaining: number | null;
   limits: { maxActiveStudents: number; maxTeamMembers: number };
   usage: { activeStudents: number; activeTeamMembers: number };
+  capacityBand: 90 | 95 | 100 | null;
+  hasFuturePaidPeriod: boolean;
   pendingDowngrade: { targetPlanCode: string; billingCycle: string } | null;
 }
 
-/** Current commercial state + usage the billing page renders. Read-only. */
-export async function loadBillingPlanState(db: Db, workspaceId: string): Promise<BillingPlanState | null> {
+const MS_PER_DAY_PLANSTATE = 24 * 60 * 60 * 1000;
+
+/** Current commercial state + usage the billing page renders. Read-only. Phase 6: enriched with price snapshot, trial-days, near-capacity band, and the future-paid flag. */
+export async function loadBillingPlanState(db: Db, workspaceId: string, now: Date = new Date()): Promise<BillingPlanState | null> {
   const [sub] = await db
     .select({
+      id: subscriptions.id,
       state: subscriptions.state,
       planCode: subscriptions.planCode,
       billingCycle: subscriptions.billingCycle,
+      periodStart: subscriptions.periodStart,
       periodEnd: subscriptions.periodEnd,
+      currentPriceMinor: subscriptions.currentPriceMinor,
+      priceCurrencyCode: subscriptions.priceCurrencyCode,
       customMaxActiveStudents: subscriptions.customMaxActiveStudents,
       customMaxTeamMembers: subscriptions.customMaxTeamMembers,
       pendingPlanCode: subscriptions.pendingPlanCode,
@@ -1112,13 +1129,32 @@ export async function loadBillingPlanState(db: Db, workspaceId: string): Promise
   const activeStudents = currentMonthId ? await getActiveStudentCountForMonth(db, workspaceId, currentMonthId) : 0;
   const activeTeamMembers = await getActiveTeamUsage(db, workspaceId);
 
+  // Highest crossed capacity band across students + team.
+  const studentBand = resolveCapacityThresholdBand(activeStudents, limits.maxActiveStudents);
+  const teamBand = resolveCapacityThresholdBand(activeTeamMembers, limits.maxTeamMembers);
+  const capacityBand = [studentBand, teamBand].reduce<90 | 95 | 100 | null>((best, b) => (b !== null && (best === null || b > best) ? b : best), null);
+
+  // A future paid period already covers beyond period_end (prepaid renewal / future plan).
+  const nowMs = now.getTime();
+  const ledgerRows = await loadLedgerRowsForSubscription(db, sub.id);
+  const hasFuturePaidPeriod = ledgerRows.some((r) => r.periodStartMs > nowMs);
+
+  const trialDaysRemaining =
+    sub.state === "TRIAL" && sub.periodEnd ? Math.max(0, Math.ceil((sub.periodEnd.getTime() - nowMs) / MS_PER_DAY_PLANSTATE)) : null;
+
   return {
     state: sub.state as SubscriptionStateDto,
     currentPlanCode: sub.planCode,
     billingCycle: sub.billingCycle,
+    periodStart: sub.periodStart ? sub.periodStart.toISOString() : null,
     periodEnd: sub.periodEnd ? sub.periodEnd.toISOString() : null,
+    currentPriceMinor: sub.currentPriceMinor ?? null,
+    currencyCode: sub.priceCurrencyCode ?? null,
+    trialDaysRemaining,
     limits,
     usage: { activeStudents, activeTeamMembers },
+    capacityBand,
+    hasFuturePaidPeriod,
     pendingDowngrade: sub.pendingPlanCode && sub.pendingBillingCycle ? { targetPlanCode: sub.pendingPlanCode, billingCycle: sub.pendingBillingCycle } : null,
   };
 }
@@ -1171,6 +1207,7 @@ export async function quoteUpgradeForWorkspace(
     currencyCode: target?.currency ?? "EGP",
     paidThrough: sub?.periodEnd ? sub.periodEnd.toISOString() : null,
   };
+  if (input.billingCycle !== "MONTHLY") return { ...base, reason: "ANNUAL_BILLING_NOT_SUPPORTED" }; // V1 MONTHLY-only
   if (!sub) return { ...base, reason: "SUBSCRIPTION_NOT_ACTIVE" };
   if (sub.state !== ACTIVE_SUBSCRIPTION_STATE) return { ...base, reason: "SUBSCRIPTION_NOT_ACTIVE" };
   const current = sub.planCode;

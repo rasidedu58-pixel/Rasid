@@ -18,6 +18,7 @@ import type {
   GetCustomPlanStateResponse,
   CustomOfferDto,
   CustomRequestDto,
+  ListBillingHistoryResponse,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -84,4 +85,10 @@ export function rejectCustomOffer(workspaceId: string, offerId: string): Promise
 }
 export function createCustomPayment(workspaceId: string, body: CreateCustomPaymentRequest): Promise<CreatePaymentRequestResponse> {
   return apiRequest<CreatePaymentRequestResponse>("/billing/custom/payment-request", { method: "POST", workspaceId, body });
+}
+
+// --- Billing Phase 6: unified billing history (owner-only) -------------------
+
+export function fetchBillingHistory(workspaceId: string, cursor?: string): Promise<ListBillingHistoryResponse> {
+  return apiRequest<ListBillingHistoryResponse>("/billing/history", { workspaceId, query: { cursor, limit: 20 } });
 }

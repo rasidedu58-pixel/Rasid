@@ -46,7 +46,6 @@ const CYCLE_LABEL: Record<BillingCycle, string> = { MONTHLY: "شهري", ANNUAL:
 export function PaymentRequestPanel({ workspaceId }: { workspaceId: string }) {
   const queryClient = useQueryClient();
   const [planCode, setPlanCode] = useState<string>("PROFESSIONAL");
-  const [cycle, setCycle] = useState<BillingCycle>("MONTHLY");
   const [method, setMethod] = useState<BillingPaymentMethod>("INSTAPAY");
   const [created, setCreated] = useState<CreatePaymentRequestResponse | null>(null);
 
@@ -56,7 +55,7 @@ export function PaymentRequestPanel({ workspaceId }: { workspaceId: string }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => createPaymentRequest(workspaceId, { planCode: planCode as never, billingCycle: cycle, paymentMethod: method }),
+    mutationFn: () => createPaymentRequest(workspaceId, { planCode: planCode as never, billingCycle: "MONTHLY", paymentMethod: method }),
     onSuccess: (res) => {
       setCreated(res);
       queryClient.invalidateQueries({ queryKey: ["billing", "payment-requests", workspaceId] });
@@ -65,7 +64,7 @@ export function PaymentRequestPanel({ workspaceId }: { workspaceId: string }) {
   });
 
   const selectedPlan = STANDARD_PLAN_LIST.find((p) => p.code === planCode);
-  const priceMinor = selectedPlan ? (cycle === "ANNUAL" ? selectedPlan.annualPriceMinor : selectedPlan.monthlyPriceMinor) : 0;
+  const priceMinor = selectedPlan ? selectedPlan.monthlyPriceMinor : 0; // MONTHLY-only
   const latest = listQuery.data?.paymentRequests[0];
 
   return (
@@ -89,8 +88,8 @@ export function PaymentRequestPanel({ workspaceId }: { workspaceId: string }) {
         </div>
       ) : null}
 
-      {/* Selection */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {/* Selection — MONTHLY-only (no cycle selector) */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-text-secondary">الباقة</span>
           <Select value={planCode} onValueChange={setPlanCode}>
@@ -99,16 +98,6 @@ export function PaymentRequestPanel({ workspaceId }: { workspaceId: string }) {
               {STANDARD_PLAN_LIST.map((p) => (
                 <SelectItem key={p.code} value={p.code}>{p.nameAr} — حتى {p.maxActiveStudents} طالب</SelectItem>
               ))}
-            </SelectContent>
-          </Select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-text-secondary">الدورة</span>
-          <Select value={cycle} onValueChange={(v) => setCycle(v as BillingCycle)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="MONTHLY">شهري</SelectItem>
-              <SelectItem value="ANNUAL">سنوي (شهران مجانًا)</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -126,7 +115,7 @@ export function PaymentRequestPanel({ workspaceId }: { workspaceId: string }) {
 
       <div className="flex items-center justify-between">
         <span className="text-sm text-text-secondary">
-          المبلغ: <span className="font-semibold text-text-primary">{formatMoney(priceMinor)}</span>
+          المبلغ: <span className="font-semibold text-text-primary">{formatMoney(priceMinor)}</span> / شهريًا
         </span>
         <Button onClick={() => createMutation.mutate()} loading={createMutation.isPending}>
           إنشاء طلب الدفع

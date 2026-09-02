@@ -49,6 +49,7 @@ import { groupMonths } from "../schema/groups";
 import { enrollments } from "../schema/enrollments";
 import { sessionRecords } from "../schema/session-records";
 import { students } from "../schema/students";
+import { trialEndingContent, subscriptionEndingContent } from "@academic-precision/contracts";
 import { withWorkerRuntimeContext } from "../connection";
 import { deriveEligibleEnrollmentIds } from "../session-mode/roster";
 import { deriveMissingRecords } from "../session-mode/missing-records";
@@ -171,23 +172,23 @@ async function scanSubscriptionReminders(workerDb: Db, now: Date): Promise<{ sca
     if (!subscription.periodEnd) continue;
     const hoursUntilExpiry = (subscription.periodEnd.getTime() - now.getTime()) / MS_PER_HOUR;
 
+    // Phase 6: split the single legacy SUBSCRIPTION_EXPIRING into TRIAL_ENDING vs
+    // SUBSCRIPTION_ENDING. A paid sub's `period_end` equals its ledger paid-through
+    // (synced at confirm), so a within-window candidate is inherently NOT prepaid —
+    // no false "subscription ending" for someone who renewed early.
+    const notifType = subscription.state === "TRIAL" ? ("TRIAL_ENDING" as const) : ("SUBSCRIPTION_ENDING" as const);
+
     const wasCreated = await withWorkerRuntimeContext({ workspaceId: subscription.workspaceId }, async (tx) => {
-      // Phase 10 Closure Delta — catch-up rule (see determineMilestoneToEmit's
-      // own doc comment): what matters is which dedup keys THIS subscription
-      // already has, not a fixed exact-window check, so that a worker outage
-      // spanning a whole reminder window still emits the single most-relevant
-      // missed milestone once, and never floods multiple stale ones. Reading
-      // the existing dedup keys costs one extra SELECT per candidate
-      // subscription — candidates are already filtered to active-ish states
-      // only (small set, not the whole workspace table), so this stays a
-      // cheap, workspace-scoped query, not a new N+1 hot path of consequence.
+      // Catch-up rule (see determineMilestoneToEmit): consult THIS subscription's
+      // already-emitted dedup keys for this notification type before deciding
+      // which single milestone still needs firing. Cheap, workspace-scoped.
       const existingRows = await tx
         .select({ dedupKey: notifications.dedupKey })
         .from(notifications)
         .where(
           and(
             eq(notifications.workspaceId, subscription.workspaceId),
-            eq(notifications.type, "SUBSCRIPTION_EXPIRING"),
+            eq(notifications.type, notifType),
             eq(notifications.entityType, "subscription"),
             eq(notifications.entityId, subscription.id),
           ),
@@ -198,12 +199,13 @@ async function scanSubscriptionReminders(workerDb: Db, now: Date): Promise<{ sca
 
       const [workspace] = await tx.select({ ownerUserId: workspaces.ownerUserId, name: workspaces.name }).from(workspaces).where(eq(workspaces.id, subscription.workspaceId)).limit(1);
       if (!workspace) return false;
+      const content = notifType === "TRIAL_ENDING" ? trialEndingContent(workspace.name, milestone.days) : subscriptionEndingContent(workspace.name, milestone.days);
       return insertDedupedNotification(tx, {
         workspaceId: subscription.workspaceId,
         userId: workspace.ownerUserId,
-        type: "SUBSCRIPTION_EXPIRING",
-        title: "اقتراب انتهاء الاشتراك",
-        body: `اشتراك مساحة العمل «${workspace.name}» سينتهي خلال ${milestone.days} ${milestone.days === 1 ? "يوم" : "أيام"}.`,
+        type: notifType,
+        title: content.title,
+        body: content.body,
         entityType: "subscription",
         entityId: subscription.id,
         dedupKey: milestone.dedupKey,

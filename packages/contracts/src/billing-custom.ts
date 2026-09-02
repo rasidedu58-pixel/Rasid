@@ -23,7 +23,7 @@ const BUSINESS_PLUS_MONTHLY_MINOR = STANDARD_PLANS.BUSINESS_PLUS.monthlyPriceMin
 const BUSINESS_PLUS_STUDENTS = STANDARD_PLANS.BUSINESS_PLUS.maxActiveStudents; // 3000
 const BUSINESS_PLUS_TEAM = STANDARD_PLANS.BUSINESS_PLUS.maxTeamMembers; // 15
 const CUSTOM_TEAM_STUDENTS_PER_SEAT = 200; // ~1 non-owner seat per 200 students
-const ANNUAL_MULTIPLIER = 10; // recommendation only ("pay 10 months") — a negotiated annual offer is independent
+// V1 commercial policy: MONTHLY ONLY — the custom recommendation is a monthly price; there is no annual recommendation.
 
 /** True when a requested active-student capacity can ONLY be served by CUSTOM (strictly > 3000). */
 export function isCustomEligible(requestedMaxActiveStudents: number): boolean {
@@ -50,7 +50,8 @@ export function recommendCustomTeamMembers(students: number): number {
 export interface CustomRecommendationInput {
   requestedMaxActiveStudents: number;
   requestedMaxTeamMembers: number;
-  billingCycle: BillingCycle;
+  /** Retained for call-site compatibility; V1 is MONTHLY-only so it does not affect the recommended price. */
+  billingCycle?: BillingCycle;
 }
 
 export interface CustomRecommendation {
@@ -58,8 +59,7 @@ export interface CustomRecommendation {
   recommendationVersion: number;
   currency: string;
   recommendedMonthlyMinor: number;
-  recommendedAnnualMinor: number;
-  /** Recommended price for the REQUESTED cycle (annual = monthly × 10, recommendation only). */
+  /** The recommended price. V1 is MONTHLY-only, so this always equals `recommendedMonthlyMinor`. */
   recommendedPriceMinor: number;
   recommendedMaxTeamMembers: number;
   /** The requested team capacity exceeds the internal recommendation → the system flags it for the admin (never auto-rejected). */
@@ -73,22 +73,19 @@ export function recommendCustom(input: CustomRecommendationInput): CustomRecomme
       recommendationVersion: RECOMMENDATION_VERSION,
       currency: BILLING_CURRENCY,
       recommendedMonthlyMinor: 0,
-      recommendedAnnualMinor: 0,
       recommendedPriceMinor: 0,
       recommendedMaxTeamMembers: 0,
       teamAboveRecommendation: false,
     };
   }
   const monthly = recommendCustomMonthlyMinor(input.requestedMaxActiveStudents);
-  const annual = monthly * ANNUAL_MULTIPLIER;
   const recommendedMaxTeamMembers = recommendCustomTeamMembers(input.requestedMaxActiveStudents);
   return {
     eligible: true,
     recommendationVersion: RECOMMENDATION_VERSION,
     currency: BILLING_CURRENCY,
     recommendedMonthlyMinor: monthly,
-    recommendedAnnualMinor: annual,
-    recommendedPriceMinor: input.billingCycle === "ANNUAL" ? annual : monthly,
+    recommendedPriceMinor: monthly, // MONTHLY-only
     recommendedMaxTeamMembers,
     teamAboveRecommendation: input.requestedMaxTeamMembers > recommendedMaxTeamMembers,
   };

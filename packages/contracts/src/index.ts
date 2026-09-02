@@ -15,6 +15,8 @@ export * from "./billing-catalog";
 export * from "./billing-payment-requests";
 export * from "./billing-plan-changes";
 export * from "./billing-custom";
+export * from "./billing-notifications";
+export * from "./billing-lifecycle";
 export * from "./reports";
 export * from "./platform-admin";
 export * from "./platform-operations";

@@ -4,6 +4,7 @@ import {
   createPaymentRequestTransaction,
   listPaymentRequestsForWorkspace,
   loadBillingPlanState,
+  loadBillingHistory,
   quoteUpgradeForWorkspace,
   scheduleDowngradeTransaction,
   withRuntimeContext,
@@ -19,12 +20,14 @@ import type {
   GetBillingPlanStateResponse,
   ListPaymentRequestsResponse,
   PaymentRequestDto,
+  ListBillingHistoryResponse,
   ScheduleDowngradeRequest,
   ScheduleDowngradeResponse,
   StandardPlanCode,
   UpgradeQuoteRequest,
   UpgradeQuoteResponse,
 } from "@academic-precision/contracts";
+import { effectivePaymentRequestStatus } from "@academic-precision/contracts";
 import { ForbiddenApiException, ResourceNotFoundException } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
@@ -92,6 +95,19 @@ export class PaymentRequestsService {
     return { paymentRequests: rows.map((r) => this.toDto(r)) };
   }
 
+  async getBillingHistory(
+    user: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    query: { cursor?: string; limit?: number },
+  ): Promise<ListBillingHistoryResponse> {
+    this.assertOwner(workspaceContext);
+    const page = await withRuntimeContext(
+      { userId: user.id, workspaceId: workspaceContext.workspaceId },
+      (db) => loadBillingHistory(db, { workspaceId: workspaceContext.workspaceId, cursor: query.cursor ?? null, limit: query.limit }),
+    );
+    return page as ListBillingHistoryResponse;
+  }
+
   // ── Phase 4: plan state, upgrade quote, downgrade schedule/cancel (owner-only) ──
 
   async getPlanState(user: VerifiedSupabaseToken, workspaceContext: WorkspaceContext): Promise<GetBillingPlanStateResponse> {
@@ -148,7 +164,8 @@ export class PaymentRequestsService {
       amountMinor: row.amountMinor,
       currencyCode: row.currencyCode,
       paymentMethod: row.paymentMethod as BillingPaymentMethod,
-      status: row.status as PaymentRequestDto["status"],
+      // Derive-on-read: a PENDING request past its expiry shows as EXPIRED even before the worker flip.
+      status: effectivePaymentRequestStatus({ status: row.status, expiresAtMs: row.expiresAt ? row.expiresAt.getTime() : null, nowMs: Date.now() }) as PaymentRequestDto["status"],
       rejectReason: row.rejectReason,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),

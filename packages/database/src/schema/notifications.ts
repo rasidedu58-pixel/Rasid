@@ -56,7 +56,8 @@ export const notifications = pgTable(
   (table) => [
     check(
       "notifications_type_check",
-      sql`${table.type} IN ('SUBSCRIPTION_EXPIRING', 'FOLLOWUP_DUE', 'MISSING_RECORDS', 'PAYMENT_CONFIRMED', 'PAYMENT_REJECTED')`,
+      // Phase 6 (0070) widened this with the billing lifecycle set. Legacy types kept for historical rows.
+      sql`${table.type} IN ('SUBSCRIPTION_EXPIRING', 'FOLLOWUP_DUE', 'MISSING_RECORDS', 'TRIAL_ENDING', 'TRIAL_EXPIRED', 'SUBSCRIPTION_ENDING', 'SUBSCRIPTION_EXPIRED', 'PAYMENT_REQUEST_CREATED', 'PAYMENT_REQUEST_EXPIRING', 'PAYMENT_REQUEST_EXPIRED', 'PAYMENT_CONFIRMED', 'PAYMENT_REJECTED', 'CAPACITY_STUDENTS', 'CAPACITY_TEAM', 'CUSTOM_OFFER_READY', 'CUSTOM_OFFER_EXPIRING', 'CUSTOM_OFFER_ACCEPTED_PAYMENT_PENDING', 'CUSTOM_OFFER_APPLIED', 'CUSTOM_REQUEST_CREATED', 'NEW_PAYMENT_PROOF_PENDING')`,
     ),
     // The DB-level dedup invariant itself — see module doc comment.
     unique("notifications_dedup_unique").on(

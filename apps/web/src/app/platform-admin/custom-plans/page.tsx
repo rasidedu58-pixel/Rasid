@@ -99,7 +99,6 @@ function OfferDialog({ request, onClose, onDone }: { request: PlatformCustomRequ
     defaultValues: {
       maxActiveStudents: request.requestedMaxActiveStudents,
       maxTeamMembers: Math.max(request.requestedMaxTeamMembers, request.recommendedMaxTeamMembers),
-      billingCycle: request.preferredBillingCycle,
       priceMinor: request.recommendedPriceMinor,
       adjustmentReason: "",
       effectiveMode: "IMMEDIATE" as const,
@@ -115,7 +114,7 @@ function OfferDialog({ request, onClose, onDone }: { request: PlatformCustomRequ
         customRequestId: request.id,
         maxActiveStudents: Number(v.maxActiveStudents),
         maxTeamMembers: Number(v.maxTeamMembers),
-        billingCycle: v.billingCycle as never,
+        billingCycle: "MONTHLY" as never, // V1 MONTHLY-only
         priceMinor: Number(v.priceMinor),
         adjustmentReason: (v.adjustmentReason as string) || undefined,
         effectiveMode: v.effectiveMode as never,
@@ -138,11 +137,8 @@ function OfferDialog({ request, onClose, onDone }: { request: PlatformCustomRequ
             <Field label="صلاحية (أيام)" htmlFor="validForDays"><Input id="validForDays" type="number" min={1} max={90} {...register("validForDays")} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="الدورة" htmlFor="billingCycle">
-              <select id="billingCycle" className="h-9 rounded-md border border-border bg-surface px-2 text-sm" {...register("billingCycle")}>
-                <option value="MONTHLY">شهري</option>
-                <option value="ANNUAL">سنوي</option>
-              </select>
+            <Field label="الدورة" htmlFor="billingCycleDisplay">
+              <input id="billingCycleDisplay" className="h-9 rounded-md border border-border bg-surface-sunken px-2 text-sm text-text-secondary" value="شهري" disabled readOnly />
             </Field>
             <Field label="التطبيق" htmlFor="effectiveMode">
               <select id="effectiveMode" className="h-9 rounded-md border border-border bg-surface px-2 text-sm" {...register("effectiveMode")}>

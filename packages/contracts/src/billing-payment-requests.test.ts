@@ -17,7 +17,7 @@ describe("createPaymentRequest — price trust boundary", () => {
   it("NEVER accepts a client-supplied amount/price/limit — those fields are stripped, never trusted", () => {
     const parsed = createPaymentRequestSchema.parse({
       planCode: "STARTER",
-      billingCycle: "ANNUAL",
+      billingCycle: "MONTHLY",
       paymentMethod: "VODAFONE_CASH",
       amountMinor: 1,
       planPriceVersion: 999,
