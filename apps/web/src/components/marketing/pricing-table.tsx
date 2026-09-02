@@ -25,10 +25,12 @@ export function PricingTable() {
                 : "border-border bg-surface shadow-sm hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md"
             }`}
           >
+            {/* Recommended badge — in the card's normal flow (never clipped by the
+                card's own `overflow:hidden` sheen, never overlapping the border). */}
             {plan.badge ? (
-              <span className="absolute -top-3 start-6">
+              <div className="mb-3 flex">
                 <Badge tone="brand" className="border border-brand/20 shadow-sm">{plan.badge}</Badge>
-              </span>
+              </div>
             ) : null}
 
             <span className="text-sm font-medium text-text-secondary">{plan.tagline}</span>

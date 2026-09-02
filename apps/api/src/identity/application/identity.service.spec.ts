@@ -68,6 +68,27 @@ describe("IdentityService", () => {
       await service.getMe(AUTH_USER);
       await expect(service.updateProfile(AUTH_USER, { phone: "0191234567" })).rejects.toBeInstanceOf(ValidationApiException);
     });
+
+    it("backfills the teacher profile from signup metadata for a brand-new account", async () => {
+      const me = await service.getMe({ id: "u-meta", email: "meta@example.com", fullName: "منى", phone: "01012345678", governorate: "CAIRO", subject: "MATH" });
+      expect(me.profile.phone).toBe("+201012345678"); // normalized
+      expect(me.profile.governorate).toBe("CAIRO");
+      expect(me.profile.subject).toBe("MATH");
+    });
+
+    it("ignores INVALID signup metadata (profile stays for the onboarding backstop)", async () => {
+      const me = await service.getMe({ id: "u-badmeta", email: "bad@example.com", fullName: "x", phone: "not-a-phone", governorate: "NOWHERE", subject: "MATH" });
+      expect(me.profile.phone).toBeNull();
+      expect(me.profile.governorate).toBeNull();
+    });
+
+    it("never overwrites an existing profile from metadata on a later request", async () => {
+      const meta = { id: "u-existing", email: "ex@example.com", fullName: "y", phone: "01012345678", governorate: "CAIRO", subject: "MATH" };
+      await service.getMe(meta); // provisions + backfills CAIRO
+      await service.updateProfile(meta, { governorate: "GIZA" }); // teacher edits it
+      const me = await service.getMe({ ...meta, governorate: "CAIRO" }); // metadata still CAIRO
+      expect(me.profile.governorate).toBe("GIZA"); // edit preserved — never re-applied from metadata
+    });
   });
 
   describe("idempotent provisioning", () => {

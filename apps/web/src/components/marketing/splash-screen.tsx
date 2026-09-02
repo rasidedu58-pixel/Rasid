@@ -12,27 +12,39 @@ import {
   RASID_CENTER,
 } from "../brand/rasid-geometry";
 
-const SEEN_KEY = "rasid_splash_seen";
-const FULL_MS = 2150;
+const FULL_MS = 1500;
 const REDUCED_MS = 500;
 
 /**
- * Rasid brand-entrance splash — a ~2.1s Brand Motion Sequence shown on the FIRST
- * landing-page load of a tab (sessionStorage-gated), never on internal nav.
+ * Module-level flag — reset on every FULL page load (a fresh JS execution
+ * context: browser refresh, opening the app in a new tab, or any hard
+ * navigation) and preserved across in-app SPA route changes (same context). So
+ * the splash replays on refresh / new navigation, but never on an internal
+ * route change. Deliberately NOT sessionStorage (which survives refresh and so
+ * suppressed the replay).
+ */
+let shownThisLoad = false;
+
+/**
+ * Rasid brand-entrance splash — a ~1.5s Brand Motion Sequence shown on every FULL
+ * page load (browser refresh / new tab / hard navigation), never on internal SPA
+ * route changes. Gated by the module-level `shownThisLoad` flag above (which
+ * resets with each fresh JS context), NOT sessionStorage — sessionStorage
+ * survives a refresh and so wrongly suppressed the replay.
  *
- * Story (all CSS-timed; JS only mounts then unmounts):
- *   0–250ms   detection — rings resolve from the centre outward, centre lights up
- *   250–800   an arrow flies IN from off the lower-right, accelerating; rings lock-pulse
- *   800–1050  impact — the arrow strikes the centre (and stops); flash + shockwave;
- *             the rings fracture into their segments and are pulled back into place —
- *             the strike is what FORMS the final logo (not a random explosion)
- *   1050–1450 settle
- *   1300–1650 the "راصد" wordmark rises in
- *   1650–2100 the whole mark eases up + the cover fades, revealing the page beneath
+ * Story (all CSS-timed to the same ~1.5s window; JS only mounts then unmounts):
+ *   detection — rings resolve from the centre outward, centre lights up
+ *   an arrow flies IN from off the lower-right, accelerating; rings lock-pulse
+ *   impact — the arrow strikes the centre (and stops); flash + shockwave; the
+ *            rings fracture into their segments and are pulled back into place —
+ *            the strike is what FORMS the final logo (not a random explosion)
+ *   settle → the "راصد" wordmark rises in → the whole mark eases up + the cover
+ *   fades, revealing the page beneath.
  *
  * The final frame is byte-identical to the static RasidMark. `prefers-reduced-motion`
- * collapses this to a ~350ms logo fade. `?splashPreview=1` replays it in dev only.
- * Fixed overlay (no CLS), `aria-hidden` (the page is already mounted beneath it).
+ * collapses this to a ~500ms logo fade (no motion, no layout shift). `?splashPreview=1`
+ * replays it in dev only. Fixed overlay (no CLS), `aria-hidden` (the page is already
+ * mounted beneath it).
  */
 export function SplashScreen() {
   const [state, setState] = useState<"idle" | "full" | "reduced">("idle");
@@ -41,28 +53,13 @@ export function SplashScreen() {
     const params = new URLSearchParams(window.location.search);
     const devPreview = process.env.NODE_ENV !== "production" && params.get("splashPreview") === "1";
 
-    let seen = false;
-    try {
-      seen = sessionStorage.getItem(SEEN_KEY) === "1";
-    } catch {
-      /* private mode → treat as first visit */
-    }
     const reduced =
       typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    const markSeen = () => {
-      try {
-        sessionStorage.setItem(SEEN_KEY, "1");
-      } catch {
-        /* ignore */
-      }
-    };
-
-    if (!devPreview && seen) {
-      markSeen();
-      return; // already shown this tab → page is visible beneath
+    if (!devPreview && shownThisLoad) {
+      return; // already shown in THIS page load (SPA re-mount) → do not replay
     }
-    markSeen();
+    shownThisLoad = true;
 
     if (reduced && !devPreview) {
       setState("reduced");

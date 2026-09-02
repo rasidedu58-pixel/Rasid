@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, MessageCircle } from "lucide-react";
+import { attentionRuleLabel } from "@academic-precision/contracts";
 import type { AttentionEvidenceDto } from "@academic-precision/contracts";
 import { Badge, Button, Card, ErrorState, LoadingRegion, SectionCard, StatusDot, cn, formatDate, formatRelativeToNow, toast } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
@@ -51,11 +52,6 @@ function ReasonEvidence({ evidence }: { evidence: AttentionEvidenceDto[] }) {
     </div>
   );
 }
-const RULE_LABEL: Record<string, string> = {
-  ATTENDANCE_ABSENCE_STREAK: "غياب متكرر",
-  HOMEWORK_NOT_DONE_STREAK: "تقصير متكرر في الواجب",
-  LOW_EXAM_SCORE: "درجة امتحان منخفضة",
-};
 
 export default function AttentionCaseDetailPage() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -107,7 +103,7 @@ export default function AttentionCaseDetailPage() {
             {item.reasons.map((reason) => (
               <Card key={reason.id} className={`border-s-2 p-3 ${reason.severity === "HIGH" ? "border-s-danger" : "border-s-warning"}`}>
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-text-primary">{RULE_LABEL[reason.ruleKey] ?? reason.ruleKey}</p>
+                  <p className="text-sm font-medium text-text-primary">{attentionRuleLabel(reason.ruleKey)}</p>
                   <Badge tone={reason.severity === "HIGH" ? "danger" : "warning"}>{reason.severity === "HIGH" ? "عالية" : "متوسطة"}</Badge>
                 </div>
                 <p className="mt-1 text-xs text-text-tertiary">

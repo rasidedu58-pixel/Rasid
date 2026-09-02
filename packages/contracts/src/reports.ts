@@ -169,7 +169,7 @@ const actionItemSchema = z.object({
 
 export const actionCenterResponseSchema = z.object({
   month: monthRefSchema.nullable(),
-  nextSession: z.object({ id: z.string().uuid(), groupName: z.string(), scheduledAt: z.string() }).nullable().optional(),
+  nextSession: z.object({ id: z.string().uuid(), groupName: z.string(), scheduledAt: z.string(), status: z.enum(["SCHEDULED", "IN_PROGRESS"]) }).nullable().optional(),
   missingRecords: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),
   followUpsDue: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),
   attention: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),

@@ -97,6 +97,9 @@ export function PaymentLedger() {
                       <TableCell>
                         <Link href={`/students/${p.studentId}`} className="font-medium text-text-primary hover:text-brand">{p.studentName}</Link>
                         <span className="mt-0.5 block text-xs text-text-tertiary sm:hidden">{p.groupName}</span>
+                        {/* Recorder — always accessible: the dedicated "سجّلها" column only
+                            shows on xl, so surface it as a subline on smaller screens. */}
+                        {p.recordedByName ? <span className="mt-0.5 block text-xs text-text-tertiary xl:hidden">سجّلها: {p.recordedByName}</span> : null}
                       </TableCell>
                       <TableCell className="hidden text-sm text-text-secondary sm:table-cell">{p.groupName}</TableCell>
                       <TableCell className={cn("text-end text-base font-semibold tabular-nums", reversed ? "text-text-tertiary line-through" : "text-text-primary")}>{formatMoney(p.amountMinor)}</TableCell>

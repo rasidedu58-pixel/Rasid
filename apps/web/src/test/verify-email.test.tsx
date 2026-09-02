@@ -15,8 +15,15 @@ vi.mock("../lib/supabase-client", () => ({
 }));
 
 let workspaceStatus: "loading" | "ready" | "no-workspace" | "error" = "no-workspace";
+// A brand-new owner's /me PROVISIONS their workspace, so post-verify the resolved
+// status is "ready" with an incomplete profile — which is what routes them to
+// Step-2 onboarding (shouldForceTeacherOnboarding). These mirror useWorkspace's
+// real fields so the redirect effect can be exercised faithfully.
+let wsIsOwner = true;
+let wsIsPlatformStaff = false;
+let wsProfileCompleted = false;
 vi.mock("../lib/workspace-provider", () => ({
-  useWorkspace: () => ({ status: workspaceStatus }),
+  useWorkspace: () => ({ status: workspaceStatus, isOwner: wsIsOwner, isPlatformStaff: wsIsPlatformStaff, profileCompleted: wsProfileCompleted }),
 }));
 
 let searchParamsEmail: string | null = "teacher@example.com";
@@ -31,6 +38,9 @@ beforeEach(() => {
   replaceMock.mockReset();
   searchParamsEmail = "teacher@example.com";
   workspaceStatus = "no-workspace";
+  wsIsOwner = true;
+  wsIsPlatformStaff = false;
+  wsProfileCompleted = false;
 });
 
 // vitest doesn't register RTL's auto-cleanup unless `test.globals` is on
@@ -58,7 +68,12 @@ describe("VerifyEmailPage", () => {
 
   it("verifies a correct 6-digit code via verifyOtp({ type: 'email' }) and redirects a NEW user to /onboarding", async () => {
     verifyOtpMock.mockResolvedValue({ data: {}, error: null });
-    workspaceStatus = "no-workspace";
+    // A new owner's first /me provisions their workspace, so WorkspaceProvider
+    // resolves "ready" with an incomplete profile → Step-2 onboarding.
+    workspaceStatus = "ready";
+    wsIsOwner = true;
+    wsIsPlatformStaff = false;
+    wsProfileCompleted = false;
     const { default: VerifyEmailPage } = await import("../app/verify-email/page");
     render(<VerifyEmailPage />);
 
@@ -72,7 +87,9 @@ describe("VerifyEmailPage", () => {
 
   it("redirects to /dashboard instead when the workspace already exists (existing source of truth, no new frontend logic)", async () => {
     verifyOtpMock.mockResolvedValue({ data: {}, error: null });
+    // Returning owner with a COMPLETE profile → straight to the app, no onboarding.
     workspaceStatus = "ready";
+    wsProfileCompleted = true;
     const { default: VerifyEmailPage } = await import("../app/verify-email/page");
     render(<VerifyEmailPage />);
 

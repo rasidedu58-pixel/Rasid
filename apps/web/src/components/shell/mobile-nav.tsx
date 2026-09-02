@@ -12,7 +12,9 @@ export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange:
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="end" className="w-72 max-w-[85vw] border-shell-border bg-shell" closeClassName="text-shell-text-muted hover:text-shell-text">
+      {/* side="start" = inline-start = the RIGHT edge under RTL, matching the desktop
+          sidebar's side so the mobile nav slides in from the right, as expected. */}
+      <SheetContent side="start" className="w-72 max-w-[85vw] border-shell-border bg-shell" closeClassName="text-shell-text-muted hover:text-shell-text">
         <SheetHeader>
           <SheetTitle>
             <RasidWordmark variant="default" tone="onDark" />

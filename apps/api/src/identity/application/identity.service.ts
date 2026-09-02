@@ -1,8 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  governorateSchema,
   isTeacherProfileComplete,
   normalizeEgyptianPhone,
   onboardingCompleteRequestSchema,
+  subjectSchema,
   updateTeacherProfileRequestSchema,
   type MeResponse,
   type OnboardingCompleteResponse,
@@ -42,8 +44,8 @@ export class IdentityService {
    * for the verified caller. Triggered by the first authenticated request
    * from a verified identity; safe to call on every request afterward.
    */
-  private ensureProvisioned(authUser: VerifiedSupabaseToken) {
-    return this.repository.provision({
+  private async ensureProvisioned(authUser: VerifiedSupabaseToken) {
+    const provisioned = await this.repository.provision({
       authUserId: authUser.id,
       email: authUser.email,
       // FIRST trusted name wins: the signup name (Supabase user_metadata,
@@ -53,6 +55,26 @@ export class IdentityService {
       // so this sets the name exactly once — later edits go through the profile.
       fullName: authUser.fullName || authUser.email?.split("@")[0]?.trim() || DEFAULT_FULL_NAME,
     });
+    // Backfill the teacher profile from signup metadata for a BRAND-NEW account
+    // (phone/governorate/subject are now required at signup). Only when the
+    // profile is still empty — never overwrites a later edit — and only with
+    // values that validate/normalize (untrusted metadata). Legacy/invite
+    // accounts without metadata fall through to the onboarding step unchanged.
+    if (!provisioned.user.phone && authUser.governorate && authUser.subject) {
+      const phone = normalizeEgyptianPhone(authUser.phone ?? "");
+      const gov = governorateSchema.safeParse(authUser.governorate);
+      const subj = subjectSchema.safeParse(authUser.subject);
+      if (phone && gov.success && subj.success) {
+        const updated = await this.repository.updateProfile(provisioned.user.id, {
+          phone,
+          governorate: gov.data,
+          subject: subj.data,
+          subjectOther: subj.data === "OTHER" ? authUser.subjectOther ?? null : null,
+        });
+        if (updated) return { ...provisioned, user: updated };
+      }
+    }
+    return provisioned;
   }
 
   async getMe(authUser: VerifiedSupabaseToken): Promise<MeResponse> {

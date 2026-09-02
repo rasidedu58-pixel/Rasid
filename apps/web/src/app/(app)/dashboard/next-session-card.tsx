@@ -9,6 +9,7 @@ export interface NextSessionInfo {
   id: string;
   groupName: string;
   scheduledAt: string;
+  status: "SCHEDULED" | "IN_PROGRESS";
 }
 
 const arNum = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
@@ -62,17 +63,23 @@ export function NextSessionCard({ session }: { session: NextSessionInfo | null |
 
   const at = new Date(session.scheduledAt);
   const mins = Math.round((at.getTime() - now) / 60_000);
-  const imminent = mins >= 0 && mins < 60;
+  const isLive = session.status === "IN_PROGRESS";
+  // A live session is always the most urgent thing on the page (highlight it);
+  // an upcoming one is only "imminent" within the next hour.
+  const imminent = isLive || (mins >= 0 && mins < 60);
+  const eyebrow = isLive ? "الحصة الجارية الآن" : "الحصة القادمة";
+  const cta = isLive ? "متابعة الحصة" : "فتح الحصة";
 
   let when: string;
-  if (mins <= 0) when = "بدأ موعدها للتو";
+  if (isLive) when = "جارية الآن — سجّل الحضور والواجب";
+  else if (mins <= 0) when = "بدأ موعدها للتو";
   else if (mins < 60) when = `تبدأ بعد ${arNum(mins)} دقيقة`;
   else if (sameLocalDay(at, new Date(now))) when = `اليوم • ${new Intl.DateTimeFormat("ar-EG", { hour: "numeric", minute: "2-digit" }).format(at)}`;
   else when = formatDateTime(session.scheduledAt);
 
   return (
     <section
-      aria-label="الحصة القادمة"
+      aria-label={eyebrow}
       className={`relative overflow-hidden rounded-2xl border p-6 shadow-sm transition-shadow ${
         imminent ? "border-brand/40 bg-surface shadow-glow" : "border-border bg-surface"
       }`}
@@ -84,14 +91,14 @@ export function NextSessionCard({ session }: { session: NextSessionInfo | null |
             <CalendarClock className="h-5 w-5" aria-hidden />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-wide text-brand">الحصة القادمة</p>
+            <p className="text-xs font-semibold tracking-wide text-brand">{eyebrow}</p>
             <p className="mt-0.5 truncate text-lg font-semibold text-text-primary">{session.groupName}</p>
             <p className={`mt-0.5 text-sm ${imminent ? "font-medium text-brand" : "text-text-secondary"}`}>{when}</p>
           </div>
         </div>
         <Button asChild size="lg" className="shrink-0">
           <Link href={`/sessions/${session.id}`} className="gap-1.5">
-            فتح الحصة
+            {cta}
             <ArrowLeft className="h-4 w-4" aria-hidden />
           </Link>
         </Button>

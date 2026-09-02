@@ -50,16 +50,28 @@ describe("Landing motion — OperatingRhythm", () => {
   });
 });
 
-describe("Landing motion — HeroProductPreview", () => {
+describe("Landing hero — real product screenshot", () => {
   beforeEach(() => mockReducedMotion(true));
 
-  it("renders the honest mockup labels without crashing under reduced motion", () => {
-    render(<HeroProductPreview />);
-    expect(screen.getByText("يحتاج إجراء الآن")).toBeTruthy();
-    expect(screen.getByText("مركز الإجراءات")).toBeTruthy();
+  it("renders the real Rasid dashboard screenshot with a descriptive alt", () => {
+    const { container } = render(<HeroProductPreview />);
+    const img = container.querySelector("img");
+    expect(img).toBeTruthy();
+    expect(img?.getAttribute("src")).toBe("/hero-dashboard.png");
+    expect(img?.getAttribute("alt") ?? "").toMatch(/راصد/);
+    expect(img?.getAttribute("loading")).toBe("eager"); // above the fold (LCP)
+    // Intrinsic dimensions are locked to reserve space and prevent layout shift.
+    expect(img?.getAttribute("width")).toBe("2880");
+    expect(img?.getAttribute("height")).toBe("1800");
   });
 
-  it("starts no focus-loop interval under reduced motion", () => {
+  it("keeps the two supporting status chips in the accessible tree", () => {
+    render(<HeroProductPreview />);
+    expect(screen.getByText("حضور حصة اليوم سُجّل")).toBeTruthy();
+    expect(screen.getByText("دفعة متأخرة — تذكير")).toBeTruthy();
+  });
+
+  it("is a static, JS-free preview — starts no timers (LCP-friendly)", () => {
     const intervalSpy = vi.spyOn(globalThis, "setInterval");
     render(<HeroProductPreview />);
     expect(intervalSpy).not.toHaveBeenCalled();

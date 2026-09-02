@@ -51,12 +51,19 @@ describe("ActionCenterService", () => {
           attentionCases: p.attention
             ? (attentionCases
                 .filter((c) => inScope(c.groupId, p.attention!.restrictToGroupIds))
-                .map((c) => ({ id: c.id, status: c.status, priority: c.priority, workspaceId: WORKSPACE_A, studentId: "s", openedAt: new Date(), lastQualifiedAt: new Date(), contactedAt: null, monitoringSince: null, closedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 })) as never)
+                .map((c) => ({
+                  case: { id: c.id, status: c.status, priority: c.priority, workspaceId: WORKSPACE_A, studentId: "s", openedAt: new Date(), lastQualifiedAt: new Date(), contactedAt: null, monitoringSince: null, closedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 },
+                  studentName: "أحمد محمد",
+                  primaryRuleKey: "ATTENDANCE_ABSENCE_STREAK",
+                })) as never)
             : undefined,
           followups: p.followups
             ? (followups
                 .filter((f) => inScope(f.groupId, p.followups!.restrictToGroupIds))
-                .map((f) => ({ id: f.id, status: f.status, dueAt: f.dueAt, workspaceId: WORKSPACE_A, attentionCaseId: "c", studentId: "s", assigneeMembershipId: null, sourceContactLogId: null, completedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 })) as never)
+                .map((f) => ({
+                  followup: { id: f.id, status: f.status, dueAt: f.dueAt, workspaceId: WORKSPACE_A, attentionCaseId: "c", studentId: "s", assigneeMembershipId: null, sourceContactLogId: null, completedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 },
+                  studentName: "أحمد محمد",
+                })) as never)
             : undefined,
           missingRecords: p.missing ? [] : undefined,
           collection: p.collection ? collectionRows.filter((r) => inScope(r.groupId, p.collection!.restrictToGroupIds)) : undefined,
@@ -137,6 +144,21 @@ describe("ActionCenterService", () => {
     const result = await service.getActionCenter(owner, ownerContext);
     expect(result.attention?.count).toBe(1);
     expect(result.attention?.items.map((i) => i.entityId)).toEqual(["case-open"]);
+  });
+
+  it("attention items name WHO and WHY (student + concrete reason), and collection shows amounts in ج.م — never قرش or raw minor units", async () => {
+    attentionCases.push({ id: "case-1", status: "NEW", priority: "HIGH", groupId: GROUP_A });
+    collectionRows.push({ obligation: { id: "ob-1", remainingMinor: 30000, status: "UNPAID" } as never, studentId: "s-1", studentName: "مصطفى ماهر", studentCode: "AP-1", groupMonthId: "gm-1", groupId: GROUP_A });
+
+    const result = await service.getActionCenter(owner, ownerContext);
+    // Attention: "<student> — <reason>", never a generic "حالة انتباه".
+    expect(result.attention?.items[0]?.reason).toBe("أحمد محمد — غياب متكرر");
+    expect(result.attention?.items[0]?.reason).not.toContain("حالة انتباه");
+    // Collection: amount in EGP (ج.م), 30000 minor → 300, never "قرش".
+    const colReason = result.collection?.items[0]?.reason ?? "";
+    expect(colReason).toContain("ج.م");
+    expect(colReason).toContain("300");
+    expect(colReason).not.toContain("قرش");
   });
 
   it("subscription warning is Owner-only, and only appears for a state that actually warrants one", async () => {

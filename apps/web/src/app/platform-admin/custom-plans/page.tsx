@@ -99,13 +99,15 @@ function OfferDialog({ request, onClose, onDone }: { request: PlatformCustomRequ
     defaultValues: {
       maxActiveStudents: request.requestedMaxActiveStudents,
       maxTeamMembers: Math.max(request.requestedMaxTeamMembers, request.recommendedMaxTeamMembers),
-      priceMinor: request.recommendedPriceMinor,
+      // Entered/displayed in EGP (pounds) for consistency with the ج.م recommendation
+      // shown above; converted to the stored piastre `priceMinor` on submit.
+      priceEgp: request.recommendedPriceMinor / 100,
       adjustmentReason: "",
       effectiveMode: "IMMEDIATE" as const,
       validForDays: 14,
     },
   });
-  const priceMinor = Number(watch("priceMinor"));
+  const priceMinor = Math.round(Number(watch("priceEgp")) * 100);
   const differs = priceMinor !== request.recommendedPriceMinor;
 
   const mutation = useMutation({
@@ -115,7 +117,7 @@ function OfferDialog({ request, onClose, onDone }: { request: PlatformCustomRequ
         maxActiveStudents: Number(v.maxActiveStudents),
         maxTeamMembers: Number(v.maxTeamMembers),
         billingCycle: "MONTHLY" as never, // V1 MONTHLY-only
-        priceMinor: Number(v.priceMinor),
+        priceMinor: Math.round(Number(v.priceEgp) * 100),
         adjustmentReason: (v.adjustmentReason as string) || undefined,
         effectiveMode: v.effectiveMode as never,
         validForDays: Number(v.validForDays),
@@ -133,7 +135,7 @@ function OfferDialog({ request, onClose, onDone }: { request: PlatformCustomRequ
           <div className="grid grid-cols-2 gap-3">
             <Field label="حد الطلاب" htmlFor="maxActiveStudents"><Input id="maxActiveStudents" type="number" min={3001} {...register("maxActiveStudents")} /></Field>
             <Field label="حد الفريق" htmlFor="maxTeamMembers"><Input id="maxTeamMembers" type="number" min={0} {...register("maxTeamMembers")} /></Field>
-            <Field label="السعر (قروش)" htmlFor="priceMinor"><Input id="priceMinor" type="number" min={1} {...register("priceMinor")} /></Field>
+            <Field label="السعر (جنيه)" htmlFor="priceEgp"><Input id="priceEgp" type="number" min={1} step="0.01" {...register("priceEgp")} /></Field>
             <Field label="صلاحية (أيام)" htmlFor="validForDays"><Input id="validForDays" type="number" min={1} max={90} {...register("validForDays")} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">

@@ -19,7 +19,7 @@ const sheetVariants = cva("fixed z-50 flex flex-col gap-4 border-border bg-surfa
   variants: {
     side: {
       end: "inset-y-0 end-0 h-full w-full max-w-md border-s data-[state=open]:animate-slide-in-from-end",
-      start: "inset-y-0 start-0 h-full w-full max-w-md border-e",
+      start: "inset-y-0 start-0 h-full w-full max-w-md border-e data-[state=open]:animate-slide-in-from-start",
       bottom: "inset-x-0 bottom-0 max-h-[85vh] rounded-t-xl border-t",
     },
   },

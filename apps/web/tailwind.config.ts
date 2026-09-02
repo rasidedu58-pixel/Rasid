@@ -90,10 +90,13 @@ const config: Config = {
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
         "slide-in-from-end": { from: { transform: "translateX(8px)", opacity: "0" }, to: { transform: "translateX(0)", opacity: "1" } },
+        // Right-edge (RTL start) drawer: enters from just off the right edge.
+        "slide-in-from-start": { from: { transform: "translateX(16px)", opacity: "0" }, to: { transform: "translateX(0)", opacity: "1" } },
       },
       animation: {
         "fade-in": "fade-in 150ms ease-out",
         "slide-in-from-end": "slide-in-from-end 150ms ease-out",
+        "slide-in-from-start": "slide-in-from-start 180ms ease-out",
       },
     },
   },

@@ -484,6 +484,13 @@
       "when": 1789800000000,
       "tag": "0070_billing_lifecycle_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1789900000000,
+      "tag": "0071_fix_app_runtime_subscriptions_insert",
+      "breakpoints": true
     }
   ]
 }

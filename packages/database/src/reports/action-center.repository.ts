@@ -7,7 +7,7 @@
  * `notifications-scan.ts`/`session-mode.service.ts` already use (Phase 9
  * Closure correction #2 — never a divergent "session overdue" definition).
  */
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 import { groupMonths, groups } from "../schema/groups";
 import { enrollments } from "../schema/enrollments";
 import { sessions } from "../schema/sessions";
@@ -18,7 +18,7 @@ import { workspaces } from "../schema/workspaces";
 import { deriveEligibleEnrollmentIds } from "../session-mode/roster";
 import { deriveMissingRecords } from "../session-mode/missing-records";
 import type { Db } from "../repositories/identity.repository";
-import { listAttentionCasesForWorkspace, listScheduledFollowups, type AttentionCaseRow, type ScheduledFollowupRow } from "../repositories/attention.repository";
+import { listAttentionCasesForWorkspace, listAttentionReasonsForCases, listScheduledFollowups, type AttentionCaseRow, type AttentionReasonRow, type ScheduledFollowupRow } from "../repositories/attention.repository";
 import { listCollectionQueue, type CollectionQueueRow } from "../repositories/finance.repository";
 import { findSubscriptionByWorkspaceId, type SubscriptionRow } from "../repositories/subscriptions.repository";
 
@@ -132,9 +132,16 @@ export interface NextSessionItem {
   sessionId: string;
   groupName: string;
   scheduledAt: Date;
+  /** IN_PROGRESS = a session happening right now (teacher mid-class); SCHEDULED = the soonest upcoming one. */
+  status: "SCHEDULED" | "IN_PROGRESS";
 }
 
-/** The single soonest-upcoming SCHEDULED session (now or later), restricted to `visibleGroupIds`. */
+/**
+ * The single session to surface on the dashboard: a session happening RIGHT NOW
+ * (IN_PROGRESS — the teacher is mid-class, so the dashboard offers to continue
+ * it) takes priority; otherwise the soonest upcoming SCHEDULED session (now or
+ * later). Restricted to `visibleGroupIds`.
+ */
 export async function getNextSession(db: Db, workspaceId: string, visibleGroupIds: "ALL" | string[], now: Date): Promise<NextSessionItem | undefined> {
   let groupMonthRows = await db
     .select({ id: groupMonths.id, groupId: groupMonths.groupId })
@@ -145,17 +152,30 @@ export async function getNextSession(db: Db, workspaceId: string, visibleGroupId
     groupMonthRows = groupMonthRows.filter((gm) => visibleSet.has(gm.groupId));
   }
   if (groupMonthRows.length === 0) return undefined;
+  const visibleGroupMonthIds = groupMonthRows.map((gm) => gm.id);
+
+  // A session happening NOW wins — the teacher is mid-class and the dashboard
+  // should let them jump straight back into it.
+  const [current] = await db
+    .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, groupName: groups.name })
+    .from(sessions)
+    .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
+    .innerJoin(groups, eq(groups.id, groupMonths.groupId))
+    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "IN_PROGRESS"), inArray(sessions.groupMonthId, visibleGroupMonthIds)))
+    .orderBy(desc(sessions.scheduledAt))
+    .limit(1);
+  if (current) return { sessionId: current.id, groupName: current.groupName, scheduledAt: current.scheduledAt, status: "IN_PROGRESS" };
 
   const [row] = await db
     .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, groupName: groups.name })
     .from(sessions)
     .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
     .innerJoin(groups, eq(groups.id, groupMonths.groupId))
-    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "SCHEDULED"), gt(sessions.scheduledAt, now), inArray(sessions.groupMonthId, groupMonthRows.map((gm) => gm.id))))
+    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "SCHEDULED"), gt(sessions.scheduledAt, now), inArray(sessions.groupMonthId, visibleGroupMonthIds)))
     .orderBy(asc(sessions.scheduledAt))
     .limit(1);
   if (!row) return undefined;
-  return { sessionId: row.id, groupName: row.groupName, scheduledAt: row.scheduledAt };
+  return { sessionId: row.id, groupName: row.groupName, scheduledAt: row.scheduledAt, status: "SCHEDULED" };
 }
 
 // ---------------------------------------------------------------------------
@@ -186,10 +206,24 @@ export interface ActionCenterDataParams {
   nextSession: { visibleGroupIds: "ALL" | string[] };
 }
 
+/** An attention case enriched with the student name + its primary (highest-severity)
+ *  reason rule key, so the action-center item title can state WHO and WHY. */
+export interface AttentionCaseListItem {
+  case: AttentionCaseRow;
+  studentName: string;
+  primaryRuleKey: string | null;
+}
+
+/** A due follow-up enriched with the student name, so its item names WHO. */
+export interface FollowupListItem {
+  followup: ScheduledFollowupRow;
+  studentName: string;
+}
+
 export interface ActionCenterData {
   month: CurrentMonthRef | undefined;
-  attentionCases: AttentionCaseRow[] | undefined;
-  followups: ScheduledFollowupRow[] | undefined;
+  attentionCases: AttentionCaseListItem[] | undefined;
+  followups: FollowupListItem[] | undefined;
   missingRecords: MissingRecordsSessionItem[] | undefined;
   collection: CollectionQueueRow[] | undefined;
   subscription: SubscriptionRow | undefined;
@@ -219,5 +253,33 @@ export async function loadActionCenterData(db: Db, p: ActionCenterDataParams): P
     p.subscription ? findSubscriptionByWorkspaceId(db, p.workspaceId) : Promise.resolve(undefined),
     getNextSession(db, p.workspaceId, p.nextSession.visibleGroupIds, p.now),
   ]);
-  return { month, attentionCases, followups, missingRecords, collection, subscription, nextSession };
+
+  // Enrich attention cases + due follow-ups with the student NAME, and each
+  // attention case with its primary (highest-severity) reason rule key, so the
+  // action-center titles say WHO and WHY (e.g. "أحمد محمد — غياب متكرر") instead
+  // of a generic "حالة انتباه". Two batched lookups (names + reasons), issued
+  // together on this same transaction (postgres.js pipelines them) — one extra
+  // round-trip, and only when there is anything to enrich.
+  const attnStudentIds = attentionCases?.map((c) => c.studentId) ?? [];
+  const fuStudentIds = followups?.map((f) => f.studentId) ?? [];
+  const allStudentIds = [...new Set([...attnStudentIds, ...fuStudentIds])];
+  const [nameRows, reasonRows] = await Promise.all([
+    allStudentIds.length ? db.select({ id: students.id, name: students.name }).from(students).where(inArray(students.id, allStudentIds)) : Promise.resolve([]),
+    attentionCases && attentionCases.length ? listAttentionReasonsForCases(db, attentionCases.map((c) => c.id)) : Promise.resolve([] as AttentionReasonRow[]),
+  ]);
+  const nameById = new Map(nameRows.map((s) => [s.id, s.name]));
+  const reasonsByCase = new Map<string, AttentionReasonRow[]>();
+  for (const r of reasonRows) {
+    const list = reasonsByCase.get(r.attentionCaseId) ?? [];
+    list.push(r);
+    reasonsByCase.set(r.attentionCaseId, list);
+  }
+  const attentionItems: AttentionCaseListItem[] | undefined = attentionCases?.map((c) => {
+    const rs = reasonsByCase.get(c.id) ?? [];
+    const primary = rs.find((r) => r.severity === "HIGH") ?? rs[0];
+    return { case: c, studentName: nameById.get(c.studentId) ?? "طالب", primaryRuleKey: primary?.ruleKey ?? null };
+  });
+  const followupItems: FollowupListItem[] | undefined = followups?.map((f) => ({ followup: f, studentName: nameById.get(f.studentId) ?? "طالب" }));
+
+  return { month, attentionCases: attentionItems, followups: followupItems, missingRecords, collection, subscription, nextSession };
 }

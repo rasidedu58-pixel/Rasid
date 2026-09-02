@@ -44,6 +44,12 @@ describe("SchedulingService", () => {
     ownerContext = { workspaceId: WORKSPACE_A, membership: ownerMembership };
   });
 
+  // Safety net: any test that pins the system clock (fake timers) restores real
+  // time afterwards, so a date-fixed test never leaks its clock into the next.
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   function seedActiveGroup(workspaceId = WORKSPACE_A) {
     return repo.seedGroup({ workspaceId, name: "Group " + randomUUID().slice(0, 4) });
   }
@@ -258,6 +264,12 @@ describe("SchedulingService", () => {
     });
 
     it("preparing the next month creates a DRAFT and keeps the current month CURRENT (no archive until activation)", async () => {
+      // DRAFT-vs-CURRENT is decided relative to the real "now" (resolvePrepDecision
+      // → new Date()): August is the current operating month and September is the
+      // month AHEAD (→ DRAFT). Pin the clock to mid-August so this holds regardless
+      // of when the suite runs (otherwise, run in September, "September" resolves to
+      // CURRENT — the product is correct; only this fixed-month test needs the pin).
+      jest.useFakeTimers({ now: new Date("2026-08-15T12:00:00Z"), doNotFake: ["setTimeout", "setInterval", "setImmediate", "clearTimeout", "clearInterval", "clearImmediate", "nextTick", "queueMicrotask", "performance"] });
       const group = seedActiveGroup();
       const first = await createMonthEndToEnd([group.id]); // August → CURRENT (bootstrap)
 

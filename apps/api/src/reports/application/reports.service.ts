@@ -284,16 +284,27 @@ export class ReportsService {
   }
 
   private studentObligationsToCsv(obligations: StudentReportResponse["obligationsByMonth"]): string {
+    // Amounts are exported in EGP (pounds), not piastres — values are the raw
+    // minor units divided by 100 (whole pounds show no decimals; otherwise 2),
+    // kept as plain numbers so the export stays sum-able while the column label
+    // states the unit. Never expose the internal `*_minor` piastre values.
+    const egp = (minor: number): number => Math.round(minor) / 100;
     return toCsv(
       [
         { key: "monthLabel", label: "الشهر" },
         { key: "groupName", label: "المجموعة" },
-        { key: "netDueMinor", label: "المطلوب (قرش)" },
-        { key: "amountPaidMinor", label: "المدفوع (قرش)" },
-        { key: "remainingMinor", label: "المتبقي (قرش)" },
+        { key: "netDueEgp", label: "المطلوب (ج.م)" },
+        { key: "amountPaidEgp", label: "المدفوع (ج.م)" },
+        { key: "remainingEgp", label: "المتبقي (ج.م)" },
         { key: "status", label: "الحالة" },
       ],
-      obligations.map((o) => ({ ...o, monthLabel: `${o.year}-${String(o.month).padStart(2, "0")}` })),
+      obligations.map((o) => ({
+        ...o,
+        monthLabel: `${o.year}-${String(o.month).padStart(2, "0")}`,
+        netDueEgp: egp(o.netDueMinor),
+        amountPaidEgp: egp(o.amountPaidMinor),
+        remainingEgp: egp(o.remainingMinor),
+      })),
     );
   }
 

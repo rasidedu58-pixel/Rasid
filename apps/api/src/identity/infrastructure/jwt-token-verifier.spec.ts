@@ -47,7 +47,50 @@ describe("JwtTokenVerifier (Supabase JWKS/asymmetric verification)", () => {
     const verifier = new JwtTokenVerifier(makeEnv(), jwks, ISSUER);
     const result = await verifier.verify(token);
 
-    expect(result).toEqual({ id: "user-123", email: "owner@example.com" });
+    // A token carrying no `user_metadata` yields id + email with every optional
+    // profile field explicitly null (name + the signup teacher-profile fields).
+    expect(result).toEqual({
+      id: "user-123",
+      email: "owner@example.com",
+      fullName: null,
+      phone: null,
+      governorate: null,
+      subject: null,
+      subjectOther: null,
+    });
+  });
+
+  it("extracts and trims the signup name + teacher-profile fields from user_metadata", async () => {
+    const { privateKey, jwks } = await buildKeys();
+    const token = await new SignJWT({
+      email: "teacher@example.com",
+      user_metadata: {
+        full_name: "  أ. كريم عبد الله  ",
+        phone: "+201012345678",
+        governorate: "GIZA",
+        subject: "OTHER",
+        subject_other: "  التربية الفنية  ",
+      },
+    })
+      .setProtectedHeader({ alg: ALG, kid: KID })
+      .setIssuedAt()
+      .setIssuer(ISSUER)
+      .setSubject("user-999")
+      .setExpirationTime("1h")
+      .sign(privateKey);
+
+    const verifier = new JwtTokenVerifier(makeEnv(), jwks, ISSUER);
+    const result = await verifier.verify(token);
+
+    expect(result).toEqual({
+      id: "user-999",
+      email: "teacher@example.com",
+      fullName: "أ. كريم عبد الله",
+      phone: "+201012345678",
+      governorate: "GIZA",
+      subject: "OTHER",
+      subjectOther: "التربية الفنية",
+    });
   });
 
   it("rejects an expired token with TokenExpiredVerificationError", async () => {

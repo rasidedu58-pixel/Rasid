@@ -39,6 +39,24 @@ export const attentionReasonSchema = z.object({
 });
 export type AttentionReasonDto = z.infer<typeof attentionReasonSchema>;
 
+/**
+ * Human-readable Arabic label for an attention rule key — the SINGLE source of
+ * truth shared by the web (case detail list) and the server (dashboard / action
+ * center item titles), so every surface explains WHY a case exists in the same
+ * words. Keep in sync with the rule engine's emitted `ruleKey`s
+ * (packages/database/src/attention/rule-engine).
+ */
+export const ATTENTION_RULE_LABEL: Record<string, string> = {
+  ATTENDANCE_ABSENCE_STREAK: "غياب متكرر",
+  HOMEWORK_NOT_DONE_STREAK: "تقصير متكرر في الواجب",
+  LOW_EXAM_SCORE: "درجة امتحان منخفضة",
+};
+
+/** Rule-key → label, with a safe generic fallback for any future/unknown rule. */
+export function attentionRuleLabel(ruleKey: string | null | undefined): string {
+  return (ruleKey && ATTENTION_RULE_LABEL[ruleKey]) || "حالة تحتاج متابعة";
+}
+
 /** List-row shape (API §9.7 `GET /attention-cases` — "Unified active/history cases"; field set derived from PRD §13's Queue row: student/reasons/next action/last contact). */
 export const attentionCaseSummarySchema = z.object({
   id: z.string().uuid(),

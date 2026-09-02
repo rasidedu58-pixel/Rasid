@@ -396,7 +396,7 @@ body * {
   display: grid;
   place-items: center;
   background-color: #08090e; /* deep near-black — matches the landing beneath, no white flash */
-  animation: rs-cover 2.15s linear both;
+  animation: rs-cover 1.5s linear both;
 }
 .rasid-splash2-glow {
   position: absolute;
@@ -405,7 +405,7 @@ body * {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(34, 211, 238, 0.16), rgba(13, 148, 136, 0.05) 45%, transparent 70%);
   filter: blur(6px);
-  animation: rs-glow 2.15s ease-out both;
+  animation: rs-glow 1.5s ease-out both;
 }
 .rasid-splash2-stage {
   position: relative;
@@ -413,7 +413,7 @@ body * {
   flex-direction: column;
   align-items: center;
   gap: 18px;
-  animation: rs-stage-exit 2.15s cubic-bezier(0.5, 0, 0.2, 1) both;
+  animation: rs-stage-exit 1.5s cubic-bezier(0.5, 0, 0.2, 1) both;
 }
 .rs-svg {
   overflow: visible;
@@ -428,14 +428,14 @@ body * {
   transform-box: view-box;
   transform-origin: 32px 32px;
 }
-.rs-rings { animation: rs-rings 2.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.rs-seg { animation: rs-fracture 2.15s cubic-bezier(0.34, 1.4, 0.5, 1) both; }
-.rs-center { animation: rs-center 2.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.rs-flash { animation: rs-flash 2.15s ease-out both; }
-.rs-wave { animation: rs-wave 2.15s ease-out both; opacity: 0; }
-.rs-particle { animation: rs-particle 2.15s ease-out both; opacity: 0; }
+.rs-rings { animation: rs-rings 1.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rs-seg { animation: rs-fracture 1.5s cubic-bezier(0.34, 1.4, 0.5, 1) both; }
+.rs-center { animation: rs-center 1.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rs-flash { animation: rs-flash 1.5s ease-out both; }
+.rs-wave { animation: rs-wave 1.5s ease-out both; opacity: 0; }
+.rs-particle { animation: rs-particle 1.5s ease-out both; opacity: 0; }
 .rs-arrow {
-  animation: rs-arrow 2.15s cubic-bezier(0.5, 0, 0.85, 0.4) both;
+  animation: rs-arrow 1.5s cubic-bezier(0.5, 0, 0.85, 0.4) both;
   filter: drop-shadow(0 0 2px rgba(103, 232, 249, 0.55));
 }
 .rs-word {
@@ -443,7 +443,7 @@ body * {
   font-size: 22px;
   letter-spacing: -0.5px;
   color: #f8fafc;
-  animation: rs-word 2.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: rs-word 1.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes rs-cover {

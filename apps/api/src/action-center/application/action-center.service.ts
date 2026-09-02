@@ -1,11 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { attentionRuleLabel, formatEgpMinor } from "@academic-precision/contracts";
 import type { ActionCenterResponse } from "@academic-precision/contracts";
 import type {
-  AttentionCaseRow,
+  AttentionCaseListItem,
   CollectionQueueRow,
+  FollowupListItem,
   MissingRecordsSessionItem,
   NextSessionItem,
-  ScheduledFollowupRow,
   SubscriptionRow,
 } from "@academic-precision/database";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
@@ -98,28 +99,30 @@ export class ActionCenterService {
   // reason strings, urgency logic, and JS post-filters are unchanged.
   // ---------------------------------------------------------------------
 
-  private toAttentionSection(cases: AttentionCaseRow[]) {
-    const open = cases.filter((c) => c.status !== "CLOSED");
+  private toAttentionSection(items: AttentionCaseListItem[]) {
+    const open = items.filter((i) => i.case.status !== "CLOSED");
     return {
       count: open.length,
-      items: open.map((c) => ({
+      // Title explains WHO and WHY (student name + the case's primary reason),
+      // never a generic "حالة انتباه" — e.g. "أحمد محمد — غياب متكرر".
+      items: open.map((i) => ({
         entityType: "attention_case",
-        entityId: c.id,
-        reason: c.priority === "HIGH" ? "حالة انتباه عالية الأولوية" : "حالة انتباه تحتاج متابعة",
-        urgency: c.priority === "HIGH" ? ("HIGH" as const) : ("MEDIUM" as const),
-        nextAction: c.status === "NEW" ? "ابدأ المتابعة" : "تواصل مع ولي الأمر",
+        entityId: i.case.id,
+        reason: `${i.studentName} — ${attentionRuleLabel(i.primaryRuleKey)}`,
+        urgency: i.case.priority === "HIGH" ? ("HIGH" as const) : ("MEDIUM" as const),
+        nextAction: i.case.status === "NEW" ? "ابدأ المتابعة" : "تواصل مع ولي الأمر",
       })),
     };
   }
 
-  private toFollowUpsSection(followups: ScheduledFollowupRow[], now: Date) {
-    const due = followups.filter((f) => f.dueAt <= now);
+  private toFollowUpsSection(items: FollowupListItem[], now: Date) {
+    const due = items.filter((i) => i.followup.dueAt <= now);
     return {
       count: due.length,
-      items: due.map((f) => ({
+      items: due.map((i) => ({
         entityType: "scheduled_followup",
-        entityId: f.id,
-        reason: "متابعة مستحقة",
+        entityId: i.followup.id,
+        reason: `متابعة مستحقة لـ ${i.studentName}`,
         urgency: "MEDIUM" as const,
         nextAction: "أكمل المتابعة",
       })),
@@ -145,7 +148,7 @@ export class ActionCenterService {
       items: rows.map((r) => ({
         entityType: "financial_obligation",
         entityId: r.obligation.id,
-        reason: `متبقٍ ${r.obligation.remainingMinor} قرش على ${r.studentName}`,
+        reason: `متبقٍ ${formatEgpMinor(r.obligation.remainingMinor)} على ${r.studentName}`,
         urgency: r.obligation.status === "UNPAID" ? ("HIGH" as const) : ("MEDIUM" as const),
         nextAction: "سجّل دفعة",
       })),
@@ -172,6 +175,6 @@ export class ActionCenterService {
 
   private toNextSection(next: NextSessionItem | undefined) {
     if (!next) return undefined;
-    return { id: next.sessionId, groupName: next.groupName, scheduledAt: next.scheduledAt.toISOString() };
+    return { id: next.sessionId, groupName: next.groupName, scheduledAt: next.scheduledAt.toISOString(), status: next.status };
   }
 }

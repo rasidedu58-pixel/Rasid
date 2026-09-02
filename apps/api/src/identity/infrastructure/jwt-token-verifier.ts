@@ -17,6 +17,18 @@ export interface VerifiedSupabaseToken {
    * always populates it (string or null).
    */
   fullName?: string | null;
+  /**
+   * Signup teacher-profile fields, carried in Supabase `user_metadata`
+   * (`phone` / `governorate` / `subject` / `subject_other`, set at signup).
+   * Provisioning backfills them into the user's profile ONCE for a brand-new
+   * account, so a new signup arrives with a complete profile. Null when absent
+   * (an invite-based signup / a legacy account) — the onboarding step is the
+   * backstop. Untrusted metadata: validated + normalized before persistence.
+   */
+  phone?: string | null;
+  governorate?: string | null;
+  subject?: string | null;
+  subjectOther?: string | null;
 }
 
 export interface TokenVerifier {
@@ -82,7 +94,17 @@ export class JwtTokenVerifier implements TokenVerifier {
       const meta = payload.user_metadata && typeof payload.user_metadata === "object" ? (payload.user_metadata as Record<string, unknown>) : {};
       const rawName = typeof meta.full_name === "string" ? meta.full_name : typeof meta.name === "string" ? meta.name : null;
       const fullName = rawName && rawName.trim().length > 0 ? rawName.trim() : null;
-      return { id: sub, email, fullName };
+      // Signup teacher-profile metadata (validated/normalized downstream at provisioning).
+      const metaStr = (k: string): string | null => (typeof meta[k] === "string" && (meta[k] as string).trim().length > 0 ? (meta[k] as string).trim() : null);
+      return {
+        id: sub,
+        email,
+        fullName,
+        phone: metaStr("phone"),
+        governorate: metaStr("governorate"),
+        subject: metaStr("subject"),
+        subjectOther: metaStr("subject_other"),
+      };
     } catch (error) {
       if (error instanceof joseErrors.JWTExpired) {
         throw new TokenExpiredVerificationError("Token expired.");

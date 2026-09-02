@@ -1,0 +1,37 @@
+-- 0071 — Restore app_runtime INSERT on public.subscriptions (P0 provisioning fix).
+--
+-- ROOT CAUSE (reproduced end-to-end): 0062 replaced app_runtime's table-wide
+-- INSERT (granted in 0037) with a COLUMN-level INSERT on exactly
+--   (workspace_id, state, period_start, period_end, cancel_at_period_end),
+-- on the stated assumption that the sole subscriptions INSERT
+-- (provisionSubscriptionForNewWorkspaceTransaction) "names only those five
+-- columns; id/provider/timestamps/version use column defaults".
+--
+-- That assumption does not hold for the ORM. Drizzle emits an INSERT that NAMES
+-- EVERY column of the table, supplying the literal DEFAULT keyword for the ones
+-- the code does not set:
+--   INSERT INTO subscriptions ("id","workspace_id","provider",...,"version")
+--   VALUES (default,$1,default,...,default) RETURNING ...
+-- Postgres requires INSERT privilege on every NAMED column — even a column whose
+-- value is DEFAULT. With INSERT granted on only five of ~23 named columns, the
+-- statement failed with `permission denied for table subscriptions` (SQLSTATE
+-- 42501), which rolled the entire provisioning transaction back. The result: the
+-- first authenticated `GET /me` of EVERY new signup — which is what provisions
+-- the User + owner Workspace + owner Membership + initial TRIAL subscription —
+-- returned 500, so no new account could ever reach the dashboard.
+--
+-- FIX: restore table-wide INSERT for app_runtime (as it was under 0037). This is
+-- INSERT-only and does NOT weaken 0062's actual billing protection:
+--   * The billing STATE MACHINE lives in UPDATEs, and 0062's column-level UPDATE
+--     grants (state/period/cancel/provider-linkage/version only) are UNTOUCHED —
+--     app_runtime still cannot write the commercial columns (plan_code, price,
+--     custom limits, ...); only app_platform_admin can (0062/0059).
+--   * The ONLY code path that INSERTs subscriptions is provisioning, which writes
+--     a TRIAL (or immediately-EXPIRED) row with every commercial column at its
+--     default (NULL), RLS-bounded to the caller's own workspace by
+--     subscriptions_tenant_isolation. No path inserts an arbitrary/ACTIVE row.
+--
+-- The narrower column-level INSERT grant from 0062 is left in place (table-wide
+-- supersedes it; keeping it is harmless and documents intent).
+
+GRANT INSERT ON public.subscriptions TO app_runtime;
