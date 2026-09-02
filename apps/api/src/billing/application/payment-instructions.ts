@@ -16,9 +16,16 @@ export interface BillingChannelConfig {
 
 const CYCLE_AR: Record<BillingCycle, string> = { MONTHLY: "شهري", ANNUAL: "سنوي" };
 
-/** Whole-EGP display for a minor amount (catalog prices are whole EGP). */
+/**
+ * EGP display for a minor amount. Whole amounts render with no decimals
+ * ("300 جنيه"); custom-plan prices that carry piastres are shown exactly
+ * ("180.50 جنيه") rather than silently rounded — the payer must see the
+ * amount they will actually transfer.
+ */
 export function formatEgpMajor(amountMinor: number): string {
-  return `${Math.round(amountMinor / 100)} جنيه`;
+  const major = amountMinor / 100;
+  const text = Number.isInteger(major) ? String(major) : major.toFixed(2);
+  return `${text} جنيه`;
 }
 
 /** Normalize an Egyptian phone/handle to a wa.me international form (mirrors the web whatsappLink logic). Returns null if too short. */

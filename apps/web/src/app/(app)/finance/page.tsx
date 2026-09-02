@@ -116,9 +116,11 @@ export default function FinancePage() {
                         <ObligationStatusBadge status={item.status} />
                       </TableCell>
                       <TableCell className="text-end">
-                        <Button size="sm" onClick={() => setPayingObligation({ id: item.obligationId, remainingMinor: item.remainingMinor })}>
-                          تسجيل دفعة
-                        </Button>
+                        {hasPermission("payments.record") ? (
+                          <Button size="sm" onClick={() => setPayingObligation({ id: item.obligationId, remainingMinor: item.remainingMinor })}>
+                            تسجيل دفعة
+                          </Button>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   );

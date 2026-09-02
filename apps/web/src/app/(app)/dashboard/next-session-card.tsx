@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CalendarClock, ArrowLeft } from "lucide-react";
-import { Button, formatDateTime } from "@academic-precision/ui";
+import { Button } from "@academic-precision/ui";
+import { nextSessionWhen } from "./next-session-label";
 
 export interface NextSessionInfo {
   id: string;
@@ -11,8 +12,6 @@ export interface NextSessionInfo {
   scheduledAt: string;
   status: "SCHEDULED" | "IN_PROGRESS";
 }
-
-const arNum = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
 
 /** Ticking "now" (updates every 30s) so the countdown stays live without a heavy timer. */
 function useNow(intervalMs = 30_000) {
@@ -22,10 +21,6 @@ function useNow(intervalMs = 30_000) {
     return () => clearInterval(t);
   }, [intervalMs]);
   return now;
-}
-
-function sameLocalDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 /**
@@ -69,13 +64,7 @@ export function NextSessionCard({ session }: { session: NextSessionInfo | null |
   const imminent = isLive || (mins >= 0 && mins < 60);
   const eyebrow = isLive ? "الحصة الجارية الآن" : "الحصة القادمة";
   const cta = isLive ? "متابعة الحصة" : "فتح الحصة";
-
-  let when: string;
-  if (isLive) when = "جارية الآن — سجّل الحضور والواجب";
-  else if (mins <= 0) when = "بدأ موعدها للتو";
-  else if (mins < 60) when = `تبدأ بعد ${arNum(mins)} دقيقة`;
-  else if (sameLocalDay(at, new Date(now))) when = `اليوم • ${new Intl.DateTimeFormat("ar-EG", { hour: "numeric", minute: "2-digit" }).format(at)}`;
-  else when = formatDateTime(session.scheduledAt);
+  const when = nextSessionWhen(session.scheduledAt, session.status, now);
 
   return (
     <section

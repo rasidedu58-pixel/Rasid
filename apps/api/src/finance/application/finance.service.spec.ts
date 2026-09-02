@@ -166,6 +166,33 @@ describe("FinanceService", () => {
     });
   });
 
+  describe("Payment actor / audit — recorded_by is the authenticated user (non-spoofable)", () => {
+    it("attributes the payment to the authenticated user's id + membership (the 'سجّلها' actor)", async () => {
+      const { obligation } = await seedEnrolledStudent();
+      const spy = jest.spyOn(repo, "recordPaymentTransaction");
+      await service.recordPayment(owner, ownerContext, "actor-key", { obligationId: obligation.id, amountMinor: 20000, method: "CASH" }, null);
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({ recordedByUserId: owner.id, actorMembershipId: ownerContext.membership.id }),
+      );
+    });
+
+    it("ignores a client-supplied recordedByUserId — the actor stays the authenticated user (no spoofing)", async () => {
+      const { obligation } = await seedEnrolledStudent();
+      const spy = jest.spyOn(repo, "recordPaymentTransaction");
+      // A malicious client tries to attribute the payment to someone else via the body.
+      const spoofed = { obligationId: obligation.id, amountMinor: 20000, method: "CASH", recordedByUserId: "u-attacker" } as never;
+      await service.recordPayment(owner, ownerContext, "spoof-key", spoofed, null);
+      expect(spy.mock.calls[0]![0].recordedByUserId).toBe(owner.id);
+      expect(spy.mock.calls[0]![0].recordedByUserId).not.toBe("u-attacker");
+    });
+
+    it("stamps a paidAt timestamp on the recorded payment", async () => {
+      const { obligation } = await seedEnrolledStudent();
+      const result = await service.recordPayment(owner, ownerContext, "ts-key", { obligationId: obligation.id, amountMinor: 20000, method: "CASH" }, null);
+      expect(new Date(result.payment.paidAt).getTime()).toBeGreaterThan(0);
+    });
+  });
+
   describe("ReversePayment", () => {
     it("reversal restores the obligation's balances correctly", async () => {
       const { obligation } = await seedEnrolledStudent();

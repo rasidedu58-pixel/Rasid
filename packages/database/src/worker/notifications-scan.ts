@@ -45,7 +45,7 @@ import { workspaces } from "../schema/workspaces";
 import { scheduledFollowups } from "../schema/followup";
 import { memberships } from "../schema/permissions";
 import { sessions } from "../schema/sessions";
-import { groupMonths } from "../schema/groups";
+import { groupMonths, groups } from "../schema/groups";
 import { enrollments } from "../schema/enrollments";
 import { sessionRecords } from "../schema/session-records";
 import { students } from "../schema/students";
@@ -240,12 +240,18 @@ async function scanFollowupsDue(workerDb: Db, now: Date): Promise<{ scanned: num
       }
       if (!recipientUserId) return false;
 
+      // Name the student so the teacher knows who/why at a glance — the same
+      // standard the Action Center uses ("متابعة مستحقة لـ {studentName}"),
+      // never a bare generic "متابعة مستحقة".
+      const [student] = await tx.select({ name: students.name }).from(students).where(eq(students.id, followup.studentId)).limit(1);
+      const studentName = student?.name?.trim();
+
       return insertDedupedNotification(tx, {
         workspaceId: followup.workspaceId,
         userId: recipientUserId,
         type: "FOLLOWUP_DUE",
-        title: "متابعة مستحقة",
-        body: "لديك متابعة مجدولة مستحقة الآن.",
+        title: studentName ? `متابعة مستحقة — ${studentName}` : "متابعة مستحقة",
+        body: studentName ? `حان موعد المتابعة المجدولة مع ${studentName}.` : "لديك متابعة مجدولة مستحقة الآن.",
         entityType: "scheduled_followup",
         entityId: followup.id,
         dedupKey: followup.id,
@@ -269,6 +275,8 @@ async function scanMissingRecords(workerDb: Db): Promise<{ scanned: number; crea
     const wasCreated = await withWorkerRuntimeContext({ workspaceId: session.workspaceId }, async (tx) => {
       const [groupMonth] = await tx.select().from(groupMonths).where(eq(groupMonths.id, session.groupMonthId)).limit(1);
       if (!groupMonth) return false;
+      const [group] = await tx.select({ name: groups.name }).from(groups).where(eq(groups.id, groupMonth.groupId)).limit(1);
+      const groupName = group?.name?.trim();
       const [workspace] = await tx.select({ ownerUserId: workspaces.ownerUserId, timezone: workspaces.timezone }).from(workspaces).where(eq(workspaces.id, session.workspaceId)).limit(1);
       if (!workspace) return false;
 
@@ -300,8 +308,10 @@ async function scanMissingRecords(workerDb: Db): Promise<{ scanned: number; crea
         workspaceId: session.workspaceId,
         userId: workspace.ownerUserId,
         type: "MISSING_RECORDS",
-        title: "سجلات ناقصة",
-        body: `يوجد ${missingRecords.length} سجل حضور/واجب ناقص في حصة جارية.`,
+        title: groupName ? `سجلات ناقصة — ${groupName}` : "سجلات ناقصة",
+        body: groupName
+          ? `يوجد ${missingRecords.length} سجل حضور/واجب ناقص في حصة «${groupName}» الجارية.`
+          : `يوجد ${missingRecords.length} سجل حضور/واجب ناقص في حصة جارية.`,
         entityType: "session",
         entityId: session.id,
         dedupKey: session.id,

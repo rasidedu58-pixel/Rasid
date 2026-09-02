@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, HeartHandshake } from "lucide-react";
 import { Button, EmptyState, ErrorState, SkeletonRows, StatusDot, Tabs, TabsContent, TabsList, TabsTrigger, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableScroll, cn, formatRelativeToNow, toast } from "@academic-precision/ui";
@@ -10,15 +10,20 @@ import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
 import { completeFollowup, fetchAttentionCases, fetchFollowups } from "../../../lib/api/attention";
+import { initialAttentionTab, type AttentionTab } from "./attention-tab";
 
 const STATUS_LABEL: Record<string, string> = { NEW: "جديدة", IN_FOLLOWUP: "قيد المتابعة", CONTACTED: "تم التواصل", MONITORING: "تحت الملاحظة", CLOSED: "مغلقة" };
 
-export default function AttentionPage() {
-  const [tab, setTab] = useState<"cases" | "followups">("cases");
+function AttentionTabs() {
+  // Honor a deep-link tab (e.g. the dashboard's "متابعة مستحقة" item links to
+  // /attention?tab=followups) so the follow-up the teacher clicked is actually
+  // shown, instead of always defaulting to the cases tab.
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<AttentionTab>(() => initialAttentionTab(searchParams.get("tab")));
   return (
     <>
       <PageHeader title="المتابعة" description="كل حالة موضّح سببها ودليلها — بدون تخمين." />
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "cases" | "followups")} dir="rtl">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as AttentionTab)} dir="rtl">
         <TabsList>
           <TabsTrigger value="cases">الحالات</TabsTrigger>
           <TabsTrigger value="followups">المتابعات المجدولة</TabsTrigger>
@@ -31,6 +36,14 @@ export default function AttentionPage() {
         </TabsContent>
       </Tabs>
     </>
+  );
+}
+
+export default function AttentionPage() {
+  return (
+    <Suspense fallback={<PageHeader title="المتابعة" description="كل حالة موضّح سببها ودليلها — بدون تخمين." />}>
+      <AttentionTabs />
+    </Suspense>
   );
 }
 

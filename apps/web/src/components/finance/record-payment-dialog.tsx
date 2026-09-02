@@ -50,7 +50,7 @@ export function RecordPaymentDialog({ obligationId, remainingMinor, open, onOpen
         <form onSubmit={handleSubmit((v) => mutation.mutate(v))} className="flex flex-col gap-4">
           <p className="text-sm text-text-secondary">المتبقي حاليًا: {formatMoney(remainingMinor)}</p>
           <Field label="المبلغ" htmlFor="amount" required error={formState.errors.amount?.message}>
-            <Input id="amount" type="number" step="0.01" min="0.01" dir="ltr" {...register("amount", { required: "المبلغ مطلوب", min: { value: 0.01, message: "المبلغ يجب أن يكون أكبر من صفر" } })} />
+            <Input id="amount" type="number" step="0.01" min="0.01" max={remainingMinor / 100} dir="ltr" {...register("amount", { required: "المبلغ مطلوب", min: { value: 0.01, message: "المبلغ يجب أن يكون أكبر من صفر" }, max: { value: remainingMinor / 100, message: `المبلغ يتجاوز المتبقّي (${formatMoney(remainingMinor)})` } })} />
           </Field>
           <Field label="طريقة الدفع" htmlFor="method">
             <Select value={method} onValueChange={(v) => setMethod(v as PaymentMethod)}>

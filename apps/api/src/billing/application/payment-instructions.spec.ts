@@ -44,4 +44,12 @@ describe("payment instructions builder", () => {
     expect(formatEgpMajor(30000)).toBe("300 جنيه");
     expect(planNameAr("BUSINESS_PLUS")).toBe("أعمال بلس");
   });
+
+  it("formatEgpMajor shows piastres exactly for a non-whole custom price (never silently rounded)", () => {
+    // A custom-plan price of 180.50 EGP must not display as "181 جنيه" in the
+    // payment instructions — the payer must see the amount they will transfer.
+    expect(formatEgpMajor(18050)).toBe("180.50 جنيه");
+    expect(formatEgpMajor(18000)).toBe("180 جنيه"); // whole → no decimals
+    expect(formatEgpMajor(18010)).toBe("180.10 جنيه"); // trailing zero kept to 2 dp
+  });
 });
