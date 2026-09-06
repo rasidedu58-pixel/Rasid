@@ -324,6 +324,17 @@ export interface WorkspaceOperationalSnapshot {
   lastActivityAt: Date | null;
 }
 
+/**
+ * Coerce a raw `max(timestamp)` value to a Date. A raw SQL aggregate like
+ * `max(created_at)` carries no drizzle column codec, so postgres.js yields it
+ * as a STRING — and calling `.toISOString()` on a string throws a TypeError
+ * (the platform operational-snapshot crash, `snap.lastActivityAt.toISOString`).
+ * Normalizing here means every caller gets a real `Date | null`.
+ */
+export function coerceTimestamp(raw: string | Date | null | undefined): Date | null {
+  return raw ? new Date(raw) : null;
+}
+
 export async function getWorkspaceOperationalSnapshot(workspaceId: string): Promise<WorkspaceOperationalSnapshot> {
   const db = getPlatformAdminDb();
   const unavailable: WorkspaceOperationalSnapshot = {
@@ -385,7 +396,7 @@ export async function getWorkspaceOperationalSnapshot(workspaceId: string): Prom
       // `max(...)` is a raw SQL aggregate, so drizzle applies no column codec —
       // the value arrives as whatever postgres.js yields (a timestamp string),
       // NOT a Date. Coerce explicitly so the caller can safely `.toISOString()`.
-      const lastActivityAt = activityRow?.last ? new Date(activityRow.last) : null;
+      const lastActivityAt = coerceTimestamp(activityRow?.last);
 
       return {
         available: true,
