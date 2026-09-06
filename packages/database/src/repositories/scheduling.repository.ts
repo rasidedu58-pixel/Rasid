@@ -401,12 +401,19 @@ export async function rescheduleSessionTransaction(
     }
 
     const now = new Date();
+    // Status-guarded UPDATE: this row lock + `status = SCHEDULED` predicate is
+    // what actually serializes two concurrent reschedules of the same session.
+    // The plain existence check above can be passed by both racers, but only
+    // the first flips SCHEDULED → RESCHEDULED; the second's UPDATE then matches
+    // 0 rows and returns a clean no-op, instead of proceeding to a duplicate
+    // replacement INSERT that would violate sessions_rescheduled_from_session_unique
+    // and surface as a 500.
     const [updatedOriginal] = await tx
       .update(sessions)
       .set({ status: RESCHEDULED_SESSION_STATUS, updatedAt: now })
-      .where(eq(sessions.id, original.id))
+      .where(and(eq(sessions.id, original.id), eq(sessions.status, SCHEDULED_SESSION_STATUS)))
       .returning();
-    if (!updatedOriginal) throw new Error("Failed to mark original session RESCHEDULED.");
+    if (!updatedOriginal) return undefined;
 
     const [replacement] = await tx
       .insert(sessions)

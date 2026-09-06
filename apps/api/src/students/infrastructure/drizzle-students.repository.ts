@@ -17,6 +17,7 @@ import {
   generateUniqueStudentCode,
   insertGuardian,
   insertStudent,
+  insertStudentWithUniqueCode,
   insertStudentGuardian,
   insertStudentsAuditEvent,
   issueQrCredential,
@@ -109,6 +110,10 @@ export class DrizzleStudentsRepository implements StudentsRepositoryPort {
 
   insertStudent(input: InsertStudentInput): Promise<StudentRow> {
     return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => insertStudent(db, input));
+  }
+
+  insertStudentWithUniqueCode(input: { workspaceId: string; name: string; searchNameNormalized: string }): Promise<StudentRow> {
+    return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => insertStudentWithUniqueCode(db, input));
   }
 
   updateStudentWithVersion(

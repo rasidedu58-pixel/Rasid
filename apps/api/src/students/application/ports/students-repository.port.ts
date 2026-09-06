@@ -55,6 +55,8 @@ export interface StudentsRepositoryPort {
   generateUniqueStudentCode(workspaceId: string): Promise<string>;
   findStudentById(id: string): Promise<StudentRow | undefined>;
   insertStudent(input: InsertStudentInput): Promise<StudentRow>;
+  /** Concurrency-safe create: generates a unique display code and inserts, retrying on a code collision (never a 500). */
+  insertStudentWithUniqueCode(input: { workspaceId: string; name: string; searchNameNormalized: string }): Promise<StudentRow>;
   updateStudentWithVersion(
     id: string,
     expectedVersion: number,

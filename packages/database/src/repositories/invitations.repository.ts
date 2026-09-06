@@ -216,9 +216,15 @@ export async function acceptInvitationTx(
       status: ACTIVE_MEMBERSHIP_STATUS,
       joinedAt: new Date(),
     })
+    // Guard the (workspace_id, user_id) unique against the one race the
+    // pre-check above can't serialize: the SAME user accepting a DIFFERENT
+    // pending invite at the same instant. Both accepts pass the existence
+    // check and claim their own token, but only one membership may exist —
+    // the loser gets a clean ALREADY_MEMBER, never an uncaught 23505 → 500.
+    .onConflictDoNothing({ target: [memberships.workspaceId, memberships.userId] })
     .returning();
   if (!membership) {
-    throw new Error("Failed to insert membership row during invitation acceptance.");
+    return { ok: false, reason: "ALREADY_MEMBER" };
   }
 
   const desiredGrants: DesiredGrantInput[] = invite.desiredGrants.map((g) => ({

@@ -279,6 +279,10 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
     return this.seedStudent(input);
   }
 
+  async insertStudentWithUniqueCode(input: { workspaceId: string; name: string; searchNameNormalized: string }): Promise<StudentRow> {
+    return this.seedStudent({ ...input, studentCode: `AP-${randomUUID().slice(0, 6).toUpperCase()}` });
+  }
+
   async updateStudentWithVersion(
     id: string,
     expectedVersion: number,

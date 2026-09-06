@@ -430,6 +430,24 @@ export async function recordPaymentTransaction(
       .where(and(eq(financialObligations.id, input.obligationId), eq(financialObligations.workspaceId, input.workspaceId)))
       .for("update");
     if (!obligation) return OBLIGATION_NOT_FOUND;
+
+    // Idempotency short-circuit UNDER the row lock: if a payment for this exact
+    // idempotency key already landed — a genuinely simultaneous same-key double
+    // submit where both requests slipped past the app-layer idempotency gate
+    // before either COMPLETED — return that winning payment instead of racing
+    // into a duplicate INSERT (which would hit payments_workspace_idempotency_key_unique
+    // → 500) or a false OBLIGATION_NOT_PAYABLE / PAYMENT_EXCEEDS_REMAINING now
+    // that the winner has already reduced `remaining`. The FOR UPDATE above
+    // serialized us behind the winner, so its row is now visible here.
+    if (input.idempotencyKey) {
+      const [existingPayment] = await tx
+        .select()
+        .from(payments)
+        .where(and(eq(payments.workspaceId, input.workspaceId), eq(payments.idempotencyKey, input.idempotencyKey)))
+        .limit(1);
+      if (existingPayment) return { obligation, payment: existingPayment };
+    }
+
     if (obligation.status === PAID) return OBLIGATION_NOT_PAYABLE;
 
     // Step 4: amount > 0 (zod already enforces this at the request boundary

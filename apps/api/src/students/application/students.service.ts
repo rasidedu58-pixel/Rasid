@@ -198,10 +198,12 @@ export class StudentsService {
     body: CreateStudentRequest,
     correlationId: string | null,
   ): Promise<CreateStudentResponse> {
-    const studentCode = await this.repository.generateUniqueStudentCode(workspaceContext.workspaceId);
-    const student = await this.repository.insertStudent({
+    // Concurrency-safe: generates a unique display code and inserts atomically,
+    // retrying on a code collision so two simultaneous creates never 500. (A
+    // student has no dedup key — identical names are distinct real people — so
+    // this intentionally does not merge same-name creates into one row.)
+    const student = await this.repository.insertStudentWithUniqueCode({
       workspaceId: workspaceContext.workspaceId,
-      studentCode,
       name: body.name,
       searchNameNormalized: normalizeArabicName(body.name),
     });

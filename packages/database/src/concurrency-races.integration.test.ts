@@ -22,6 +22,8 @@ import {
   withRuntimeContext,
   recordPaymentTransaction,
   updateSubscriptionStateTransaction,
+  createOrReactivateEnrollmentTransaction,
+  insertStudentWithUniqueCode,
   OBLIGATION_NOT_FOUND,
   PAYMENT_EXCEEDS_REMAINING,
   SUBSCRIPTION_VERSION_CONFLICT,
@@ -176,5 +178,87 @@ describe.skipIf(!hasLiveCreds)("Phase 10 Concurrency Races (live Postgres)", () 
     const finalSub = await admin`SELECT state, version FROM subscriptions WHERE id = ${subscriptionId}`;
     expect(finalSub[0]!.version).toBe((current.version as number) + 1); // incremented exactly once, not twice
     expect(["PAYMENT_FAILED", "CANCELLED_AT_PERIOD_END"]).toContain(finalSub[0]!.state);
+  });
+
+  it("enrollment duplicate race: two SIMULTANEOUS identical enrollments (same student + group_month) — the ON CONFLICT upsert makes exactly ONE row and BOTH callers SUCCEED (the race-loser reactivates, never a generic 'تعذر التسجيل')", async () => {
+    const raceStudentId = randomUUID();
+    await admin`INSERT INTO students (id, workspace_id, student_code, name, search_name_normalized, status) VALUES (${raceStudentId}, ${workspaceId}, 'AP-ENRLR', 'Enroll Race Student', 'enroll race student', 'ACTIVE')`;
+
+    const input = {
+      workspaceId,
+      studentId: raceStudentId,
+      groupMonthId,
+      joinDate: "2026-08-01",
+      status: "PENDING" as const, // PENDING takes NO capacity lock — the exact path that used to race
+      feeMethod: "FULL_MONTH" as const,
+      obligation: { baseFeeMinor: 30000, currencyCode: "EGP", dueDate: "2026-08-10", calculationBasis: "FULL_MONTH" as const, calculationSnapshotJson: {} },
+    };
+
+    const [a, b] = await Promise.all([
+      withRuntimeContext({ workspaceId }, (tx) => createOrReactivateEnrollmentTransaction(tx, input)),
+      withRuntimeContext({ workspaceId }, (tx) => createOrReactivateEnrollmentTransaction(tx, input)),
+    ]);
+
+    // Neither call threw; both reference the SAME single enrollment row.
+    expect(a.enrollment.id).toBe(b.enrollment.id);
+    // Exactly one is a fresh create and the other a reactivation — never two "created".
+    expect([a.reactivated, b.reactivated].sort()).toEqual([false, true]);
+
+    const eRows = await admin`SELECT count(*)::int AS c FROM enrollments WHERE student_id = ${raceStudentId} AND group_month_id = ${groupMonthId}`;
+    expect(eRows[0]!.c).toBe(1); // no duplicate enrollment row
+    const oRows = await admin`SELECT count(*)::int AS c FROM financial_obligations WHERE enrollment_id = ${a.enrollment.id}`;
+    expect(oRows[0]!.c).toBe(1); // and exactly one obligation
+  });
+
+  it("student create race: two SIMULTANEOUS creates with the SAME name — both SUCCEED as DISTINCT students (a student has no dedup key by design), never a 500 from a code collision", async () => {
+    const create = () =>
+      withRuntimeContext({ workspaceId }, (tx) =>
+        insertStudentWithUniqueCode(tx, { workspaceId, name: "Race Duplicate Name", searchNameNormalized: "race duplicate name" }),
+      );
+    const [s1, s2] = await Promise.all([create(), create()]);
+
+    expect(s1.id).not.toBe(s2.id); // two real, distinct students (same name = different people)
+    expect(s1.studentCode).not.toBe(s2.studentCode); // distinct display codes — no collision, no 500
+    const rows = await admin`SELECT count(*)::int AS c FROM students WHERE workspace_id = ${workspaceId} AND name = 'Race Duplicate Name'`;
+    expect(rows[0]!.c).toBe(2);
+  });
+
+  it("payment idempotency race: two SIMULTANEOUS payments with the SAME idempotency key — exactly ONE payment row, and BOTH callers get that same payment (never a duplicate-key 500 or a false overpay)", async () => {
+    const stuId = randomUUID();
+    const enrId = randomUUID();
+    const oblId = randomUUID();
+    await admin`INSERT INTO students (id, workspace_id, student_code, name, search_name_normalized, status) VALUES (${stuId}, ${workspaceId}, 'AP-PAYIR', 'Idem Race Student', 'idem race student', 'ACTIVE')`;
+    await admin`INSERT INTO enrollments (id, workspace_id, student_id, group_month_id, join_date, status, fee_method) VALUES (${enrId}, ${workspaceId}, ${stuId}, ${groupMonthId}, '2026-08-01', 'ACTIVE', 'FULL_MONTH')`;
+    await admin`INSERT INTO financial_obligations (id, workspace_id, enrollment_id, base_fee_minor, net_due_minor, due_date, amount_paid_minor, remaining_minor, status, calculation_basis) VALUES
+      (${oblId}, ${workspaceId}, ${enrId}, 30000, 30000, '2026-08-05', 0, 30000, 'UNPAID', 'FULL_MONTH')`;
+
+    const input = {
+      workspaceId,
+      obligationId: oblId,
+      amountMinor: 20000,
+      method: "CASH" as const,
+      paidAt: new Date(),
+      recordedByUserId: userId,
+      actorMembershipId: null,
+      idempotencyKey: "idem-same-key-race", // SAME key on both → one logical payment
+    };
+
+    const [a, b] = await Promise.all([
+      withRuntimeContext({ workspaceId }, (tx) => recordPaymentTransaction(tx, input)),
+      withRuntimeContext({ workspaceId }, (tx) => recordPaymentTransaction(tx, input)),
+    ]);
+
+    // Both are success objects (neither the overpay nor not-found/not-payable marker).
+    expect(typeof a).toBe("object");
+    expect(typeof b).toBe("object");
+    const pa = a as { payment: { id: string } };
+    const pb = b as { payment: { id: string } };
+    expect(pa.payment.id).toBe(pb.payment.id); // both callers see the SAME payment
+
+    const rows = await admin`SELECT count(*)::int AS c FROM payments WHERE obligation_id = ${oblId}`;
+    expect(rows[0]!.c).toBe(1); // exactly one payment ever inserted — no double charge, no 500
+    const obl = await admin`SELECT amount_paid_minor, remaining_minor FROM financial_obligations WHERE id = ${oblId}`;
+    expect(Number(obl[0]!.amount_paid_minor)).toBe(20000); // charged once, not 40000
+    expect(Number(obl[0]!.remaining_minor)).toBe(10000);
   });
 });

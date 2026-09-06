@@ -1,5 +1,6 @@
 export * from "./env";
 export * from "./connection";
+export * from "./pg-errors";
 export * as schema from "./schema/index";
 export * from "./repositories/identity.repository";
 export * from "./repositories/permissions.repository";

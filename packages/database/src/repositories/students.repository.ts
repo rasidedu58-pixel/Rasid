@@ -108,6 +108,38 @@ export async function insertStudent(db: Db, input: InsertStudentInput): Promise<
   return inserted;
 }
 
+/**
+ * Concurrency-safe student creation. Generates a random display code and
+ * inserts with ON CONFLICT DO NOTHING on `students_workspace_student_code_unique`;
+ * on the (astronomically rare) event that a simultaneous insert grabbed the
+ * same code between generation and write, the insert returns no row → we pick
+ * a new code and retry, so a code collision never surfaces as a 500. This does
+ * NOT dedup students by name/phone: a student has no business identity key
+ * (identical names are real, distinct people, and auto-merge is deliberately
+ * prohibited), so two concurrent "create <same name>" requests correctly
+ * produce two distinct students — the guarantee here is "no false failure",
+ * not "one row".
+ */
+export async function insertStudentWithUniqueCode(
+  db: Db,
+  input: { workspaceId: string; name: string; searchNameNormalized: string },
+): Promise<StudentRow> {
+  for (let attempt = 0; attempt < STUDENT_CODE_MAX_ATTEMPTS; attempt += 1) {
+    const [inserted] = await db
+      .insert(students)
+      .values({
+        workspaceId: input.workspaceId,
+        studentCode: `AP-${randomStudentCodeSuffix()}`,
+        name: input.name,
+        searchNameNormalized: input.searchNameNormalized,
+      })
+      .onConflictDoNothing({ target: [students.workspaceId, students.studentCode] })
+      .returning();
+    if (inserted) return inserted;
+  }
+  throw new Error("Failed to insert a student with a unique student_code after multiple attempts.");
+}
+
 export interface UpdateStudentInput {
   name?: string;
   searchNameNormalized?: string;
@@ -623,7 +655,18 @@ export async function createOrReactivateEnrollmentTransaction(
       enrollment = updated;
       reactivated = true;
     } else {
-      const [inserted] = await tx
+      // Atomic upsert on the `enrollments_student_group_month_unique`
+      // (student_id, group_month_id) constraint. If a concurrent request
+      // created this exact enrollment between our SELECT above and this INSERT
+      // (the classic check-then-insert race — unserialized for PENDING joins,
+      // which take no capacity lock), we reactivate that row to the requested
+      // state instead of letting the DB raise a 23505 that would surface as a
+      // generic 500 to the user who merely lost the race. Same intent →
+      // same clean result as the winner. A fresh insert lands at version 1;
+      // the ON CONFLICT path bumps version past 1, which is how we tell a real
+      // create from a race-reactivation so the audit log never records two
+      // "enrollment.created" events for one row.
+      const [row] = await tx
         .insert(enrollments)
         .values({
           workspaceId: input.workspaceId,
@@ -634,10 +677,23 @@ export async function createOrReactivateEnrollmentTransaction(
           feeMethod: input.feeMethod,
           customFeeMinor: input.customFeeMinor ?? null,
         })
+        .onConflictDoUpdate({
+          target: [enrollments.studentId, enrollments.groupMonthId],
+          set: {
+            joinDate: input.joinDate,
+            status: input.status,
+            feeMethod: input.feeMethod,
+            customFeeMinor: input.customFeeMinor ?? null,
+            endedAt: null,
+            endReason: null,
+            updatedAt: new Date(),
+            version: rawSql`${enrollments.version} + 1`,
+          },
+        })
         .returning();
-      if (!inserted) throw new Error("Failed to insert enrollments row.");
-      enrollment = inserted;
-      reactivated = false;
+      if (!row) throw new Error("Failed to insert enrollments row.");
+      enrollment = row;
+      reactivated = row.version > 1;
     }
 
     const { obligation } = await upsertObligationForEnrollment(tx, {
