@@ -37,12 +37,11 @@ describe("PricingTable — recommended badge & responsive grid", () => {
     expect(sawAbsolute).toBe(false);
   });
 
-  it("lays the six plans out on a responsive 1 → 2 → 3 column grid", () => {
+  it("renders every plan as a card inside the responsive rail (mobile carousel → sm/lg grid, driven by .pricing-rail in globals.css)", () => {
     const { container } = render(<PricingTable />);
-    const grid = container.querySelector(".grid");
-    const cls = grid?.className ?? "";
-    expect(cls).toContain("grid-cols-1");
-    expect(cls).toContain("sm:grid-cols-2");
-    expect(cls).toContain("lg:grid-cols-3");
+    const rail = container.querySelector(".pricing-rail");
+    expect(rail).toBeTruthy();
+    const cards = container.querySelectorAll(".pricing-card");
+    expect(cards.length).toBe(PRICING_PLANS.length);
   });
 });

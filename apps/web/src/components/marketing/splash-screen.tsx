@@ -12,7 +12,7 @@ import {
   RASID_CENTER,
 } from "../brand/rasid-geometry";
 
-const FULL_MS = 1500;
+const FULL_MS = 3000;
 const REDUCED_MS = 500;
 
 /**
@@ -26,13 +26,29 @@ const REDUCED_MS = 500;
 let shownThisLoad = false;
 
 /**
- * Rasid brand-entrance splash — a ~1.5s Brand Motion Sequence shown on every FULL
+ * Rasid brand-entrance splash — a ~3s Brand Motion Sequence shown on every FULL
  * page load (browser refresh / new tab / hard navigation), never on internal SPA
  * route changes. Gated by the module-level `shownThisLoad` flag above (which
  * resets with each fresh JS context), NOT sessionStorage — sessionStorage
  * survives a refresh and so wrongly suppressed the replay.
  *
- * Story (all CSS-timed to the same ~1.5s window; JS only mounts then unmounts):
+ * Timing fix (root cause, not a timeout hack): this component used to start in
+ * an "idle" (renders `null`) state and only flip to "full" inside a `useEffect`
+ * — i.e. AFTER hydration. Since the page itself is server-rendered, that meant
+ * the very first paint (and every paint until hydration completes) showed the
+ * real landing content with NO overlay at all, and the splash then popped in
+ * late and had to rush through its animation to still finish near the intended
+ * moment. The fix: the initial state is derived synchronously from
+ * `shownThisLoad` (a plain, environment-agnostic module boolean, `false` on
+ * both the server render and the first client render of a fresh JS context —
+ * so no hydration mismatch), NOT from an effect. On a true first load this
+ * means the full-screen cover is already part of the server-rendered HTML, so
+ * it owns the very first frame — no flash of content underneath, ever. On an
+ * in-app SPA remount (shownThisLoad already true) the initial state is "idle"
+ * (nothing rendered), which is the correct "never replay on internal nav"
+ * behaviour and does not regress it.
+ *
+ * Story (all CSS-timed to the same ~3s window; JS only mounts then unmounts):
  *   detection — rings resolve from the centre outward, centre lights up
  *   an arrow flies IN from off the lower-right, accelerating; rings lock-pulse
  *   impact — the arrow strikes the centre (and stops); flash + shockwave; the
@@ -42,12 +58,15 @@ let shownThisLoad = false;
  *   fades, revealing the page beneath.
  *
  * The final frame is byte-identical to the static RasidMark. `prefers-reduced-motion`
- * collapses this to a ~500ms logo fade (no motion, no layout shift). `?splashPreview=1`
- * replays it in dev only. Fixed overlay (no CLS), `aria-hidden` (the page is already
- * mounted beneath it).
+ * collapses this to a ~500ms logo fade (no motion, no layout shift — the CSS
+ * `@media (prefers-reduced-motion: reduce)` block also force-disables every
+ * keyframe unconditionally, as a second, OS-level safety net independent of the
+ * JS detection below, which can only run post-hydration). `?splashPreview=1`
+ * replays it in dev only. Fixed overlay (no CLS), `aria-hidden` (the page is
+ * already mounted beneath it).
  */
 export function SplashScreen() {
-  const [state, setState] = useState<"idle" | "full" | "reduced">("idle");
+  const [state, setState] = useState<"idle" | "full" | "reduced">(() => (shownThisLoad ? "idle" : "full"));
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

@@ -162,11 +162,25 @@ body * {
 }
 
 /* ---- Design System v2 gradient / glow utilities ---- */
+/*
+ * `background-clip: text` on Arabic content can clip glyph marks that sit
+ * above/below the normal ascent/descent box (e.g. the hamza + dots in "شيء"
+ * rendered visibly compressed/cut). Root cause: WebKit/Blink size the
+ * clip/paint region to the element's own content box, which for a plain
+ * `inline` span with no headroom can be tighter than what those marks need.
+ * Fix: give the box a little vertical breathing room via `padding-block` and
+ * cancel it back out with an equal negative `margin-block`, so the extra room
+ * is purely internal (paint area) — no visible shift of the text, no change
+ * to line-height/wrapping/baseline of the surrounding heading.
+ */
 .text-gradient {
   background-image: linear-gradient(90deg, #0d9488, #6366f1);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  -webkit-text-fill-color: transparent;
+  padding-block: 0.12em;
+  margin-block: -0.12em;
 }
 .bg-gradient-cta {
   background-image: linear-gradient(90deg, #0d9488, #14b8a6);
@@ -388,7 +402,7 @@ body * {
   overflow: hidden;
 }
 
-/* ---- Splash screen (Brand Motion Sequence, ~2.1s) ---- */
+/* ---- Splash screen (Brand Motion Sequence, ~3s) ---- */
 .rasid-splash2 {
   position: fixed;
   inset: 0;
@@ -396,7 +410,7 @@ body * {
   display: grid;
   place-items: center;
   background-color: #08090e; /* deep near-black — matches the landing beneath, no white flash */
-  animation: rs-cover 1.5s linear both;
+  animation: rs-cover 3s linear both;
 }
 .rasid-splash2-glow {
   position: absolute;
@@ -405,7 +419,7 @@ body * {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(34, 211, 238, 0.16), rgba(13, 148, 136, 0.05) 45%, transparent 70%);
   filter: blur(6px);
-  animation: rs-glow 1.5s ease-out both;
+  animation: rs-glow 3s ease-out both;
 }
 .rasid-splash2-stage {
   position: relative;
@@ -413,7 +427,7 @@ body * {
   flex-direction: column;
   align-items: center;
   gap: 18px;
-  animation: rs-stage-exit 1.5s cubic-bezier(0.5, 0, 0.2, 1) both;
+  animation: rs-stage-exit 3s cubic-bezier(0.5, 0, 0.2, 1) both;
 }
 .rs-svg {
   overflow: visible;
@@ -428,14 +442,14 @@ body * {
   transform-box: view-box;
   transform-origin: 32px 32px;
 }
-.rs-rings { animation: rs-rings 1.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.rs-seg { animation: rs-fracture 1.5s cubic-bezier(0.34, 1.4, 0.5, 1) both; }
-.rs-center { animation: rs-center 1.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.rs-flash { animation: rs-flash 1.5s ease-out both; }
-.rs-wave { animation: rs-wave 1.5s ease-out both; opacity: 0; }
-.rs-particle { animation: rs-particle 1.5s ease-out both; opacity: 0; }
+.rs-rings { animation: rs-rings 3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rs-seg { animation: rs-fracture 3s cubic-bezier(0.34, 1.4, 0.5, 1) both; }
+.rs-center { animation: rs-center 3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rs-flash { animation: rs-flash 3s ease-out both; }
+.rs-wave { animation: rs-wave 3s ease-out both; opacity: 0; }
+.rs-particle { animation: rs-particle 3s ease-out both; opacity: 0; }
 .rs-arrow {
-  animation: rs-arrow 1.5s cubic-bezier(0.5, 0, 0.85, 0.4) both;
+  animation: rs-arrow 3s cubic-bezier(0.5, 0, 0.85, 0.4) both;
   filter: drop-shadow(0 0 2px rgba(103, 232, 249, 0.55));
 }
 .rs-word {
@@ -443,7 +457,7 @@ body * {
   font-size: 22px;
   letter-spacing: -0.5px;
   color: #f8fafc;
-  animation: rs-word 1.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: rs-word 3s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes rs-cover {
@@ -708,6 +722,75 @@ body * {
   0% { transform: scale(0.6); opacity: 0; }
   35% { opacity: 0.9; }
   100% { transform: scale(1.9); opacity: 0; }
+}
+
+/* ---- Mobile pricing carousel (§5) — pure-CSS rail/grid switch. Below `sm`
+ * this is a horizontal scroll-snap rail (one focal card + a peek of its
+ * neighbours on each side); at `sm` and up it reverts to the original
+ * comparison grid untouched. Works with zero JS (native scroll + snap); the
+ * PricingTable component only layers active-card tracking + dots on top. RTL
+ * is native browser scroll-snap behaviour — no direction-specific CSS needed. */
+.pricing-rail {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 10%;
+  padding-inline: 10%;
+  padding-block: 0.5rem 0.25rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.pricing-rail::-webkit-scrollbar {
+  display: none;
+}
+.pricing-rail > .pricing-card {
+  flex: 0 0 80%;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+  opacity: 0.55;
+  transform: scale(0.96);
+  transition:
+    opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pricing-rail > .pricing-card[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+@media (min-width: 480px) {
+  .pricing-rail > .pricing-card {
+    flex-basis: 68%;
+  }
+}
+@media (min-width: 640px) {
+  .pricing-rail {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.25rem;
+    overflow: visible;
+    padding-inline: 0;
+    scroll-snap-type: none;
+  }
+  .pricing-rail > .pricing-card {
+    flex-basis: auto;
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+@media (min-width: 1024px) {
+  .pricing-rail {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pricing-rail {
+    scroll-behavior: auto;
+  }
+  .pricing-rail > .pricing-card {
+    transition: none !important;
+  }
 }
 
 /* Reduced motion — no loops/sweeps/blur/scan; everything rests at its final state. */

@@ -61,8 +61,11 @@ describe("Landing hero — real product screenshot", () => {
     expect(img?.getAttribute("alt") ?? "").toMatch(/راصد/);
     expect(img?.getAttribute("loading")).toBe("eager"); // above the fold (LCP)
     // Intrinsic dimensions are locked to reserve space and prevent layout shift.
+    // Height reflects the curated crop (§3-c landing polish): the frame shows
+    // the top, legible band of the real capture — greeting, next/current
+    // session, and the urgent items — not the full dense 1800px-tall dashboard.
     expect(img?.getAttribute("width")).toBe("2880");
-    expect(img?.getAttribute("height")).toBe("1800");
+    expect(img?.getAttribute("height")).toBe("1170");
   });
 
   it("keeps the two supporting status chips in the accessible tree", () => {
