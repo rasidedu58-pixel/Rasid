@@ -114,7 +114,11 @@ export function GuidedSetupLauncher() {
           side={isMobile ? "bottom" : "start"}
           className={isMobile ? "" : "max-w-md"}
         >
-          <PanelContent data={data} onDismissForever={dismissPermanently} />
+          <PanelContent
+            data={data}
+            onDismissForever={dismissPermanently}
+            onStepCtaClick={() => setOpen(false)}
+          />
         </SheetContent>
       </Sheet>
     </>
@@ -188,9 +192,16 @@ function LauncherButton({
 function PanelContent({
   data,
   onDismissForever,
+  onStepCtaClick,
 }: {
   data: OnboardingStatusResponse;
   onDismissForever: () => void;
+  /**
+   * Fires the instant the user taps a step's CTA — closes the sheet so
+   * the newly-navigated-to page is the visible surface. Does NOT affect
+   * completion state; that stays derived from server truth.
+   */
+  onStepCtaClick: () => void;
 }) {
   const percent = Math.round((data.completed / data.total) * 100);
   return (
@@ -208,7 +219,12 @@ function PanelContent({
 
       <ol className="flex flex-col gap-3">
         {ONBOARDING_STEP_META_ORDERED.map((meta) => (
-          <StepRow key={meta.key} stepKey={meta.key} status={data.steps[meta.key]} />
+          <StepRow
+            key={meta.key}
+            stepKey={meta.key}
+            status={data.steps[meta.key]}
+            onCtaClick={onStepCtaClick}
+          />
         ))}
       </ol>
 
@@ -235,7 +251,21 @@ function ProgressBar({ percent }: { percent: number }) {
   );
 }
 
-function StepRow({ stepKey, status }: { stepKey: OnboardingStepKey; status: OnboardingStepStatus }) {
+function StepRow({
+  stepKey,
+  status,
+  onCtaClick,
+}: {
+  stepKey: OnboardingStepKey;
+  status: OnboardingStepStatus;
+  /**
+   * Called on the CTA click BEFORE Next.js takes over navigation, so
+   * the launcher can close the sheet immediately — the destination
+   * page becomes the visible surface, and the FAB stays available for
+   * the user to reopen the checklist from the new page.
+   */
+  onCtaClick: () => void;
+}) {
   const meta = ONBOARDING_STEP_META[stepKey];
   const isCompleted = status === "COMPLETED";
   const isAvailable = status === "AVAILABLE";
@@ -285,6 +315,15 @@ function StepRow({ stepKey, status }: { stepKey: OnboardingStepKey; status: Onbo
         {isAvailable ? (
           <Link
             href={meta.href}
+            // Close the sheet on tap so the new page is the visible
+            // surface on mobile — never a race with router.push (React
+            // runs the handler synchronously, and Radix Dialog's close
+            // is safe to call while the click still bubbles into the
+            // Link's own navigation). We deliberately don't
+            // preventDefault: the router owns navigation, we own the
+            // sheet.
+            onClick={onCtaClick}
+            data-testid={`guided-setup-cta-${stepKey}`}
             className="focus-ring mt-2 inline-flex h-9 items-center justify-center rounded-md bg-brand px-4 text-xs font-semibold text-brand-foreground shadow-sm hover:brightness-[1.05] active:scale-[0.98] motion-reduce:transition-none"
           >
             {meta.cta}

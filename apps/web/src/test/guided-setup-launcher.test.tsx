@@ -333,4 +333,81 @@ describe("GuidedSetupLauncher", () => {
       attendance: "LOCKED",
     });
   });
+
+  it("closes the sheet when a step CTA is tapped, and does NOT flip completion state locally", async () => {
+    // Mobile UX regression guard: on a phone the sheet fully covers the
+    // page below it. If the sheet stayed open after tapping a CTA the
+    // freshly-navigated-to page would be invisible under the panel and
+    // the user might not realise anything happened. Contract:
+    //   1. Sheet closes the instant the CTA is tapped.
+    //   2. The anchor's href points at the step's destination — router
+    //      navigation is the anchor's own behaviour and continues after
+    //      the sheet's setState fires.
+    //   3. Local UI state that must survive across the tap:
+    //      - the onboarding query cache is untouched (completion stays
+    //        server-derived, never inferred from a click).
+    //      - the "dismissed-forever" localStorage bit is not written
+    //        (that key is reserved for the explicit finished-footer
+    //        dismiss button).
+    workspaceValue = { workspaceId: "ws-1", isOwner: true };
+    fetchStatusMock.mockResolvedValue({
+      completed: 0,
+      total: 5,
+      steps: {
+        operatingMonth: "AVAILABLE",
+        groupSetup: "LOCKED",
+        students: "LOCKED",
+        sessions: "LOCKED",
+        attendance: "LOCKED",
+      },
+      nextStep: "operatingMonth",
+      allDone: false,
+    });
+    const queryClient = await renderLauncher();
+    const fab = await screen.findByRole("button", {
+      name: /متابعة إعداد الحساب — 0 من 5 مكتملة/,
+    });
+    fab.click();
+    const panel = await screen.findByTestId("guided-setup-panel");
+    expect(panel).toBeTruthy();
+
+    // Snapshot the state we expect NOT to change across the CTA tap.
+    const cacheBefore = queryClient.getQueryData(qk.onboarding.status("ws-1"));
+
+    const cta = await screen.findByTestId("guided-setup-cta-operatingMonth");
+    expect(cta.getAttribute("href")).toBe("/months/new");
+
+    // Neutralise real navigation — jsdom would otherwise emit a
+    // "not implemented: navigation" error when a Next.js Link click
+    // bubbles into an <a href> and the browser tries to load the URL.
+    // Our contract here is the onClick handler firing + the sheet
+    // closing, not the routing itself.
+    cta.addEventListener("click", (e) => e.preventDefault());
+    cta.click();
+
+    // The Radix Dialog root that Sheet mounts uses role=dialog on the
+    // portalled Content. Close means the dialog leaves the accessibility
+    // tree entirely.
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.queryByTestId("guided-setup-panel")).toBeNull();
+    });
+
+    // The FAB is still there — the launcher only collapses back to its
+    // trigger; it never removes itself.
+    expect(
+      screen.getByRole("button", {
+        name: /متابعة إعداد الحساب — 0 من 5 مكتملة/,
+      }),
+    ).toBeTruthy();
+
+    // Completion truth is untouched — the tap did not fabricate progress.
+    expect(queryClient.getQueryData(qk.onboarding.status("ws-1"))).toBe(cacheBefore);
+    // The dismiss-forever bit stays absent — that bit belongs to the
+    // finished-footer, not the step CTAs.
+    expect(localStorage.getItem("rasid_guided_dismissed_ws-1")).toBeNull();
+    // The legacy completion key from the pre-refactor dashboard remains
+    // absent too.
+    expect(localStorage.getItem("rasid_setup_done_ws-1")).toBeNull();
+  });
 });
