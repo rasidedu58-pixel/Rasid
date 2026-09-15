@@ -321,7 +321,7 @@ export default function LandingPage() {
             <SectionEyebrow>الأسعار</SectionEyebrow>
             <h2 className="mt-3 text-h2 text-text-primary">ادفع حسب عدد طلابك — لا أكثر</h2>
             <p className="mt-3 text-text-secondary">
-              كل الباقات تشمل مزايا راصد كاملة؛ الفرق الوحيد هو سعة الطلاب. جرّب {TRIAL_DAYS} يومًا مجانًا — بدون بطاقة، وألغِ وقت ما تشاء.
+              اختر السعة المناسبة لعدد طلابك وحجم فريقك. جرّب {TRIAL_DAYS} يومًا مجانًا بدون بطاقة، وألغِ وقت ما تشاء.
             </p>
           </Reveal>
 

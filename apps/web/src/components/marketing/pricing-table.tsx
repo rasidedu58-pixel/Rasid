@@ -3,35 +3,35 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@academic-precision/ui";
-import { Check } from "lucide-react";
-import { PRICING_PLANS, type PricingPlan } from "../../lib/marketing/pricing-config";
+import { Users } from "lucide-react";
+import {
+  PRICING_PLANS,
+  SHARED_CAPABILITIES,
+  SHARED_CAPABILITIES_NOTE,
+  type PricingPlan,
+} from "../../lib/marketing/pricing-config";
 
 /**
  * Shared pricing grid — used on both the landing page (teaser) and the full
- * `/pricing` page, driven entirely by `pricing-config.ts` (which derives from
- * the billing catalog — MONTHLY-only, single source of truth). Every button
- * starts the SAME real trial signup; only the custom ("أكثر من 3000 طالب") tier
- * routes to Support.
+ * `/pricing` page, driven entirely by `pricing-config.ts`.
  *
- * Layout (§5): on `sm:` and up this is the original comparison grid (two rows
- * of three on `lg`, unchanged). Below `sm` it becomes a swipeable, snap-to-card
- * horizontal rail — ONE card focal at a time with a peek of its neighbours —
- * so a 7-plan comparison no longer means scrolling a very long vertical list.
- * The rail/grid switch is pure CSS (`.pricing-rail`, see globals.css): the DOM
- * never changes shape, so it degrades to a perfectly usable native horizontal
- * scroller with zero JS. JS only adds three enhancements: centering on the
- * Professional plan on mobile mount, tracking which card is centred (for the
- * active-card emphasis + dot indicator), and letting a dot jump to its card.
+ * PRESENTATION POLICY (owner review):
+ *  • A single "كل الخطط تشمل" block sits ABOVE the grid, listing the real
+ *    shared product surface once — so no card falsely implies a capability
+ *    is plan-locked.
+ *  • Each card shows ONLY genuine per-plan differences: name, positioning,
+ *    optional badge, capacity, price, team-seat count, CTA.
+ *
+ * Layout: on `sm:` and up this is the original comparison grid. Below `sm`
+ * it becomes a swipeable snap-to-card horizontal rail (one card focal + a
+ * peek of neighbours). JS enhancements: center on Professional on mount,
+ * track the centred card for the dot indicator, jump on dot tap.
  */
 export function PricingTable() {
   const railRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [active, setActive] = useState(() => Math.max(0, PRICING_PLANS.findIndex((p) => p.highlighted)));
 
-  // Land on the focal (Professional) plan on mobile, instantly (no motion —
-  // this corrects initial scroll position, it isn't a decorative animation).
-  // Deliberately reads `active`'s initial value only, once, on mount — it is
-  // never meant to re-run when the user later scrolls to a different card.
   useEffect(() => {
     const isMobile = typeof matchMedia !== "undefined" && matchMedia("(max-width: 639px)").matches;
     if (!isMobile) return;
@@ -39,9 +39,6 @@ export function PricingTable() {
     initial?.scrollIntoView({ inline: "center", block: "nearest", behavior: "auto" });
   }, []);
 
-  // Track the centred card via IntersectionObserver against the rail itself
-  // (RTL-safe: unlike reading `scrollLeft`, intersection ratios don't depend
-  // on a browser's RTL scroll-origin convention).
   useEffect(() => {
     const root = railRef.current;
     if (!root || typeof IntersectionObserver === "undefined") return;
@@ -74,9 +71,25 @@ export function PricingTable() {
 
   return (
     <div>
-      <p className="mb-4 hidden text-center text-sm text-text-secondary sm:block">
-        كل الباقات تشمل مزايا راصد كاملة — بدون استثناء.
-      </p>
+      {/* Shared "كل الخطط تشمل" block — real product surface, listed once.
+          Compact chip grid on all sizes; two rows on mobile (3×2), one row
+          on ≥sm (6×1) so it never inflates landing height. */}
+      <div className="mb-6 rounded-2xl border border-border bg-surface-sunken px-4 py-4 sm:mb-8 sm:px-6 sm:py-5">
+        <p className="text-center text-sm font-semibold text-text-primary">كل الخطط تشمل</p>
+        <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          {SHARED_CAPABILITIES.map((cap) => (
+            <li
+              key={cap.id}
+              className="flex items-center justify-center rounded-full border border-border bg-surface px-3 py-1.5 text-center text-xs font-medium text-text-primary sm:text-sm"
+            >
+              {cap.label}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-center text-xs leading-relaxed text-text-secondary sm:text-sm">
+          {SHARED_CAPABILITIES_NOTE}
+        </p>
+      </div>
 
       <div ref={railRef} className="pricing-rail" role="list">
         {PRICING_PLANS.map((plan, i) => (
@@ -126,8 +139,6 @@ function PlanCard({ plan }: { plan: PricingPlan }) {
           : "border-border bg-surface shadow-sm hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md"
       }`}
     >
-      {/* Recommended badge — in the card's normal flow (never clipped by the
-          card's own `overflow:hidden` sheen, never overlapping the border). */}
       {plan.badge ? (
         <div className="mb-3 flex">
           <Badge tone="brand" className="border border-brand/20 shadow-sm">{plan.badge}</Badge>
@@ -135,6 +146,7 @@ function PlanCard({ plan }: { plan: PricingPlan }) {
       ) : null}
 
       <span className="text-sm font-medium text-text-secondary">{plan.tagline}</span>
+      <p className="mt-1 text-sm leading-relaxed text-text-secondary">{plan.positioning}</p>
 
       <p className="mt-4 text-lg font-semibold text-text-primary">{plan.studentCapacityLabel}</p>
 
@@ -152,16 +164,17 @@ function PlanCard({ plan }: { plan: PricingPlan }) {
         )}
       </div>
 
-      {/* Every plan includes all features — stated once above the section, not
-          repeated in every one of the 7 cards. */}
-      <div className="mt-4 flex flex-1 flex-col justify-end gap-2">
-        {!plan.isCustom ? (
-          <p className="flex items-start gap-2 text-sm text-text-secondary sm:hidden">
-            <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />
-            <span>كل مزايا راصد متاحة</span>
-          </p>
-        ) : null}
-      </div>
+      {/* Only the real per-plan lever: team-seat count. Product surface is
+          listed once in the shared block above the grid — never repeated
+          per card. */}
+      {plan.teamSeatsLabel ? (
+        <div className="mt-5 flex flex-1 items-start gap-2 text-sm text-text-primary">
+          <Users className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden />
+          <span>{plan.teamSeatsLabel}</span>
+        </div>
+      ) : (
+        <div className="flex-1" />
+      )}
 
       <Link
         href={plan.isCustom ? "/support" : "/signup"}
@@ -171,7 +184,7 @@ function PlanCard({ plan }: { plan: PricingPlan }) {
             : "border border-border-strong bg-surface text-text-primary hover:bg-surface-sunken"
         }`}
       >
-        {plan.isCustom ? "تواصل معنا" : "ابدأ تجربتك المجانية"}
+        {plan.isCustom ? "اطلب عرضًا مخصصًا" : "ابدأ تجربتك المجانية"}
       </Link>
     </div>
   );
