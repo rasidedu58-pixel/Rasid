@@ -793,6 +793,56 @@ body * {
   }
 }
 
+/* ---- Product Showcase mobile rail (§I) — same swipeable snap-rail
+ * convention as `.pricing-rail`, tuned for a single hero-sized visual per
+ * card (84–90vw, clear neighbour peek) instead of a pricing card. Desktop
+ * (`sm:` and up) never sees this — the component renders the tabs+crossfade
+ * layout there instead, so no grid fallback is needed here. */
+.showcase-rail {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-inline: contain;
+  scroll-padding-inline: 6%;
+  padding-inline: 6%;
+  padding-block: 0.25rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.showcase-rail::-webkit-scrollbar {
+  display: none;
+}
+.showcase-rail > .showcase-card {
+  flex: 0 0 86%;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+  opacity: 0.82;
+  transform: scale(0.978);
+  transition:
+    opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.showcase-rail > .showcase-card[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+@media (min-width: 400px) {
+  .showcase-rail > .showcase-card {
+    flex-basis: 82%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .showcase-rail {
+    scroll-behavior: auto;
+  }
+  .showcase-rail > .showcase-card {
+    transition: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Reduced motion — no loops/sweeps/blur/scan; everything rests at its final state. */
 @media (prefers-reduced-motion: reduce) {
   .js-motion [data-reveal="focus"] { filter: none !important; transform: translateY(14px); }

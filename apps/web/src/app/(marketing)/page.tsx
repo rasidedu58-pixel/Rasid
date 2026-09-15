@@ -32,7 +32,7 @@ import { PricingTable } from "../../components/marketing/pricing-table";
 import { PricingCalculator } from "../../components/marketing/pricing-calculator";
 import { SplashScreen } from "../../components/marketing/splash-screen";
 import { MotionRoot, Reveal } from "../../components/marketing/motion";
-import { HeroProductPreview } from "../../components/marketing/hero-product-preview";
+import { ProductShowcase } from "../../components/marketing/product-showcase";
 import { OperatingRhythm } from "../../components/marketing/operating-rhythm";
 import { SpotlightCard } from "../../components/marketing/spotlight-card";
 import { FaqSearch } from "../../components/marketing/faq-search";
@@ -180,47 +180,55 @@ export default function LandingPage() {
           <div className="hero-drift hero-mesh absolute inset-0" />
           <div className="hero-grid absolute inset-0" />
         </div>
-        <div className="relative mx-auto max-w-6xl px-4 pb-24 pt-16 sm:px-6 sm:pt-24 lg:pt-28">
-          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
-            <div className="flex flex-col items-start gap-6">
-              <Reveal as="div" variant="focus" className="w-fit">
-                <Badge tone="brand" className="border border-brand/20 px-3 py-1">
-                  كل ما يجري في مجموعاتك… وما يحتاج تدخّلك
-                </Badge>
-              </Reveal>
-              <Reveal as="h1" variant="focus" delay={60} className="text-display text-text-primary">
-                شغّل مجموعاتك{" "}
-                {/* Break kept on ≥sm for the clean two-tone split; hidden on
-                    mobile so `text-wrap: balance` activates and avoids a
-                    single-word orphan (a hard <br> disables balancing). */}
-                <br className="hidden sm:block" />
-                <span className="text-gradient">دون أن يضيع منك شيء</span>
-              </Reveal>
-              <Reveal as="p" variant="focus" delay={120} className="max-w-[38rem] text-lg leading-[1.85] text-text-secondary sm:text-[1.125rem]">
-                الحصص والحضور والواجبات والتحصيل والمتابعة في مكان واحد — وراصد يُظهر لك ما يحتاج تدخّلك الآن، قبل أن يفوتك.
-              </Reveal>
-              <Reveal as="div" variant="focus" delay={180}>
-                <OperatingRhythm />
-              </Reveal>
-              <Reveal as="div" variant="focus" delay={240} className="flex flex-col gap-3 pt-1 sm:flex-row">
-                <Button asChild size="lg" className="cta-sweep">
-                  <Link href="/signup">ابدأ {TRIAL_DAYS} يومًا مجانًا</Link>
-                </Button>
-                <Button asChild size="lg" variant="outline">
-                  <Link href="#how-it-works">شاهد راصد أثناء العمل</Link>
-                </Button>
-              </Reveal>
-              <Reveal as="p" variant="focus" delay={300} className="text-sm text-text-tertiary">
-                {TRIAL_DAYS} يومًا مجانًا • بدون بطاقة ائتمان.
-              </Reveal>
-            </div>
-
-            <Reveal as="div" variant="focus" delay={160} className="relative">
-              <HeroProductPreview />
+        {/*
+         * Hero layout: previously a two-column split (copy on the left, a
+         * static hero-dashboard screenshot on the right). Once the
+         * ProductShowcase below started rendering theme-aware, tabbed,
+         * multi-screen live captures of the same product, the right-column
+         * still shot became redundant — same dashboard image, twice on the
+         * same fold, with the smaller copy version even being locked to
+         * dark-theme regardless of the current theme. So the hero is now a
+         * single centred column focused entirely on message + CTAs, and
+         * the ProductShowcase directly below owns the actual product view.
+         */}
+        <div className="relative mx-auto max-w-3xl px-4 pb-16 pt-16 text-center sm:px-6 sm:pt-24 lg:pb-20 lg:pt-28">
+          <div className="flex flex-col items-center gap-6">
+            <Reveal as="div" variant="focus">
+              <Badge tone="brand" className="border border-brand/20 px-3 py-1">
+                كل ما يجري في مجموعاتك… وما يحتاج تدخّلك
+              </Badge>
+            </Reveal>
+            <Reveal as="h1" variant="focus" delay={60} className="text-display text-text-primary">
+              شغّل مجموعاتك{" "}
+              {/* Break kept on ≥sm for the clean two-tone split; hidden on
+                  mobile so `text-wrap: balance` activates and avoids a
+                  single-word orphan (a hard <br> disables balancing). */}
+              <br className="hidden sm:block" />
+              <span className="text-gradient">دون أن يضيع منك شيء</span>
+            </Reveal>
+            <Reveal as="p" variant="focus" delay={120} className="max-w-[38rem] text-lg leading-[1.85] text-text-secondary sm:text-[1.125rem]">
+              الحصص والحضور والواجبات والتحصيل والمتابعة في مكان واحد — وراصد يُظهر لك ما يحتاج تدخّلك الآن، قبل أن يفوتك.
+            </Reveal>
+            <Reveal as="div" variant="focus" delay={180}>
+              <OperatingRhythm />
+            </Reveal>
+            <Reveal as="div" variant="focus" delay={240} className="flex flex-col gap-3 pt-1 sm:flex-row">
+              <Button asChild size="lg" className="cta-sweep">
+                <Link href="/signup">ابدأ {TRIAL_DAYS} يومًا مجانًا</Link>
+              </Button>
+              <Button asChild size="lg" variant="outline">
+                <Link href="#how-it-works">شاهد راصد أثناء العمل</Link>
+              </Button>
+            </Reveal>
+            <Reveal as="p" variant="focus" delay={300} className="text-sm text-text-tertiary">
+              {TRIAL_DAYS} يومًا مجانًا • بدون بطاقة ائتمان.
             </Reveal>
           </div>
         </div>
       </section>
+
+      {/* ── Product Showcase — real screens, right after the hero/CTA ── */}
+      <ProductShowcase />
 
       {/* Partner logos — renders only when real logos are supplied. */}
       <LogosSection />
