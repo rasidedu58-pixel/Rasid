@@ -3,54 +3,78 @@ import { z } from "zod";
 /**
  * Onboarding — guided-setup status contract.
  *
- * A read-only aggregator (`GET /onboarding/status`) that derives the
+ * Read-only aggregator (`GET /onboarding/status`) that derives the
  * teacher's setup progress entirely from real workspace domain state.
- * There is no shadow completion table; the endpoint runs five `EXISTS`
- * queries and reports the truth. The web tier renders a launcher /
- * panel from this shape, and completion is invalidated after every
- * mutation that could change the underlying data.
  *
- * Step definitions and their completion predicates (authoritative,
- * verified against Rasid's Drizzle schema in Phase 15+):
+ * BACKEND vs UX SEPARATION (owner decision):
+ * The server exposes FIVE raw business states, but the UI only
+ * presents FOUR guided-setup steps. `sessionsGenerated` is a
+ * system-derived readiness signal — not something the user is asked
+ * to do; auto-generation happens inside the same transaction as
+ * `operatingMonthPrepared`. The client shows a confidence line
+ * ("تم تجهيز حصص هذا الشهر تلقائيًا") when the raw signal is on, but
+ * does NOT elevate it to a task in the checklist.
  *
- *   operatingMonth — the workspace has an `operating_months` row with
- *     `status = 'CURRENT'`. `DRAFT` months do NOT count: a
- *     prepared-ahead month is not yet the driver of session generation
- *     for today's usage, and the dashboard consumes only CURRENT.
+ * ## Raw states (from `packages/database/src/onboarding/setup-status.repository.ts`)
  *
- *   groupSetup — at least one `groups` row (`status = 'ACTIVE'`) has a
- *     `group_months` row bound to the CURRENT operating month AND at
- *     least one `schedule_rules` row exists for that group_month.
+ *   groupExists              — ≥1 `groups.status='ACTIVE'` on the workspace.
+ *                              Independent of any operating month — a
+ *                              permanent group can exist without a month.
  *
- *   students — at least one `enrollments` row (`status = 'ACTIVE'`) is
- *     bound to a `group_months` of the CURRENT operating month. A
- *     workspace-only student without an enrollment does not count;
- *     PENDING / STOPPED / WITHDRAWN / TRANSFERRED do not count.
+ *   operatingMonthPrepared   — the workspace has an `operating_months`
+ *                              row with `status='CURRENT'`, AND at least
+ *                              one `group_months` bound to it, AND at
+ *                              least one `schedule_rules` for that
+ *                              group_month. DRAFT does NOT count.
  *
- *   sessions — at least one `sessions` row exists with
- *     `origin = 'GENERATED'` bound to a `group_months` of the CURRENT
- *     operating month. Any session status (SCHEDULED / IN_PROGRESS /
- *     COMPLETED / CANCELLED / RESCHEDULED) is accepted; the point is
- *     that the auto-generator has produced sessions for the current
- *     cycle.
+ *   studentsEnrolled         — ≥1 `enrollments.status='ACTIVE'` bound to
+ *                              a `group_months` of the CURRENT month.
+ *                              Bare workspace-only students never count;
+ *                              PENDING / STOPPED / WITHDRAWN / TRANSFERRED
+ *                              never count.
  *
- *   attendance — at least one `session_records` row exists with
- *     `attendance_status IN ('PRESENT', 'ABSENT', 'LATE')`. This step
- *     is intentionally NOT scoped to the current month: once a
- *     workspace has recorded real attendance, it must never regress to
- *     "not started" just because the CURRENT month rolled over.
+ *   sessionsGenerated        — ≥1 `sessions.origin='GENERATED'` bound to
+ *                              a `group_months` of the CURRENT month.
+ *                              System-derived only; not a user task.
  *
- * The response also carries a derived `completed`/`total` count and a
- * `nextStep` pointer (the first non-COMPLETED step in dependency
- * order), so the client does not need to re-implement the ordering.
+ *   attendanceRecorded       — ≥1 `session_records.attendance_status IN
+ *                              ('PRESENT','ABSENT','LATE')`. DELIBERATELY
+ *                              workspace-global so a workspace that has
+ *                              recorded real attendance never regresses
+ *                              across CURRENT-month rollovers.
+ *
+ * ## UX steps (four visible checklist items)
+ *
+ *   createGroup       ← groupExists
+ *   prepareMonth      ← operatingMonthPrepared
+ *   enrollStudents    ← studentsEnrolled
+ *   recordAttendance  ← attendanceRecorded
+ *
+ * Rationale for the ordering:
+ *   • The first server-visible action a fresh Owner can perform is
+ *     `POST /groups` — the /months/new page hard-blocks on
+ *     `activeGroups.length === 0` and its underlying service refuses
+ *     a preview without either `sourceMonthId` or a non-empty
+ *     `selectedGroupIds`, so a workspace with zero groups can never
+ *     reach the month page usefully. The wizard at /groups is the
+ *     genuine first-run entry: it creates the durable Group, then
+ *     tries to prepare it for the CURRENT month, and on
+ *     NO_CURRENT_MONTH redirects to /months/new WITH a selectable
+ *     group already in scope.
+ *   • Step 2 wraps everything that the month flow writes atomically:
+ *     the CURRENT month row, the group_month, its schedule, AND the
+ *     auto-generated sessions. That is why the checklist has no
+ *     separate "sessions" task.
+ *   • Step 3 (enrollment) can only be completed once a group_month
+ *     exists on the CURRENT month.
+ *   • Step 4 (attendance) is intentionally workspace-global.
  */
 
 export const onboardingStepKeySchema = z.enum([
-  "operatingMonth",
-  "groupSetup",
-  "students",
-  "sessions",
-  "attendance",
+  "createGroup",
+  "prepareMonth",
+  "enrollStudents",
+  "recordAttendance",
 ]);
 export type OnboardingStepKey = z.infer<typeof onboardingStepKeySchema>;
 
@@ -59,27 +83,44 @@ export type OnboardingStepKey = z.infer<typeof onboardingStepKeySchema>;
  *   COMPLETED — the underlying business state satisfies the predicate.
  *   AVAILABLE — every prior step is COMPLETED, and this one is not yet.
  *   LOCKED    — at least one prior step is not COMPLETED.
- * There is no IN_PROGRESS state: session generation is synchronous and
- * every other step is a durable existence check, so there is no
- * transient "processing" phase we can honestly surface here.
+ * No IN_PROGRESS state: every predicate is a durable existence check
+ * and (post-Discovery) session generation is inside the same
+ * transaction as its trigger, so there is no transient phase.
  */
 export const onboardingStepStatusSchema = z.enum(["COMPLETED", "AVAILABLE", "LOCKED"]);
 export type OnboardingStepStatus = z.infer<typeof onboardingStepStatusSchema>;
 
+/**
+ * Raw business signals — exposed so the client can render confidence
+ * copy (e.g. "تم تجهيز حصص هذا الشهر تلقائيًا") without needing a
+ * separate task in the checklist. All five are pure existence checks
+ * on already-indexed columns.
+ */
+export const onboardingRawStatesSchema = z.object({
+  groupExists: z.boolean(),
+  operatingMonthPrepared: z.boolean(),
+  studentsEnrolled: z.boolean(),
+  sessionsGenerated: z.boolean(),
+  attendanceRecorded: z.boolean(),
+});
+export type OnboardingRawStates = z.infer<typeof onboardingRawStatesSchema>;
+
 export const onboardingStatusResponseSchema = z.object({
-  completed: z.number().int().min(0).max(5),
-  total: z.literal(5),
+  /** How many of the FOUR visible steps are COMPLETED. */
+  completed: z.number().int().min(0).max(4),
+  total: z.literal(4),
   steps: z.object({
-    operatingMonth: onboardingStepStatusSchema,
-    groupSetup: onboardingStepStatusSchema,
-    students: onboardingStepStatusSchema,
-    sessions: onboardingStepStatusSchema,
-    attendance: onboardingStepStatusSchema,
+    createGroup: onboardingStepStatusSchema,
+    prepareMonth: onboardingStepStatusSchema,
+    enrollStudents: onboardingStepStatusSchema,
+    recordAttendance: onboardingStepStatusSchema,
   }),
   /** Convenience — first non-completed step in dependency order, or null when done. */
   nextStep: onboardingStepKeySchema.nullable(),
-  /** True when every step is COMPLETED. Redundant with `completed === 5` but explicit. */
+  /** True when every UX step is COMPLETED. Redundant with `completed === 4` but explicit. */
   allDone: z.boolean(),
+  /** Raw signals — see file docstring. */
+  rawStates: onboardingRawStatesSchema,
 });
 export type OnboardingStatusResponse = z.infer<typeof onboardingStatusResponseSchema>;
 
@@ -89,9 +130,8 @@ export type OnboardingStatusResponse = z.infer<typeof onboardingStatusResponseSc
  * panel in the same order without duplicating the sequence.
  */
 export const ONBOARDING_STEP_ORDER: readonly OnboardingStepKey[] = [
-  "operatingMonth",
-  "groupSetup",
-  "students",
-  "sessions",
-  "attendance",
+  "createGroup",
+  "prepareMonth",
+  "enrollStudents",
+  "recordAttendance",
 ] as const;

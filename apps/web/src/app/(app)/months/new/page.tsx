@@ -168,10 +168,24 @@ export default function NewMonthPage() {
         {mode === "MANUAL" ? (
           <SectionCard title="المجموعات" description="حدّد المجموعات النشطة هذا الشهر، واضبط رسوم وجدول كل منها.">
             {activeGroups.length === 0 ? (
-              <p className="text-sm text-text-secondary">
-                لا توجد مجموعات دائمة بعد. أنشئ مجموعة أولًا من صفحة{" "}
-                <a href="/groups" className="text-brand hover:underline">المجموعات</a>.
-              </p>
+              // Empty-state Card — replaces the inline text link so a
+              // user who lands here from the guided setup (or any other
+              // direct path) sees a clear primary CTA back to the
+              // create-group wizard instead of a dead-end sentence.
+              <div className="rounded-lg border border-dashed border-border-strong bg-surface-sunken/40 p-5 text-center">
+                <p className="text-sm font-semibold text-text-primary">
+                  لتبدأ الشهر، أنشئ أول مجموعة دائمة
+                </p>
+                <p className="mt-1 text-xs text-text-secondary">
+                  المجموعة الدائمة هي الأساس — سيهيّئ راصد الشهر ومواعيد الحصص من إعداداتها.
+                </p>
+                <a
+                  href="/groups"
+                  className="focus-ring mt-4 inline-flex h-10 items-center justify-center rounded-md bg-brand px-4 text-sm font-semibold text-brand-foreground shadow-sm hover:brightness-[1.05] active:scale-[0.98] motion-reduce:transition-none"
+                >
+                  إنشاء مجموعة
+                </a>
+              </div>
             ) : (
               <div className="flex flex-col gap-4">
                 {activeGroups.map((group) => (

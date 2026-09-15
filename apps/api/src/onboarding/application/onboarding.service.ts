@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   ONBOARDING_STEP_ORDER,
+  type OnboardingRawStates,
   type OnboardingStatusResponse,
   type OnboardingStepKey,
   type OnboardingStepStatus,
@@ -11,23 +12,18 @@ import {
 } from "./ports/onboarding-repository.port";
 
 /**
- * Onboarding-status service — pure derivation. No writes, no side
- * effects; the input is a workspace id, the output is the status
- * response the client renders straight into the launcher.
+ * Onboarding-status service — pure derivation.
  *
- * Dependency ordering rules (mirrors the SQL predicates in
- * `packages/database/src/onboarding/setup-status.repository.ts`):
- *   • operatingMonth → groupSetup → students → sessions form a strict
- *     chain: each step is COMPLETED, else AVAILABLE if every prior
- *     step is COMPLETED, else LOCKED.
- *   • attendance sits after `sessions` in the visible order, but its
- *     underlying predicate is workspace-global (per product decision);
- *     the dependency here is still enforced for UI clarity — you can't
- *     "start attendance" if you don't have generated sessions yet.
- *     If the DB layer ever reports `attendance=true` while
- *     `sessions=false` (a historical account that migrated), the raw
- *     boolean is still honoured: COMPLETED wins over LOCKED so the
- *     user never loses credit for real work already done.
+ * Reads FIVE raw business signals and maps them onto FOUR visible UX
+ * steps. `sessionsGenerated` is a raw state but NOT a user task — the
+ * client renders a confidence line under `prepareMonth` when it's on.
+ *
+ * Dependency ordering rules — each step's raw boolean maps 1:1 to its
+ * `COMPLETED` status, otherwise `AVAILABLE` if the chain is still
+ * intact so far, otherwise `LOCKED`. A step's raw `true` always wins
+ * for `COMPLETED` even if the chain has broken (a historical account
+ * with attendance but no current month never silently loses credit
+ * for real past work).
  */
 @Injectable()
 export class OnboardingService {
@@ -39,23 +35,20 @@ export class OnboardingService {
   async getStatus(workspaceId: string): Promise<OnboardingStatusResponse> {
     const state = await this.repository.loadSetupState(workspaceId);
 
-    // Walk the deterministic step order, tracking whether the dependency
-    // chain is still satisfied. A step's raw boolean always wins for
-    // COMPLETED (never demote real progress). Otherwise AVAILABLE if
-    // the chain is intact so far, else LOCKED.
+    // The visible checklist uses four UX keys, each backed by ONE raw
+    // signal (never a compound). `sessionsGenerated` stays raw only.
     const doneFlags: Record<OnboardingStepKey, boolean> = {
-      operatingMonth: state.operatingMonth,
-      groupSetup: state.groupSetup,
-      students: state.students,
-      sessions: state.sessions,
-      attendance: state.attendance,
+      createGroup: state.groupExists,
+      prepareMonth: state.operatingMonthPrepared,
+      enrollStudents: state.studentsEnrolled,
+      recordAttendance: state.attendanceRecorded,
     };
+
     const steps: Record<OnboardingStepKey, OnboardingStepStatus> = {
-      operatingMonth: "LOCKED",
-      groupSetup: "LOCKED",
-      students: "LOCKED",
-      sessions: "LOCKED",
-      attendance: "LOCKED",
+      createGroup: "LOCKED",
+      prepareMonth: "LOCKED",
+      enrollStudents: "LOCKED",
+      recordAttendance: "LOCKED",
     };
     let chainIntact = true;
     for (const key of ONBOARDING_STEP_ORDER) {
@@ -75,12 +68,21 @@ export class OnboardingService {
     );
     const nextStep = ONBOARDING_STEP_ORDER.find((key) => steps[key] !== "COMPLETED") ?? null;
 
+    const rawStates: OnboardingRawStates = {
+      groupExists: state.groupExists,
+      operatingMonthPrepared: state.operatingMonthPrepared,
+      studentsEnrolled: state.studentsEnrolled,
+      sessionsGenerated: state.sessionsGenerated,
+      attendanceRecorded: state.attendanceRecorded,
+    };
+
     return {
       completed,
-      total: 5,
+      total: 4,
       steps,
       nextStep,
-      allDone: completed === 5,
+      allDone: completed === 4,
+      rawStates,
     };
   }
 }

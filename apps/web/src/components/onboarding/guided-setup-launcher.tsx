@@ -16,6 +16,7 @@ import { fetchOnboardingStatus } from "../../lib/api/onboarding";
 import {
   ONBOARDING_STEP_META,
   ONBOARDING_STEP_META_ORDERED,
+  SESSIONS_READY_CONFIDENCE_COPY,
 } from "../../lib/onboarding/step-config";
 
 /**
@@ -224,6 +225,17 @@ function PanelContent({
             stepKey={meta.key}
             status={data.steps[meta.key]}
             onCtaClick={onStepCtaClick}
+            // The confidence line under `prepareMonth` is a raw
+            // signal, not a task — see step-config.ts and the
+            // onboarding contract. Rendering it here (instead of
+            // promoting it to a fifth step) is how the four-step
+            // checklist stays honest about "sessions are ready" while
+            // never asking the user to do anything for it.
+            confidenceLine={
+              meta.key === "prepareMonth" && data.rawStates.sessionsGenerated
+                ? SESSIONS_READY_CONFIDENCE_COPY
+                : undefined
+            }
           />
         ))}
       </ol>
@@ -255,6 +267,7 @@ function StepRow({
   stepKey,
   status,
   onCtaClick,
+  confidenceLine,
 }: {
   stepKey: OnboardingStepKey;
   status: OnboardingStepStatus;
@@ -265,6 +278,13 @@ function StepRow({
    * the user to reopen the checklist from the new page.
    */
   onCtaClick: () => void;
+  /**
+   * Optional soft confidence line rendered under the step's
+   * description — used by `prepareMonth` when the raw
+   * `sessionsGenerated` signal is on, to reinforce that the auto-
+   * generation ran without inventing a separate task for it.
+   */
+  confidenceLine?: string;
 }) {
   const meta = ONBOARDING_STEP_META[stepKey];
   const isCompleted = status === "COMPLETED";
@@ -312,6 +332,15 @@ function StepRow({
         <p className="mt-0.5 text-xs leading-relaxed text-text-secondary">
           {status === "LOCKED" ? meta.depHint : description}
         </p>
+        {confidenceLine ? (
+          <p
+            className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-success-subtle px-2 py-1 text-[11px] font-medium leading-tight text-success"
+            data-testid="guided-setup-confidence"
+          >
+            <Sparkles className="h-3 w-3 shrink-0" aria-hidden />
+            <span>{confidenceLine}</span>
+          </p>
+        ) : null}
         {isAvailable ? (
           <Link
             href={meta.href}

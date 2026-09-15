@@ -93,6 +93,15 @@ export function CreateGroupWizard() {
         const g = await createGroup(workspaceId!, { name: name.trim(), subject: subject.trim() || undefined, grade: grade.trim() || undefined });
         groupId = g.id;
         setCreatedGroupId(g.id);
+        // Fire the onboarding invalidation the INSTANT the durable
+        // group row is written. Guided-setup Step 1 (`createGroup`)
+        // is backed by a `groupExists` predicate that is TRUE the
+        // moment this call returns — even if the next
+        // `prepareGroupCurrentMonth` fails with `NO_CURRENT_MONTH`
+        // (empty-workspace first-run) and lands the user in the
+        // `need-month` recovery stage, the launcher must already
+        // reflect Step 1 = COMPLETED so the user sees genuine progress.
+        queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId!) });
       }
       const res = await prepareGroupCurrentMonth(workspaceId!, groupId, {
         baseFeeMinor: Math.round(Number(feeMajor) * 100),

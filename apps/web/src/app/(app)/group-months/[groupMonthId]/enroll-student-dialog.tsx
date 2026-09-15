@@ -68,6 +68,11 @@ export function EnrollStudentDialog({ groupMonth, open, onOpenChange }: { groupM
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.reports.group(workspaceId!, groupMonth.groupId) });
+      // First enrolment flips guided-setup Step 3 (`enrollStudents`)
+      // to COMPLETED. This dialog is a per-group entry point that
+      // bypasses the shared `invalidateAfterEnrollment` helper, so
+      // wire the fan-out here too — no dependency on a later fetch.
+      queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId!) });
       toast.success("تم تسجيل الطالب");
       reset();
       onOpenChange(false);
