@@ -232,7 +232,15 @@ function PanelContent({
             // checklist stays honest about "sessions are ready" while
             // never asking the user to do anything for it.
             confidenceLine={
-              meta.key === "prepareMonth" && data.rawStates.sessionsGenerated
+              // Optional-chain the raw signal so an already-cached
+              // old-shape response (a pre-390d120 payload sitting in an
+              // in-memory React Query cache from a rolling deploy)
+              // degrades to "no confidence line" instead of throwing
+              // `Cannot read properties of undefined` during render and
+              // escaping to `global-error.tsx`. New fetches are Zod-
+              // guarded in `fetchOnboardingStatus`; this is the paired
+              // render-safe fallback for the cached-value edge.
+              meta.key === "prepareMonth" && data.rawStates?.sessionsGenerated
                 ? SESSIONS_READY_CONFIDENCE_COPY
                 : undefined
             }

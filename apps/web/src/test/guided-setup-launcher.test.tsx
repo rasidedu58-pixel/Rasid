@@ -323,6 +323,47 @@ describe("GuidedSetupLauncher", () => {
     expect(localStorage.getItem("rasid_setup_done_ws-1")).toBeNull();
   });
 
+  it("opens the completed 4/4 panel without throwing even when the cached response is missing `rawStates` (stale in-memory value from a pre-390d120 rolling deploy)", async () => {
+    // Reproduces the exact production crash: an authenticated Owner's
+    // React Query cache holds a response that pre-dates the 5-raw/4-UX
+    // rewrite (no `rawStates` field). The FAB renders (it only reads
+    // `completed`/`total`/`allDone`, all present in every past shape),
+    // but opening the sheet used to read `data.rawStates.sessionsGenerated`
+    // straight through and throw `Cannot read properties of undefined`,
+    // which escaped every per-page error boundary because the launcher
+    // is mounted at shell level — the exception bubbled all the way to
+    // `global-error.tsx`.
+    workspaceValue = { workspaceId: "ws-1", isOwner: true };
+    const stale = {
+      completed: 4,
+      total: 4,
+      steps: {
+        createGroup: "COMPLETED",
+        prepareMonth: "COMPLETED",
+        enrollStudents: "COMPLETED",
+        recordAttendance: "COMPLETED",
+      },
+      nextStep: null,
+      allDone: true,
+      // Deliberately no `rawStates` — the stale shape.
+    } as unknown as OnboardingStatusResponse;
+    fetchStatusMock.mockResolvedValue(stale);
+    await renderLauncher();
+    const fab = await screen.findByRole("button", { name: /إعداد الحساب مكتمل/ });
+    // The panel must open and render every completed row without
+    // throwing. This is the regression assertion — a throw here would
+    // reach the surrounding error boundary in production.
+    expect(() => fab.click()).not.toThrow();
+    const panel = await screen.findByTestId("guided-setup-panel");
+    const rows = Array.from(panel.querySelectorAll("li[data-step]")).map((r) => r.getAttribute("data-step"));
+    expect(rows).toEqual(["createGroup", "prepareMonth", "enrollStudents", "recordAttendance"]);
+    // Confidence line is absent when the raw signal is unknown — the
+    // launcher must NOT invent it from thin air.
+    expect(screen.queryByTestId("guided-setup-confidence")).toBeNull();
+    // Finished footer still renders (it depends only on `allDone`).
+    expect(screen.getByRole("button", { name: /إخفاء دليل الإعداد نهائيًا/ })).toBeTruthy();
+  });
+
   it("student exists workspace-side but no enrolment on the CURRENT month → Step 3 stays AVAILABLE with the honest depHint under LOCKED-below", async () => {
     // Guards the wording contract: `enrollStudents` is backed by the
     // enrollments predicate, so a bare Student row never flips it.
