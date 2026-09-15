@@ -122,11 +122,16 @@ export function GuidedSetupLauncher() {
 }
 
 /**
- * The floating trigger. Fixed at the bottom-left of the viewport, sitting
- * above the mobile BottomNav (`bottom-24` on mobile ≈ 96px, `bottom-6` on
- * ≥sm) with safe-area padding so an iOS PWA never overlaps the home
- * indicator. Circular; the number acts as its label ("`n / total`") so
- * the button is meaningful on its own without an icon-only mystery.
+ * The floating trigger. Fixed at the visual bottom-LEFT of the viewport
+ * (owner review: the right-hand side collided with the desktop sidebar's
+ * footer icons for Team/Settings; the left edge is free of persistent
+ * chrome in both light and dark themes). In RTL, the Tailwind logical
+ * property `end-*` resolves to `left`, and we pair it with
+ * `env(safe-area-inset-left)` so an iOS PWA never overlaps the physical
+ * left safe-area. Sits above the mobile BottomNav (`bottom-24` on mobile
+ * ≈ 96px, `bottom-6` on ≥sm). Circular; the number acts as its label
+ * ("`n / total`") so the button is meaningful on its own without an
+ * icon-only mystery.
  */
 function LauncherButton({
   completed,
@@ -149,7 +154,7 @@ function LauncherButton({
       onClick={onOpen}
       aria-label={ariaLabel}
       title={ariaLabel}
-      className="focus-ring fixed z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg ring-1 ring-black/10 transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-xl active:scale-[0.97] motion-reduce:transition-none motion-reduce:hover:translate-y-0 bottom-[max(calc(env(safe-area-inset-bottom)+5.5rem),5.5rem)] start-[max(1rem,env(safe-area-inset-left))] sm:bottom-[max(1.5rem,env(safe-area-inset-bottom))] sm:start-6"
+      className="focus-ring fixed z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg ring-1 ring-black/10 transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-xl active:scale-[0.97] motion-reduce:transition-none motion-reduce:hover:translate-y-0 bottom-[max(calc(env(safe-area-inset-bottom)+5.5rem),5.5rem)] end-[max(1rem,env(safe-area-inset-left))] sm:bottom-[max(1.5rem,env(safe-area-inset-bottom))] sm:end-6"
     >
       {/* Circular progress ring — pure SVG so it obeys `prefers-reduced-motion`
           (no animation on it at all). */}
