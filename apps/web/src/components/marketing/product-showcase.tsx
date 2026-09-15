@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
+import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
 import { PRODUCT_SHOWCASE_SLIDES, pickShowcaseSrc, type ProductShowcaseSlide } from "../../lib/marketing/product-showcase-slides";
 import { useTheme } from "../../lib/theme-provider";
 
@@ -83,7 +83,7 @@ export function ProductShowcase() {
               role="tab"
               aria-selected={i === desktopActive}
               onClick={() => setDesktopActive(i)}
-              className={`focus-ring rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 ${
+              className={`focus-ring rounded-full px-4 py-2 text-sm font-medium transition-[background-color,color,box-shadow] duration-150 ${
                 i === desktopActive ? "bg-gradient-cta text-brand-foreground shadow-sm" : "text-text-secondary hover:text-text-primary"
               }`}
             >
@@ -100,26 +100,43 @@ export function ProductShowcase() {
       >
         <div aria-hidden className="pointer-events-none absolute -inset-8 -z-10 bg-[radial-gradient(60%_60%_at_50%_20%,hsl(var(--brand)/0.14),transparent_70%)]" />
 
-        {/* Desktop: single crossfading visual. Aspect ratio 1800/875 =
-            the natural shape of every real captured screenshot (see
-            product-showcase-slides.ts) — showing them at 4:3 would either
-            crop off the sidebar or leave letterbox bars, both of which
-            waste the actual content of the shot. */}
+        {/* Desktop: crossfade stack (§J). Aspect ratio 1800/875 = the
+            natural shape of every real captured screenshot (see
+            product-showcase-slides.ts) — showing them at 4:3 would
+            either crop off the sidebar or leave letterbox bars.
+            All five images are mounted at once and kept in the DOM +
+            browser cache: tab clicks flip which one is opaque, no
+            AnimatePresence mount/unmount cycle and no network wait for
+            an already-cached asset. First slide uses `priority` (LCP-
+            adjacent), the rest use `loading="eager"` so the tab
+            interaction is instant on first tap — the trade is ~200 KB
+            of extra WebP up front (all five combined) for zero-latency
+            switching after that. */}
         <div className="relative hidden aspect-[1800/875] w-full sm:block">
-          <AnimatePresence mode="wait" initial={false}>
+          {PRODUCT_SHOWCASE_SLIDES.map((slide, i) => (
             <motion.div
-              key={activeSlide.id}
-              initial={reduce ? undefined : { opacity: 0.4, x: 14, scale: 0.985 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={reduce ? undefined : { opacity: 0.4, x: -14, scale: 0.985 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              key={slide.id}
+              initial={false}
+              animate={reduce ? { opacity: i === desktopActive ? 1 : 0 } : { opacity: i === desktopActive ? 1 : 0, scale: i === desktopActive ? 1 : 0.99 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               className="absolute inset-0"
+              aria-hidden={i !== desktopActive}
+              style={{ pointerEvents: i === desktopActive ? "auto" : "none" }}
             >
-              <SlideImage slide={activeSlide} theme={theme} priority={desktopActive === 0} />
+              <SlideImage slide={slide} theme={theme} priority={i === 0} eager={i !== 0} />
             </motion.div>
-          </AnimatePresence>
+          ))}
         </div>
-        <SlideCaption slide={activeSlide} className="hidden sm:block" />
+        {/* Caption crossfades to match the image — quick, subtle. */}
+        <motion.div
+          key={activeSlide.id}
+          initial={reduce ? false : { opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          className="hidden sm:block"
+        >
+          <SlideCaption slide={activeSlide} />
+        </motion.div>
 
         {/* Mobile: swipeable snap rail. */}
         <div ref={railRef} className="showcase-rail sm:hidden" role="list">
@@ -162,7 +179,7 @@ export function ProductShowcase() {
   );
 }
 
-function SlideImage({ slide, theme, priority }: { slide: ProductShowcaseSlide; theme: "light" | "dark"; priority: boolean }) {
+function SlideImage({ slide, theme, priority, eager }: { slide: ProductShowcaseSlide; theme: "light" | "dark"; priority: boolean; eager?: boolean }) {
   const src = pickShowcaseSrc(theme, slide);
   return (
     <Image
@@ -172,6 +189,10 @@ function SlideImage({ slide, theme, priority }: { slide: ProductShowcaseSlide; t
       sizes="(max-width: 640px) 88vw, (max-width: 1024px) 80vw, 768px"
       quality={80}
       priority={priority}
+      // `priority` already implies eager loading, so only set the explicit
+      // loading prop when the caller wants eager WITHOUT the priority high
+      // fetch-priority hint (avoids five images competing for LCP bandwidth).
+      loading={priority ? undefined : eager ? "eager" : undefined}
       className="object-cover"
     />
   );
