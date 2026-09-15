@@ -18,7 +18,6 @@ import {
   KeyRound,
   History,
   DatabaseBackup,
-  Activity,
   Smartphone,
   ArrowLeft,
   Check,
@@ -156,7 +155,6 @@ const TRUST_POINTS = [
   { icon: ShieldCheck, title: "صلاحيات دقيقة لكل عضو فريق", description: "تحدد أنت من يرى ماذا ومن يستطيع تعديل ماذا، مجموعة بمجموعة." },
   { icon: History, title: "سجل كامل للعمليات المالية", description: "كل دفعة ومستحق محفوظ ومرتبط بسجله، دون تعديل يمحو التاريخ." },
   { icon: DatabaseBackup, title: "نسخ احتياطي دوري لبياناتك", description: "بياناتك تُنسخ احتياطيًا بشكل منتظم وخارج الخادم، ويُختبر استرجاعها." },
-  { icon: Activity, title: "مراقبة استقرار مستمرة", description: "نراقب استقرار النظام باستمرار لنعالج أي خلل قبل أن يؤثر على عملك." },
 ];
 
 /**
@@ -350,9 +348,12 @@ export default function LandingPage() {
           <SectionEyebrow>الأمان والموثوقية</SectionEyebrow>
           <h2 className="mt-3 text-h2 text-text-primary">بيانات مجموعاتك ليست شيئًا نتركه للصدفة</h2>
         </Reveal>
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {/* 4 items → 2×2 on ≥sm, single column on mobile. A 4-column row on
+            desktop makes each card too narrow for the description; 2×2 keeps
+            the balance after the fifth item was removed. */}
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-5 sm:grid-cols-2">
           {TRUST_POINTS.map((point, i) => (
-            <Reveal as="div" key={point.title} delay={(i % 3) * 80}>
+            <Reveal as="div" key={point.title} delay={(i % 2) * 80}>
               <SpotlightCard><TrustCard icon={point.icon} title={point.title} description={point.description} /></SpotlightCard>
             </Reveal>
           ))}
