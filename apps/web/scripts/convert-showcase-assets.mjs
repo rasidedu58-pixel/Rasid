@@ -26,8 +26,12 @@ const MAPPING = [
   ["Screenshot 2026-09-15 081559.png", "dashboard-dark.webp"],
   ["Screenshot 2026-09-15 081649.png", "sessions-dark.webp"],
   ["Screenshot 2026-09-15 081714.png", "sessions-light.webp"],
-  ["Screenshot 2026-09-15 081757.png", "followups-dark.webp"],
-  ["Screenshot 2026-09-15 081816.png", "followups-light.webp"],
+  // Corrected after live QA: the human took the light-theme capture at
+  // 081757 (white background) and the dark-theme one at 081816 — my
+  // earlier mapping had these swapped. Every other slide's L/D pair
+  // was correct on first pass.
+  ["Screenshot 2026-09-15 081757.png", "followups-light.webp"],
+  ["Screenshot 2026-09-15 081816.png", "followups-dark.webp"],
   ["Screenshot 2026-09-15 081840.png", "students-dark.webp"],
   ["Screenshot 2026-09-15 081902.png", "students-light.webp"],
   ["Screenshot 2026-09-15 082035.png", "finance-dark.webp"],
