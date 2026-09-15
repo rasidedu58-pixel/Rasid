@@ -32,11 +32,21 @@ export function PricingTable() {
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [active, setActive] = useState(() => Math.max(0, PRICING_PLANS.findIndex((p) => p.highlighted)));
 
+  // Center the focal (Professional) card in the mobile rail on mount.
+  // MUST NOT use element.scrollIntoView — that also scrolls the PAGE when
+  // the rail isn't yet in view, which on landing means loading the site
+  // and finding it already scrolled down to the pricing section instead of
+  // starting at the top. Instead we set the rail's OWN scrollLeft directly,
+  // so nothing outside the rail ever moves. offsetLeft is padding-box-based
+  // in both LTR and RTL, so the same formula works either way.
   useEffect(() => {
     const isMobile = typeof matchMedia !== "undefined" && matchMedia("(max-width: 639px)").matches;
     if (!isMobile) return;
-    const initial = cardRefs.current[active];
-    initial?.scrollIntoView({ inline: "center", block: "nearest", behavior: "auto" });
+    const rail = railRef.current;
+    const card = cardRefs.current[active];
+    if (!rail || !card) return;
+    const target = card.offsetLeft - (rail.clientWidth - card.clientWidth) / 2;
+    rail.scrollTo({ left: target, behavior: "auto" });
   }, []);
 
   useEffect(() => {
@@ -65,8 +75,14 @@ export function PricingTable() {
     return () => io.disconnect();
   }, []);
 
+  // Same rail-only convention as the mount effect: dot-tap centers the
+  // target card inside the rail without ever moving the page vertically.
   function goTo(index: number) {
-    cardRefs.current[index]?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+    const rail = railRef.current;
+    const card = cardRefs.current[index];
+    if (!rail || !card) return;
+    const target = card.offsetLeft - (rail.clientWidth - card.clientWidth) / 2;
+    rail.scrollTo({ left: target, behavior: "smooth" });
   }
 
   return (
