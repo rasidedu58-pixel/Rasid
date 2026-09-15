@@ -100,6 +100,8 @@ export default function NewMonthPage() {
     mutationFn: () => confirmCreateMonth(workspaceId!, { previewToken: preview!.previewToken }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: qk.months.list(workspaceId!) });
+      // Creating the CURRENT month flips guided-setup Step 1 (and Step 2/4 when groupSpecs are included).
+      queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId!) });
       toast.success("تم تجهيز الشهر التشغيلي");
       router.push(`/months/${res.monthId}`);
     },

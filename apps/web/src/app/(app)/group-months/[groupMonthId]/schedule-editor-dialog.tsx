@@ -61,6 +61,11 @@ export function ScheduleEditorDialog({ groupMonthId, currentRules, open, onOpenC
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.groups.schedule(workspaceId!, groupMonthId) });
       queryClient.invalidateQueries({ queryKey: qk.sessions.list(workspaceId!, { groupMonthId }) });
+      // Apply-schedule rewrites schedule_rules AND re-generates sessions
+      // in the same server transaction — flips guided-setup Step 2 (and
+      // Step 4 when the first schedule lands) so the launcher moves the
+      // user forward immediately after the real business action succeeds.
+      queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId!) });
       toast.success("تم تحديث الجدول");
       onOpenChange(false);
     },

@@ -150,6 +150,8 @@ function NextMonthPrep({ workspaceId }: { workspaceId: string }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.months.list(workspaceId) });
       queryClient.invalidateQueries({ queryKey: qk.months.prepEligibility(workspaceId) });
+      // Activating a new CURRENT month reshuffles what steps 2-4 see.
+      queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId) });
       toast.success("تم بدء الشهر الجديد");
     },
     onError: () => toast.error("تعذّر بدء الشهر — تأكد أن الشهر قد بدأ فعلًا"),

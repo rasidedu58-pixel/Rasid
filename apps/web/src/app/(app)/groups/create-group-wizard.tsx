@@ -106,6 +106,11 @@ export function CreateGroupWizard() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: qk.groups.list(workspaceId!) });
+      // The create → prepare-current-month flow writes group_months +
+      // schedule_rules + GENERATED sessions in one server transaction —
+      // that flips guided-setup Step 2 to COMPLETED and can flip Step 4
+      // immediately too. Invalidate so the launcher never trails the truth.
+      queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId!) });
       setSummary(data);
       setStage("summary");
     },

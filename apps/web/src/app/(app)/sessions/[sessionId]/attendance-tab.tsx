@@ -27,10 +27,16 @@ export function AttendanceTab({ sessionId, sessionVersion, students }: { session
   const queryClient = useQueryClient();
   const [savingId, setSavingId] = useState<string | null>(null);
 
+  // Any successful attendance write flips guided-setup Step 5 to COMPLETED
+  // the first time it lands. Cheap to fan out on every call.
+  const invalidateOnboarding = () =>
+    queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId!) });
+
   const markAllMutation = useMutation({
     mutationFn: () => markAllPresent(workspaceId!, sessionId, { sessionVersion }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.sessions.roster(workspaceId!, sessionId) });
+      invalidateOnboarding();
       toast.success("تم تسجيل الجميع كحاضرين");
     },
     onError: () => toast.error("تعذّر الحفظ"),
@@ -39,7 +45,10 @@ export function AttendanceTab({ sessionId, sessionVersion, students }: { session
   const setOneMutation = useMutation({
     mutationFn: (v: { enrollmentId: string; status: AttendanceStatus }) => saveAttendance(workspaceId!, sessionId, { sessionVersion, records: [{ enrollmentId: v.enrollmentId, status: v.status }] }),
     onMutate: (v) => setSavingId(v.enrollmentId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.sessions.roster(workspaceId!, sessionId) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.sessions.roster(workspaceId!, sessionId) });
+      invalidateOnboarding();
+    },
     onError: () => toast.error("تعذّر حفظ الحضور"),
     onSettled: () => setSavingId(null),
   });

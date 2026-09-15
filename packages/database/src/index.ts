@@ -18,6 +18,7 @@ export * from "./repositories/billing-history.repository";
 export * from "./repositories/billing-platform.repository";
 export * from "./reports/reports.repository";
 export * from "./reports/action-center.repository";
+export * from "./onboarding/setup-status.repository";
 export * from "./repositories/notifications.repository";
 export * from "./repositories/platform-admin.repository";
 export * from "./repositories/platform-operations.repository";

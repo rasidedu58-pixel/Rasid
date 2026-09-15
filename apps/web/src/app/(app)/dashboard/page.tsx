@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { motion, useReducedMotion, type Variants } from "framer-motion";
@@ -10,11 +10,10 @@ import { PageHeader } from "../../../components/shell/page-header";
 import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
 import { fetchActionCenter } from "../../../lib/api/reports";
-import { fetchSessions, fetchGroups } from "../../../lib/api/scheduling";
-import { fetchStudents } from "../../../lib/api/students";
+import { fetchSessions } from "../../../lib/api/scheduling";
 import { ActionItemRow, type ActionItem } from "./action-item-row";
 import { NextSessionCard } from "./next-session-card";
-import { OnboardingPanel, type SetupStep } from "./onboarding-panel";
+import { GuidedSetupSummary } from "../../../components/onboarding/guided-setup-summary";
 import { TodaySummary, type SummaryCell } from "./today-summary";
 
 const arNum = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
@@ -38,7 +37,6 @@ export default function DashboardPage() {
   const reduce = useReducedMotion();
 
   const canGroups = hasPermission("groups.view");
-  const canStudents = hasPermission("students.view_basic");
 
   const today = useMemo(() => {
     const s = new Date();
@@ -62,60 +60,11 @@ export default function DashboardPage() {
     enabled: !!workspaceId && canGroups,
   });
 
-  // Onboarding is owner-only and stops running once the workspace is set up
-  // (a per-workspace localStorage flag avoids re-checking forever).
-  const [setupDone, setSetupDone] = useState(false);
-  useEffect(() => {
-    if (!ws) return;
-    try {
-      setSetupDone(localStorage.getItem(`rasid_setup_done_${ws}`) === "1");
-    } catch {
-      /* storage disabled — treat as not-done, checks below still run */
-    }
-  }, [ws]);
-  const onboardingActive = isOwner && !setupDone;
-
-  const groupsQuery = useQuery({
-    queryKey: qk.groups.list(ws),
-    queryFn: () => fetchGroups(ws),
-    enabled: !!workspaceId && onboardingActive && canGroups,
-  });
-  const studentsQuery = useQuery({
-    queryKey: qk.students.list(ws, { limit: 1 }),
-    queryFn: () => fetchStudents(ws, { limit: 1 }),
-    enabled: !!workspaceId && onboardingActive && canStudents,
-  });
-
   const data = acQuery.data;
 
-  // ── Onboarding steps (real completion, derived from emptiness) ──
-  const hasGroup = (groupsQuery.data?.groups.length ?? 0) > 0;
-  const hasStudent = (studentsQuery.data?.items.length ?? 0) > 0;
-  const hasSession = !!data?.nextSession || (todayQuery.data?.items.length ?? 0) > 0;
-  const steps: SetupStep[] = [
-    { key: "group", label: "أنشئ أول مجموعة", description: "مجموعتك الدائمة بجدولها ورسومها.", done: hasGroup, href: "/groups", cta: "إنشاء مجموعة" },
-    { key: "students", label: "أضف طلابك", description: "أضف طلاب مجموعاتك أو استوردهم.", done: hasStudent, href: "/students", cta: "إضافة طلاب" },
-    { key: "month", label: "جهّز شهرك التشغيلي", description: "حدّد رسوم الشهر وجدوله الأسبوعي.", done: !!data?.month, href: "/months/new", cta: "تجهيز الشهر" },
-    { key: "session", label: "جهّز أول حصة", description: "تتولّد حصصك تلقائيًا من جدول المجموعة.", done: hasSession, href: "/sessions", cta: "عرض الحصص" },
-  ];
-  const allStepsDone = steps.every((s) => s.done);
-  const onboardingSettled =
-    !onboardingActive ||
-    (!!acQuery.data &&
-      (!canGroups || groupsQuery.isSuccess || groupsQuery.isError) &&
-      (!canStudents || studentsQuery.isSuccess || studentsQuery.isError));
-  const showOnboarding = onboardingActive && onboardingSettled && !allStepsDone;
-
-  useEffect(() => {
-    if (onboardingActive && onboardingSettled && allStepsDone && ws) {
-      try {
-        localStorage.setItem(`rasid_setup_done_${ws}`, "1");
-      } catch {
-        /* ignore */
-      }
-      setSetupDone(true);
-    }
-  }, [onboardingActive, onboardingSettled, allStepsDone, ws]);
+  // Guided setup lives in the persistent shell launcher; here we show
+  // only a compact summary card whose visibility is derived server-side
+  // (Owner-only, hidden when every step is COMPLETED).
 
   // ── Loading / error ──
   if (acQuery.isLoading) {
@@ -200,14 +149,9 @@ export default function DashboardPage() {
       ) : null}
 
       <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col gap-6">
-        {showOnboarding ? (
-          <motion.div variants={item}>
-            <OnboardingPanel
-              steps={steps}
-              optional={isOwner ? [{ key: "team", label: "أضف عضوًا لفريقك", description: "", done: false, href: "/team", cta: "إدارة الفريق" }] : undefined}
-            />
-          </motion.div>
-        ) : null}
+        <motion.div variants={item}>
+          <GuidedSetupSummary />
+        </motion.div>
 
         <motion.div variants={item}>
           <NextSessionCard session={data.nextSession ?? null} />

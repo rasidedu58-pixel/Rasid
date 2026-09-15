@@ -25,4 +25,6 @@ export function invalidateAfterEnrollment(
   queryClient.invalidateQueries({ queryKey: qk.finance.summary(workspaceId) });
   queryClient.invalidateQueries({ queryKey: qk.finance.collectionQueue(workspaceId) });
   queryClient.invalidateQueries({ queryKey: qk.actionCenter.root(workspaceId) });
+  // First enrollment flips guided-setup Step 3 from AVAILABLE to COMPLETED.
+  queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId) });
 }

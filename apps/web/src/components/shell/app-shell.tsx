@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { MobileNav } from "./mobile-nav";
 import { EntitlementBanner } from "./entitlement-banner";
+import { GuidedSetupLauncher } from "../onboarding/guided-setup-launcher";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -20,6 +21,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <MobileNav open={mobileNavOpen} onOpenChange={setMobileNavOpen} />
+      {/* Persistent guided-setup companion — renders itself only for
+          Owners whose workspace has not yet cleared the 5 setup steps
+          (and remembers a permanent-dismiss decision after completion). */}
+      <GuidedSetupLauncher />
     </div>
   );
 }

@@ -18,6 +18,7 @@ export * from "./billing-custom";
 export * from "./billing-notifications";
 export * from "./billing-lifecycle";
 export * from "./reports";
+export * from "./onboarding";
 export * from "./platform-admin";
 export * from "./platform-operations";
 export * from "./platform-status";
