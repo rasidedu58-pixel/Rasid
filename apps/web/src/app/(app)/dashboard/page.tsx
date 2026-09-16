@@ -93,7 +93,9 @@ export default function DashboardPage() {
   }
 
   // ── Decision queue (the action-center buckets) ──
-  const buckets: Array<{ items: ActionItem[] } | undefined> = [data.missingRecords, data.followUpsDue, data.attention, data.collection];
+  // `missedSessions` is placed FIRST — «فائتة — لم تُسجَّل» is the highest-
+  // urgency operational gap for a teacher (server marks each item HIGH).
+  const buckets: Array<{ items: ActionItem[] } | undefined> = [data.missedSessions, data.missingRecords, data.followUpsDue, data.attention, data.collection];
   const allItems = buckets.flatMap((b) => b?.items ?? []);
   const urgent = allItems.filter((i) => i.urgency === "HIGH");
   const followUpSoon = allItems.filter((i) => i.urgency === "MEDIUM");

@@ -167,10 +167,70 @@ const actionItemSchema = z.object({
   nextAction: z.string(),
 });
 
+/**
+ * `nextSession.status` — the DISPLAY state used by the dashboard card, not the
+ * raw `sessions.status` column. Derived server-side by comparing the session's
+ * time window with `now`:
+ *
+ *   IN_PROGRESS — the session's window covers `now` AND the stored status is
+ *                 IN_PROGRESS (teacher started it, mid-class right now).
+ *   READY       — the session's window covers `now` AND the stored status is
+ *                 still SCHEDULED (slot arrived, teacher hasn't started yet).
+ *                 Copy: «حان موعدها — ابدأ الحصة».
+ *   SCHEDULED   — future session, `scheduledAt > now`. Copy: «قادمة».
+ *
+ * A stored IN_PROGRESS session whose window has ENDED never appears here —
+ * it is surfaced separately under `missedSessions`. This is a display-only
+ * derivation; nothing mutates `sessions.status` in the database.
+ */
+export const nextSessionCardSchema = z
+  .object({
+    id: z.string().uuid(),
+    groupName: z.string(),
+    scheduledAt: z.string(),
+    /**
+     * The row's duration in minutes — carried on the wire so the client
+     * can (a) hide the "current" card the exact instant `now` crosses
+     * `scheduledAt + durationMinutes` (a defensive fallback while a
+     * refetch is in flight) and (b) schedule a lightweight
+     * `queryClient.invalidateQueries` at the next boundary (start or end),
+     * so the panel refreshes without polling and without waiting for a
+     * user refresh.
+     *
+     * OPTIONAL for rolling-deploy compatibility: a new web bundle that
+     * lands before the paired API rollout completes still sees valid
+     * responses from the old API (which did not include this field), and
+     * a new API paired with an old web bundle harmlessly carries an
+     * extra field. When the client sees this as undefined it skips the
+     * boundary scheduler + defensive hide (the server remains the source
+     * of truth on the next `refetchOnWindowFocus`); this is a safe no-op,
+     * NOT a fabricated fallback duration.
+     */
+    durationMinutes: z.number().int().positive().optional(),
+    status: z.enum(["SCHEDULED", "READY", "IN_PROGRESS"]),
+  })
+  .nullable()
+  .optional();
+
 export const actionCenterResponseSchema = z.object({
   month: monthRefSchema.nullable(),
-  nextSession: z.object({ id: z.string().uuid(), groupName: z.string(), scheduledAt: z.string(), status: z.enum(["SCHEDULED", "IN_PROGRESS"]) }).nullable().optional(),
+  nextSession: nextSessionCardSchema,
   missingRecords: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),
+  /**
+   * Sessions whose scheduled window has ended without the teacher completing
+   * them. Includes both a SCHEDULED row that was never started AND an
+   * IN_PROGRESS row that was started but never completed. Never overlaps
+   * with `missingRecords` (which is reserved for live IN_PROGRESS sessions
+   * whose slot is still open but have record gaps). COMPLETED/CANCELLED/
+   * RESCHEDULED are excluded by construction.
+   *
+   * The display copy for each item is «فائتة — لم تُسجَّل»; the row's
+   * `nextAction` is «تسجيل الحصة الآن», and tapping it opens the session
+   * page which routes to the correct write path (start-then-record if the
+   * stored status is SCHEDULED, direct record if already IN_PROGRESS).
+   * `sessions.status` is NOT mutated by the derivation.
+   */
+  missedSessions: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),
   followUpsDue: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),
   attention: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),
   collection: z.object({ count: z.number().int(), items: z.array(actionItemSchema) }).optional(),

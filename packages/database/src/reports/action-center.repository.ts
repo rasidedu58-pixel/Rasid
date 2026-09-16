@@ -7,7 +7,7 @@
  * `notifications-scan.ts`/`session-mode.service.ts` already use (Phase 9
  * Closure correction #2 — never a divergent "session overdue" definition).
  */
-import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lte, or, sql } from "drizzle-orm";
 import { groupMonths, groups } from "../schema/groups";
 import { enrollments } from "../schema/enrollments";
 import { sessions } from "../schema/sessions";
@@ -45,15 +45,30 @@ export interface MissingRecordsSessionItem {
 }
 
 /**
+ * Fragment used by both the "current session" and "missed session" queries —
+ * a Postgres `interval` value derived from the row's `duration_minutes`.
+ * Kept as `sql` so `endAt = scheduledAt + duration` becomes a single index-
+ * friendly comparison rather than a per-row JS calculation on every read.
+ * Owner directive (Phase 3, rule 2): the endAt boundary is EXACT — a
+ * session leaves the "ongoing now" set the instant `now >= endAt`, with no
+ * grace period.
+ */
+const durationInterval = sql`(${sessions.durationMinutes} * interval '1 minute')`;
+
+/**
  * IN_PROGRESS sessions in the CURRENT operating month, restricted to
  * `visibleGroupIds` ("ALL" or an explicit set), that genuinely have a
- * missing-records gap.
+ * missing-records gap AND whose scheduled window has NOT yet ended.
+ *
+ * A past-slot IN_PROGRESS row is deliberately excluded here — those are
+ * surfaced under `listMissedSessions` with the «فائتة — لم تُسجَّل» label
+ * so the same session never appears in two buckets at once.
  *
  * `currentMonthId` (Phase 15C) lets a caller that already resolved the
  * CURRENT month (the Action Center does) thread it in, avoiding a duplicate
  * `operating_months` lookup. When omitted, behaviour is unchanged.
  */
-export async function listSessionsWithMissingRecords(db: Db, workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, currentMonthId?: string): Promise<MissingRecordsSessionItem[]> {
+export async function listSessionsWithMissingRecords(db: Db, workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, currentMonthId?: string, now: Date = new Date()): Promise<MissingRecordsSessionItem[]> {
   let resolvedMonthId = currentMonthId;
   if (resolvedMonthId === undefined) {
     const [currentMonth] = await db.select({ id: operatingMonths.id }).from(operatingMonths).where(and(eq(operatingMonths.workspaceId, workspaceId), eq(operatingMonths.status, "CURRENT"))).limit(1);
@@ -79,7 +94,16 @@ export async function listSessionsWithMissingRecords(db: Db, workspaceId: string
   const inProgressSessions = await db
     .select()
     .from(sessions)
-    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "IN_PROGRESS"), inArray(sessions.groupMonthId, [...groupMonthById.keys()])));
+    .where(
+      and(
+        eq(sessions.workspaceId, workspaceId),
+        eq(sessions.status, "IN_PROGRESS"),
+        // Owner directive: a past-slot IN_PROGRESS row is a MISSED session,
+        // not a still-in-progress one — leave it for `listMissedSessions`.
+        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        inArray(sessions.groupMonthId, [...groupMonthById.keys()]),
+      ),
+    );
   if (inProgressSessions.length === 0) return [];
 
   const groupMonthIds = [...new Set(inProgressSessions.map((s) => s.groupMonthId))];
@@ -132,15 +156,40 @@ export interface NextSessionItem {
   sessionId: string;
   groupName: string;
   scheduledAt: Date;
-  /** IN_PROGRESS = a session happening right now (teacher mid-class); SCHEDULED = the soonest upcoming one. */
-  status: "SCHEDULED" | "IN_PROGRESS";
+  /** Carried through so the client can compute `endAt = scheduledAt + durationMinutes` for boundary-scheduled invalidation without a second query. */
+  durationMinutes: number;
+  /**
+   * DISPLAY status derived from `sessions.status` combined with the row's
+   * time window vs `now` — see `packages/contracts/src/reports.ts` for
+   * the full contract. `IN_PROGRESS` and `READY` are both "live-now"
+   * states, `SCHEDULED` is a future session. A past-slot IN_PROGRESS row
+   * never surfaces here — it is a missed session (see `listMissedSessions`).
+   */
+  status: "SCHEDULED" | "READY" | "IN_PROGRESS";
 }
 
 /**
- * The single session to surface on the dashboard: a session happening RIGHT NOW
- * (IN_PROGRESS — the teacher is mid-class, so the dashboard offers to continue
- * it) takes priority; otherwise the soonest upcoming SCHEDULED session (now or
- * later). Restricted to `visibleGroupIds`.
+ * The single session to surface on the dashboard's "current / next" card.
+ *
+ * Selection precedence (owner directive, Phase 3–5):
+ *   1. Live IN_PROGRESS whose window covers `now` (`scheduledAt <= now <
+ *      scheduledAt + durationMinutes`, NO grace period). If more than one
+ *      is live simultaneously, the earliest starting wins.
+ *   2. Otherwise, a SCHEDULED session whose window covers `now` — the slot
+ *      has arrived but the teacher hasn't tapped Start yet. Surfaced with
+ *      `status='READY'` so the dashboard can invite «حان موعدها — ابدأ
+ *      الحصة».
+ *   3. Otherwise, the soonest upcoming SCHEDULED session (`scheduledAt >
+ *      now`).
+ *
+ * A stored IN_PROGRESS row whose slot ended in the past never blocks the
+ * dashboard: it is out of every branch here and surfaces separately under
+ * `listMissedSessions`. This closes the production bug where a Monday
+ * session with a hung `IN_PROGRESS` was billed as "the current session"
+ * on Wednesday and masked the actual Wednesday slot.
+ *
+ * `sessions.status` is NOT mutated by this query — the classification is
+ * pure derivation. Scoped to `visibleGroupIds`.
  */
 export async function getNextSession(db: Db, workspaceId: string, visibleGroupIds: "ALL" | string[], now: Date): Promise<NextSessionItem | undefined> {
   let groupMonthRows = await db
@@ -154,20 +203,53 @@ export async function getNextSession(db: Db, workspaceId: string, visibleGroupId
   if (groupMonthRows.length === 0) return undefined;
   const visibleGroupMonthIds = groupMonthRows.map((gm) => gm.id);
 
-  // A session happening NOW wins — the teacher is mid-class and the dashboard
-  // should let them jump straight back into it.
+  // (1) A LIVE session — the teacher started it and the slot still covers now.
+  //     Ordering by asc(scheduledAt) so the earliest still-live session wins
+  //     if two happen to overlap.
   const [current] = await db
-    .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, groupName: groups.name })
+    .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, durationMinutes: sessions.durationMinutes, groupName: groups.name })
     .from(sessions)
     .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
     .innerJoin(groups, eq(groups.id, groupMonths.groupId))
-    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "IN_PROGRESS"), inArray(sessions.groupMonthId, visibleGroupMonthIds)))
-    .orderBy(desc(sessions.scheduledAt))
+    .where(
+      and(
+        eq(sessions.workspaceId, workspaceId),
+        eq(sessions.status, "IN_PROGRESS"),
+        lte(sessions.scheduledAt, now),
+        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        inArray(sessions.groupMonthId, visibleGroupMonthIds),
+      ),
+    )
+    .orderBy(asc(sessions.scheduledAt))
     .limit(1);
-  if (current) return { sessionId: current.id, groupName: current.groupName, scheduledAt: current.scheduledAt, status: "IN_PROGRESS" };
+  if (current) return { sessionId: current.id, groupName: current.groupName, scheduledAt: current.scheduledAt, durationMinutes: current.durationMinutes, status: "IN_PROGRESS" };
 
+  // (2) A SCHEDULED session whose slot has ARRIVED but hasn't been started.
+  //     Surfaced as READY so the dashboard shows «حان موعدها — ابدأ الحصة»
+  //     independently of a plain future upcoming session, per the owner's
+  //     directive that a session ready-to-start must not get lost between
+  //     "current" and "upcoming".
+  const [ready] = await db
+    .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, durationMinutes: sessions.durationMinutes, groupName: groups.name })
+    .from(sessions)
+    .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
+    .innerJoin(groups, eq(groups.id, groupMonths.groupId))
+    .where(
+      and(
+        eq(sessions.workspaceId, workspaceId),
+        eq(sessions.status, "SCHEDULED"),
+        lte(sessions.scheduledAt, now),
+        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        inArray(sessions.groupMonthId, visibleGroupMonthIds),
+      ),
+    )
+    .orderBy(asc(sessions.scheduledAt))
+    .limit(1);
+  if (ready) return { sessionId: ready.id, groupName: ready.groupName, scheduledAt: ready.scheduledAt, durationMinutes: ready.durationMinutes, status: "READY" };
+
+  // (3) The soonest genuinely-future scheduled session.
   const [row] = await db
-    .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, groupName: groups.name })
+    .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, durationMinutes: sessions.durationMinutes, groupName: groups.name })
     .from(sessions)
     .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
     .innerJoin(groups, eq(groups.id, groupMonths.groupId))
@@ -175,7 +257,75 @@ export async function getNextSession(db: Db, workspaceId: string, visibleGroupId
     .orderBy(asc(sessions.scheduledAt))
     .limit(1);
   if (!row) return undefined;
-  return { sessionId: row.id, groupName: row.groupName, scheduledAt: row.scheduledAt, status: "SCHEDULED" };
+  return { sessionId: row.id, groupName: row.groupName, scheduledAt: row.scheduledAt, durationMinutes: row.durationMinutes, status: "SCHEDULED" };
+}
+
+/**
+ * Sessions whose scheduled window has ENDED without the teacher completing
+ * them — the «فائتة — لم تُسجَّل» bucket.
+ *
+ * Predicate (owner directive, Phase 2–3):
+ *   `status IN ('SCHEDULED','IN_PROGRESS')`
+ *   AND `scheduledAt + durationMinutes <= now`
+ *   AND workspace + visible-group scope
+ *
+ * COMPLETED, CANCELLED, and RESCHEDULED are excluded by construction —
+ * they are legitimate terminal states, never "missed". The predicate is
+ * intentionally NOT tied to the CURRENT operating month, because a
+ * missed session from an earlier month is still actionable (the teacher
+ * can still record it late without changing the original `scheduledAt`).
+ *
+ * Ordering: `desc(scheduledAt)` — the most-recently-missed shows first so
+ * the top of the list is the freshest actionable item. Paginated by
+ * `limit` (identical pattern to the other Action Center listings); when
+ * more rows exist than `limit`, the older ones are trimmed silently but
+ * are still visible on the sessions calendar / list surfaces.
+ *
+ * Nothing here mutates `sessions.status` — display derivation only.
+ */
+export async function listMissedSessions(db: Db, workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, now: Date = new Date()): Promise<MissedSessionItem[]> {
+  let groupMonthRows = await db
+    .select({ id: groupMonths.id, groupId: groupMonths.groupId })
+    .from(groupMonths)
+    .where(eq(groupMonths.workspaceId, workspaceId));
+  if (visibleGroupIds !== "ALL") {
+    const visibleSet = new Set(visibleGroupIds);
+    groupMonthRows = groupMonthRows.filter((gm) => visibleSet.has(gm.groupId));
+  }
+  if (groupMonthRows.length === 0) return [];
+  const visibleGroupMonthIds = groupMonthRows.map((gm) => gm.id);
+
+  const rows = await db
+    .select({ id: sessions.id, scheduledAt: sessions.scheduledAt, status: sessions.status, groupId: groups.id, groupName: groups.name })
+    .from(sessions)
+    .innerJoin(groupMonths, eq(groupMonths.id, sessions.groupMonthId))
+    .innerJoin(groups, eq(groups.id, groupMonths.groupId))
+    .where(
+      and(
+        eq(sessions.workspaceId, workspaceId),
+        or(eq(sessions.status, "SCHEDULED"), eq(sessions.status, "IN_PROGRESS")),
+        lte(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        inArray(sessions.groupMonthId, visibleGroupMonthIds),
+      ),
+    )
+    .orderBy(desc(sessions.scheduledAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    sessionId: r.id,
+    groupId: r.groupId,
+    groupName: r.groupName,
+    scheduledAt: r.scheduledAt,
+    storedStatus: r.status as "SCHEDULED" | "IN_PROGRESS",
+  }));
+}
+
+export interface MissedSessionItem {
+  sessionId: string;
+  groupId: string;
+  groupName: string;
+  scheduledAt: Date;
+  /** The row's actual DB status — SCHEDULED = never started; IN_PROGRESS = started but never completed. Both are "missed" for display purposes but the late-recording flow differs (see the session details page). */
+  storedStatus: "SCHEDULED" | "IN_PROGRESS";
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +350,13 @@ export interface ActionCenterDataParams {
   attention?: { restrictToGroupIds: string[] | undefined };
   followups?: { restrictToGroupIds: string[] | undefined };
   missing?: { visibleGroupIds: "ALL" | string[] };
+  /**
+   * Missed sessions (SCHEDULED or IN_PROGRESS whose slot has ended without
+   * completion). Gated by the same `attendance.read` permission as the
+   * regular missing-records section, but a caller with only follow-up
+   * access still doesn't see this — it needs attendance access.
+   */
+  missed?: { visibleGroupIds: "ALL" | string[] };
   collection?: { restrictToGroupIds: string[] | undefined };
   subscription?: boolean;
   /** next-session is shown to any active member (scoped to their visible groups); always requested. */
@@ -225,6 +382,7 @@ export interface ActionCenterData {
   attentionCases: AttentionCaseListItem[] | undefined;
   followups: FollowupListItem[] | undefined;
   missingRecords: MissingRecordsSessionItem[] | undefined;
+  missedSessions: MissedSessionItem[] | undefined;
   collection: CollectionQueueRow[] | undefined;
   subscription: SubscriptionRow | undefined;
   nextSession: NextSessionItem | undefined;
@@ -237,7 +395,7 @@ export async function loadActionCenterData(db: Db, p: ActionCenterDataParams): P
   // keeps the single-transaction win of ~7→1 while recovering the
   // parallelism the seven separate transactions used to have).
   const month = await getCurrentMonth(db, p.workspaceId);
-  const [attentionCases, followups, missingRecords, collection, subscription, nextSession] = await Promise.all([
+  const [attentionCases, followups, missingRecords, missedSessions, collection, subscription, nextSession] = await Promise.all([
     p.attention
       ? listAttentionCasesForWorkspace(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.attention.restrictToGroupIds, limit: p.limit })
       : Promise.resolve(undefined),
@@ -245,7 +403,10 @@ export async function loadActionCenterData(db: Db, p: ActionCenterDataParams): P
       ? listScheduledFollowups(db, { workspaceId: p.workspaceId, status: "PENDING", restrictToGroupIds: p.followups.restrictToGroupIds, limit: p.limit })
       : Promise.resolve(undefined),
     p.missing
-      ? listSessionsWithMissingRecords(db, p.workspaceId, p.missing.visibleGroupIds, p.limit, month?.id)
+      ? listSessionsWithMissingRecords(db, p.workspaceId, p.missing.visibleGroupIds, p.limit, month?.id, p.now)
+      : Promise.resolve(undefined),
+    p.missed
+      ? listMissedSessions(db, p.workspaceId, p.missed.visibleGroupIds, p.limit, p.now)
       : Promise.resolve(undefined),
     p.collection
       ? listCollectionQueue(db, { workspaceId: p.workspaceId, restrictToGroupIds: p.collection.restrictToGroupIds, limit: p.limit })
@@ -281,5 +442,5 @@ export async function loadActionCenterData(db: Db, p: ActionCenterDataParams): P
   });
   const followupItems: FollowupListItem[] | undefined = followups?.map((f) => ({ followup: f, studentName: nameById.get(f.studentId) ?? "طالب" }));
 
-  return { month, attentionCases: attentionItems, followups: followupItems, missingRecords, collection, subscription, nextSession };
+  return { month, attentionCases: attentionItems, followups: followupItems, missingRecords, missedSessions, collection, subscription, nextSession };
 }

@@ -17,6 +17,7 @@ describe("ActionCenterService", () => {
   let followups: Array<{ id: string; status: string; dueAt: Date; groupId: string }>;
   let collectionRows: CollectionQueueRow[];
   let subscriptionState: string | null;
+  let missedSessions: Array<{ sessionId: string; groupId: string; groupName: string; scheduledAt: Date; storedStatus: "SCHEDULED" | "IN_PROGRESS" }>;
   /** Records the params of the last loadActionCenterData call, so a test can assert which sections were requested / their scope. */
   let lastParams: ActionCenterDataParams | undefined;
 
@@ -33,6 +34,7 @@ describe("ActionCenterService", () => {
     followups = [];
     collectionRows = [];
     subscriptionState = null;
+    missedSessions = [];
     lastParams = undefined;
 
     const inScope = (groupId: string, restrict: string[] | undefined) => restrict === undefined || restrict.includes(groupId);
@@ -43,6 +45,7 @@ describe("ActionCenterService", () => {
     actionCenterRepo = {
       getCurrentMonth: async () => ({ id: "month-1", year: 2026, month: 8 }),
       listSessionsWithMissingRecords: async () => [],
+      listMissedSessions: async () => [],
       getNextSession: async () => undefined,
       loadActionCenterData: async (p: ActionCenterDataParams) => {
         lastParams = p;
@@ -66,6 +69,11 @@ describe("ActionCenterService", () => {
                 })) as never)
             : undefined,
           missingRecords: p.missing ? [] : undefined,
+          missedSessions: p.missed
+            ? (missedSessions
+                .filter((m) => inScope(m.groupId, p.missed!.visibleGroupIds === "ALL" ? undefined : p.missed!.visibleGroupIds))
+                .map((m) => ({ sessionId: m.sessionId, groupId: m.groupId, groupName: m.groupName, scheduledAt: m.scheduledAt, storedStatus: m.storedStatus })))
+            : undefined,
           collection: p.collection ? collectionRows.filter((r) => inScope(r.groupId, p.collection!.restrictToGroupIds)) : undefined,
           subscription:
             p.subscription && subscriptionState
@@ -212,6 +220,54 @@ describe("ActionCenterService", () => {
       expect(lastParams?.nextSession.visibleGroupIds).toBe("ALL");
       // Membership hint reused (guard already fetched it) → resolver did not re-query.
       expect(teamRepo.findMembershipByUserAndWorkspaceCalls).toBe(0);
+    });
+
+    it("Phase 2 (missed sessions) — an attendance grant surfaces the missed bucket as HIGH-urgency items with «فائتة — لم تُسجَّل» copy; without attendance grant the bucket is OMITTED entirely (no leak)", async () => {
+      // Two missed sessions on the caller's visible groups: one stored
+      // SCHEDULED (never started), one stored IN_PROGRESS (started, never
+      // completed). Both surface identically to the teacher — «فائتة».
+      missedSessions.push({ sessionId: "s-old-1", groupId: GROUP_A, groupName: "الرياضيات — الاثنين", scheduledAt: new Date("2026-09-14T19:19:00Z"), storedStatus: "SCHEDULED" });
+      missedSessions.push({ sessionId: "s-old-2", groupId: GROUP_A, groupName: "الفيزياء — الأحد", scheduledAt: new Date("2026-09-13T17:00:00Z"), storedStatus: "IN_PROGRESS" });
+
+      // Owner has every grant including attendance → bucket present.
+      const ownerResult = await service.getActionCenter(owner, ownerContext);
+      expect(ownerResult.missedSessions?.count).toBe(2);
+      expect(ownerResult.missedSessions?.items).toHaveLength(2);
+      for (const item of ownerResult.missedSessions!.items) {
+        expect(item.entityType).toBe("session");
+        expect(item.urgency).toBe("HIGH");
+        expect(item.nextAction).toBe("تسجيل الحصة الآن");
+        expect(item.reason).toContain("فائتة — لم تُسجَّل");
+      }
+
+      // Assistant with follow-up access but NO attendance → missedSessions
+      // key must be OMITTED (never a zeroed count that would still leak
+      // "there are none").
+      const assistant: VerifiedSupabaseToken = { id: "u-followups", email: "f@example.com" };
+      const m = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: assistant.id, roleLabel: "ASSISTANT" });
+      await teamRepo.replaceMembershipGrants({
+        workspaceId: WORKSPACE_A, membershipId: m.id, createdByUserId: owner.id,
+        desiredGrants: [{ permissionKey: "followup.read", scopeType: "SELECTED_GROUPS", groupIds: [GROUP_A] }],
+      });
+      const assistantResult = await service.getActionCenter(assistant, { workspaceId: WORKSPACE_A, membership: m });
+      expect(assistantResult.missedSessions).toBeUndefined();
+      expect("missedSessions" in assistantResult ? assistantResult.missedSessions : "absent").not.toEqual({ count: 0, items: [] });
+    });
+
+    it("Phase 5 (workspace/group scope) — a scoped attendance grant restricts missed sessions to the grant's groups; other groups' missed sessions never leak", async () => {
+      missedSessions.push({ sessionId: "s-in-a", groupId: GROUP_A, groupName: "GA", scheduledAt: new Date("2026-09-14T19:19:00Z"), storedStatus: "SCHEDULED" });
+      missedSessions.push({ sessionId: "s-in-b", groupId: "group-b", groupName: "GB", scheduledAt: new Date("2026-09-14T19:19:00Z"), storedStatus: "SCHEDULED" });
+
+      const assistant: VerifiedSupabaseToken = { id: "u-attn-scoped", email: "s@example.com" };
+      const m = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: assistant.id, roleLabel: "ASSISTANT" });
+      await teamRepo.replaceMembershipGrants({
+        workspaceId: WORKSPACE_A, membershipId: m.id, createdByUserId: owner.id,
+        desiredGrants: [{ permissionKey: "attendance.read", scopeType: "SELECTED_GROUPS", groupIds: [GROUP_A] }],
+      });
+      const result = await service.getActionCenter(assistant, { workspaceId: WORKSPACE_A, membership: m });
+      expect(lastParams?.missed?.visibleGroupIds).toEqual([GROUP_A]);
+      // Only GA's missed session should be visible; group-b never leaks.
+      expect(result.missedSessions?.items.map((i) => i.entityId)).toEqual(["s-in-a"]);
     });
 
     it("scoped assistant's collection scope is the UNION of finance grants, never wider", async () => {

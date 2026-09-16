@@ -1,14 +1,15 @@
-import type {
-  StudentReportResponse,
-  GroupReportResponse,
-  MonthlyTeacherReportResponse,
-  CreateReportExportRequest,
-  CreateReportExportResponse,
-  GetExportResponse,
-  ListNotificationsResponse,
-  MarkNotificationReadResponse,
-  MarkAllNotificationsReadResponse,
-  ActionCenterResponse,
+import {
+  actionCenterResponseSchema,
+  type StudentReportResponse,
+  type GroupReportResponse,
+  type MonthlyTeacherReportResponse,
+  type CreateReportExportRequest,
+  type CreateReportExportResponse,
+  type GetExportResponse,
+  type ListNotificationsResponse,
+  type MarkNotificationReadResponse,
+  type MarkAllNotificationsReadResponse,
+  type ActionCenterResponse,
 } from "@academic-precision/contracts";
 import { apiDownload, apiRequest } from "./client";
 
@@ -53,6 +54,17 @@ export function markAllNotificationsRead(workspaceId: string): Promise<MarkAllNo
 
 // --- Action Center -----------------------------------------------------
 
-export function fetchActionCenter(workspaceId: string): Promise<ActionCenterResponse> {
-  return apiRequest<ActionCenterResponse>("/action-center", { workspaceId });
+/**
+ * `GET /action-center` — the dashboard aggregate. Parsed through the
+ * contract schema for the same rolling-deploy safety pattern as
+ * `fetchOnboardingStatus`: an old-shape payload (a paired API still on
+ * a pre-durationMinutes / pre-missedSessions build during rollout) is
+ * validated by the OPTIONAL fields of `actionCenterResponseSchema` and
+ * passes cleanly; a genuinely-broken response fails LOUDLY at fetch time
+ * (React Query error state) instead of silently populating a partial
+ * object that crashes downstream renders.
+ */
+export async function fetchActionCenter(workspaceId: string): Promise<ActionCenterResponse> {
+  const raw = await apiRequest<unknown>("/action-center", { workspaceId });
+  return actionCenterResponseSchema.parse(raw);
 }

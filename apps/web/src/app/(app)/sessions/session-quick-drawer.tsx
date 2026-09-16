@@ -140,9 +140,9 @@ export function SessionQuickDrawer({
             </div>
           ) : (
             <div className="mt-2 flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-text-secondary">
-              <StatusDot tone={display.key === "needs_completion" ? "danger" : "neutral"} label={display.label} />
-              {display.key === "needs_completion"
-                ? "انتهى وقت الحصة ولم يبدأ تسجيلها بعد."
+              <StatusDot tone={display.key === "missed" ? "danger" : "neutral"} label={display.label} />
+              {display.key === "missed"
+                ? "انتهى وقت الحصة ولم تُسجَّل — يمكنك تسجيلها الآن دون تغيير موعدها."
                 : display.key === "upcoming" || display.key === "soon"
                   ? "لم تبدأ الحصة بعد."
                   : "لا يوجد تسجيل لهذه الحصة."}

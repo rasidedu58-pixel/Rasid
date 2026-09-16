@@ -5,6 +5,7 @@ import type {
   AttentionCaseListItem,
   CollectionQueueRow,
   FollowupListItem,
+  MissedSessionItem,
   MissingRecordsSessionItem,
   NextSessionItem,
   SubscriptionRow,
@@ -73,6 +74,13 @@ export class ActionCenterService {
       missing: attendanceGrant
         ? { visibleGroupIds: attendanceGrant.scope === "ALL_GROUPS" ? "ALL" : (attendanceGrant.groupIds ?? []) }
         : undefined,
+      // Missed-sessions bucket rides on the same permission as missing-
+      // records: both are attendance-side surfaces. Kept as a separate
+      // param so a future policy split remains one-line without touching
+      // the repository.
+      missed: attendanceGrant
+        ? { visibleGroupIds: attendanceGrant.scope === "ALL_GROUPS" ? "ALL" : (attendanceGrant.groupIds ?? []) }
+        : undefined,
       collection: paymentsGrant || financeGrant ? { restrictToGroupIds: this.unionGroupScope([paymentsGrant, financeGrant]) } : undefined,
       subscription: isOwner,
       nextSession: {
@@ -86,6 +94,7 @@ export class ActionCenterService {
       attention: followupGrant ? this.toAttentionSection(data.attentionCases ?? []) : undefined,
       followUpsDue: followupGrant ? this.toFollowUpsSection(data.followups ?? [], now) : undefined,
       missingRecords: attendanceGrant ? this.toMissingRecordsSection(data.missingRecords ?? []) : undefined,
+      missedSessions: attendanceGrant ? this.toMissedSessionsSection(data.missedSessions ?? []) : undefined,
       collection: paymentsGrant || financeGrant ? this.toCollectionSection(data.collection ?? []) : undefined,
       subscriptionWarning: isOwner ? this.toSubscriptionWarning(data.subscription) : undefined,
       asOf: now.toISOString(),
@@ -142,6 +151,29 @@ export class ActionCenterService {
     };
   }
 
+  /**
+   * «فائتة — لم تُسجَّل» bucket. The stored status is preserved on the
+   * `entityId` side (the session id), and the reason line names the group
+   * so the teacher immediately knows WHICH missed session it is. The
+   * `nextAction` is the exact wording from Phase 6 of the owner's spec.
+   *
+   * `urgency` is HIGH here — a missed session is a real operational gap
+   * the teacher needs to reconcile, distinct from a merely-partial live
+   * session (missing-records = MEDIUM).
+   */
+  private toMissedSessionsSection(missed: MissedSessionItem[]) {
+    return {
+      count: missed.length,
+      items: missed.map((s) => ({
+        entityType: "session",
+        entityId: s.sessionId,
+        reason: `فائتة — لم تُسجَّل في مجموعة «${s.groupName}»`,
+        urgency: "HIGH" as const,
+        nextAction: "تسجيل الحصة الآن",
+      })),
+    };
+  }
+
   private toCollectionSection(rows: CollectionQueueRow[]) {
     return {
       count: rows.length,
@@ -175,6 +207,6 @@ export class ActionCenterService {
 
   private toNextSection(next: NextSessionItem | undefined) {
     if (!next) return undefined;
-    return { id: next.sessionId, groupName: next.groupName, scheduledAt: next.scheduledAt.toISOString(), status: next.status };
+    return { id: next.sessionId, groupName: next.groupName, scheduledAt: next.scheduledAt.toISOString(), durationMinutes: next.durationMinutes, status: next.status };
   }
 }

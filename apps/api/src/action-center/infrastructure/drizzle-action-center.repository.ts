@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { getCurrentMonth, getNextSession, listSessionsWithMissingRecords, loadActionCenterData, withRuntimeContext, type ActionCenterData, type ActionCenterDataParams, type CurrentMonthRef, type MissingRecordsSessionItem, type NextSessionItem } from "@academic-precision/database";
+import { getCurrentMonth, getNextSession, listMissedSessions, listSessionsWithMissingRecords, loadActionCenterData, withRuntimeContext, type ActionCenterData, type ActionCenterDataParams, type CurrentMonthRef, type MissedSessionItem, type MissingRecordsSessionItem, type NextSessionItem } from "@academic-precision/database";
 import { getContext } from "@academic-precision/observability";
 import type { ActionCenterRepositoryPort } from "../application/ports/action-center-repository.port";
 
@@ -14,8 +14,12 @@ export class DrizzleActionCenterRepository implements ActionCenterRepositoryPort
     return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => getCurrentMonth(db, workspaceId));
   }
 
-  listSessionsWithMissingRecords(workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number): Promise<MissingRecordsSessionItem[]> {
-    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => listSessionsWithMissingRecords(db, workspaceId, visibleGroupIds, limit));
+  listSessionsWithMissingRecords(workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, now?: Date): Promise<MissingRecordsSessionItem[]> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => listSessionsWithMissingRecords(db, workspaceId, visibleGroupIds, limit, undefined, now));
+  }
+
+  listMissedSessions(workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, now: Date): Promise<MissedSessionItem[]> {
+    return withRuntimeContext(this.runtimeCtx(workspaceId), (db) => listMissedSessions(db, workspaceId, visibleGroupIds, limit, now));
   }
 
   getNextSession(workspaceId: string, visibleGroupIds: "ALL" | string[], now: Date): Promise<NextSessionItem | undefined> {

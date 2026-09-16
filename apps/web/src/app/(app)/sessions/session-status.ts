@@ -7,19 +7,26 @@ import type { SessionCalendarItem, SessionStatus } from "@academic-precision/con
  * statuses (SCHEDULED / IN_PROGRESS / COMPLETED / CANCELLED / RESCHEDULED) into
  * the operations-facing lifecycle the teacher reads at a glance:
  *
- *   قادمة · تبدأ قريبًا · جاهزة للتسجيل · جارية · تحتاج استكمال · مكتملة · ملغاة · مؤجّلة
+ *   قادمة · تبدأ قريبًا · جاهزة للتسجيل · جارية · فائتة — لم تُسجَّل · مكتملة · ملغاة · مؤجّلة
  *
- * The key case: a SCHEDULED session whose window has PASSED but was never
- * started/completed is "تحتاج استكمال" (needs completion) — never silently
- * treated as done (per the product spec). A running session's own record gaps
- * are surfaced separately in the quick drawer via `GET /sessions/:id/review`.
+ * The key cases (owner directive, Phase 3):
+ *   - A SCHEDULED session whose window has PASSED without being started
+ *     is «فائتة — لم تُسجَّل».
+ *   - An IN_PROGRESS session whose window has PASSED without `/complete`
+ *     being called is ALSO «فائتة — لم تُسجَّل» — the stored status is
+ *     preserved (nothing here mutates the DB) but the teacher stops seeing
+ *     the session as "still ongoing" the instant `now >= scheduledAt +
+ *     durationMinutes`, with NO grace period.
+ *   - Never silently treated as done. A running session's own record gaps
+ *     are surfaced separately in the quick drawer via
+ *     `GET /sessions/:id/review`.
  */
 export type SessionDisplayKey =
   | "upcoming"
   | "soon"
   | "ready"
   | "in_progress"
-  | "needs_completion"
+  | "missed"
   | "completed"
   | "cancelled"
   | "rescheduled";
@@ -61,6 +68,13 @@ export function deriveSessionDisplay(
     case "RESCHEDULED":
       return { key: "rescheduled", label: "مؤجّلة", badgeTone: "warning", dotClass: "bg-warning", accentClass: "bg-warning/50", live: false };
     case "IN_PROGRESS":
+      // A stored IN_PROGRESS whose slot has ENDED is a missed session — the
+      // teacher started it but never called `/complete` and the window has
+      // now expired. Show it as «فائتة — لم تُسجَّل», never as still-ongoing.
+      // Boundary is EXACT (`now >= end.getTime()`), no grace period.
+      if (t >= end.getTime()) {
+        return { key: "missed", label: "فائتة — لم تُسجَّل", badgeTone: "warning", dotClass: "bg-warning", accentClass: "bg-warning", live: false };
+      }
       return { key: "in_progress", label: "جارية", badgeTone: "brand", dotClass: "bg-brand", accentClass: "bg-brand", live: true };
     case "SCHEDULED":
     default:
@@ -75,12 +89,12 @@ export function deriveSessionDisplay(
     }
     return { key: "upcoming", label: "قادمة", badgeTone: "neutral", dotClass: "bg-text-tertiary", accentClass: "bg-border-strong", live: false };
   }
-  if (t <= end.getTime()) {
+  if (t < end.getTime()) {
     // Window is active but the session was never started → ready to record now.
     return { key: "ready", label: "جاهزة للتسجيل", badgeTone: "brand", dotClass: "bg-brand", accentClass: "bg-brand", live: true };
   }
-  // Window passed, never started/completed → needs completion.
-  return { key: "needs_completion", label: "تحتاج استكمال", badgeTone: "warning", dotClass: "bg-warning", accentClass: "bg-warning", live: false };
+  // Window passed, never started/completed → missed («فائتة — لم تُسجَّل»).
+  return { key: "missed", label: "فائتة — لم تُسجَّل", badgeTone: "warning", dotClass: "bg-warning", accentClass: "bg-warning", live: false };
 }
 
 /** The primary drawer action label for a session's current display state. */
@@ -92,8 +106,12 @@ export function primaryActionLabel(key: SessionDisplayKey): string {
     case "soon":
     case "upcoming":
       return "بدء الحصة";
-    case "needs_completion":
-      return "استكمال التسجيل";
+    case "missed":
+      // Late-recording flow (owner directive, Phase 6). The session details
+      // page decides on the actual write path — a stored SCHEDULED goes
+      // through `/start` first, a stored IN_PROGRESS opens recording
+      // directly — so the label is uniform here regardless of stored status.
+      return "تسجيل الحصة الآن";
     default:
       return "فتح الحصة كاملة";
   }

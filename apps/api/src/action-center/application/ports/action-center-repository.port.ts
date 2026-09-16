@@ -2,6 +2,7 @@ import type {
   ActionCenterData,
   ActionCenterDataParams,
   CurrentMonthRef,
+  MissedSessionItem,
   MissingRecordsSessionItem,
   NextSessionItem,
 } from "@academic-precision/database";
@@ -9,7 +10,8 @@ import type {
 /** Minimal, module-local port for the queries not already owned by another module's repository (Finance/Attention/Billing are re-provided directly instead of duplicated here). */
 export interface ActionCenterRepositoryPort {
   getCurrentMonth(workspaceId: string): Promise<CurrentMonthRef | undefined>;
-  listSessionsWithMissingRecords(workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number): Promise<MissingRecordsSessionItem[]>;
+  listSessionsWithMissingRecords(workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, now?: Date): Promise<MissingRecordsSessionItem[]>;
+  listMissedSessions(workspaceId: string, visibleGroupIds: "ALL" | string[], limit: number, now: Date): Promise<MissedSessionItem[]>;
   getNextSession(workspaceId: string, visibleGroupIds: "ALL" | string[], now: Date): Promise<NextSessionItem | undefined>;
   /** Phase 15C — every still-needed Action Center section in ONE transaction. */
   loadActionCenterData(params: ActionCenterDataParams): Promise<ActionCenterData>;

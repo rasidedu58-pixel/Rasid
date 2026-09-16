@@ -42,4 +42,12 @@ describe("nextSessionWhen — Next/Current session 'when' line", () => {
     expect(label).not.toContain("اليوم");
     expect(label).not.toContain("غدًا");
   });
+
+  it("READY — a SCHEDULED session whose slot has arrived reads «حان موعدها — ابدأ الحصة» (owner directive Phase 5)", () => {
+    // The dashboard must NOT lose a session whose slot arrived but the
+    // teacher hasn't tapped Start — separate from both "current now" and
+    // regular "upcoming". Copy is exact.
+    const label = nextSessionWhen(iso(2026, 8, 2, 10, 0), "READY", new Date(2026, 8, 2, 10, 5).getTime());
+    expect(label).toBe("حان موعدها — ابدأ الحصة");
+  });
 });

@@ -6,15 +6,24 @@ function sameLocalDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+export type NextSessionDisplayStatus = "SCHEDULED" | "READY" | "IN_PROGRESS";
+
 /**
  * The human "when" line for the Next/Current Session panel. Pure so the
  * today/tomorrow/live/countdown boundaries can be regression-tested without a
  * DOM. All comparisons are in the viewer's LOCAL day (Egypt in production):
  * times are stored/transported as UTC ISO and only rendered locally here, so a
  * session at 23:50 today never leaks into "tomorrow" for the local reader.
+ *
+ * Statuses come from the server's DISPLAY derivation (see
+ * `packages/contracts/src/reports.ts`), not raw `sessions.status`:
+ *   - IN_PROGRESS = teacher mid-class, slot covers now
+ *   - READY       = slot has arrived, teacher hasn't tapped Start
+ *   - SCHEDULED   = future session
  */
-export function nextSessionWhen(scheduledAt: string, status: "SCHEDULED" | "IN_PROGRESS", nowMs: number): string {
+export function nextSessionWhen(scheduledAt: string, status: NextSessionDisplayStatus, nowMs: number): string {
   if (status === "IN_PROGRESS") return "جارية الآن — سجّل الحضور والواجب";
+  if (status === "READY") return "حان موعدها — ابدأ الحصة";
   const at = new Date(scheduledAt);
   const mins = Math.round((at.getTime() - nowMs) / 60_000);
   if (mins <= 0) return "بدأ موعدها للتو";
