@@ -8,10 +8,8 @@ import { Badge, Button, Card, ErrorState, LoadingRegion, Tabs, TabsContent, Tabs
 import { PageHeader } from "../../../../components/shell/page-header";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
-import { fetchSessionReview, startSession } from "../../../../lib/api/session-mode";
-import { useSessionDetailQuery, useSessionRosterQuery } from "../../../../offline/runtime/queries";
-import { useSessionWrites } from "../../../../offline/runtime/use-session-writes";
-import { SyncStatusBadge } from "../../../../offline/components/sync-status-badge";
+import { fetchSession } from "../../../../lib/api/scheduling";
+import { fetchSessionRoster, fetchSessionReview, startSession } from "../../../../lib/api/session-mode";
 import { deriveSessionDisplay } from "../session-status";
 import { AttendanceTab } from "./attendance-tab";
 import { HomeworkTab } from "./homework-tab";
@@ -32,6 +30,13 @@ const STATUS_LABEL: Record<string, string> = {
  * 7-screen wizard. A SCHEDULED session shows only a Start action; once
  * IN_PROGRESS the full roster-driven tabs unlock; a COMPLETED/CANCELLED/
  * RESCHEDULED session renders read-only (no Session Mode tabs at all).
+ *
+ * Phase 4 (session lifecycle honesty): a SCHEDULED session whose slot has
+ * ENDED OR an IN_PROGRESS session past its slot end is derived as
+ * `missed` («فائتة — لم تُسجَّل»). The stored `sessions.status` is NEVER
+ * mutated — this is display-only. The teacher can still record it
+ * through the existing `/start` + attendance write path (no new
+ * endpoint, no change to `scheduledAt`, no `/complete` on this render).
  */
 export default function SessionModePage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -39,23 +44,29 @@ export default function SessionModePage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState("attendance");
 
-  // Local-first when the offline layer is on; identical online-only fetch when off.
-  const sessionQuery = useSessionDetailQuery(workspaceId ?? undefined, sessionId);
-  const writes = useSessionWrites(sessionId);
+  const sessionQuery = useQuery({
+    queryKey: workspaceId ? qk.sessions.detail(workspaceId, sessionId) : ["session", "none"],
+    queryFn: () => fetchSession(workspaceId!, sessionId),
+    enabled: !!workspaceId,
+  });
 
   const isInProgress = sessionQuery.data?.status === "IN_PROGRESS";
 
-  // Live-ticking "now" so the missed-session banner + labels react to the
-  // exact slot boundary while the teacher has the page open (owner
-  // directive, Phase 9). Kept lightweight — one 30-second interval — and
-  // scoped to the mounted page.
+  // Live-ticking "now" so the missed-session banner + labels react to
+  // the exact slot boundary while the teacher has the page open (owner
+  // directive, Phase 9). Kept lightweight — one 30-second interval —
+  // and scoped to the mounted page.
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(t);
   }, []);
 
-  const rosterQuery = useSessionRosterQuery(workspaceId ?? undefined, sessionId, isInProgress);
+  const rosterQuery = useQuery({
+    queryKey: workspaceId ? qk.sessions.roster(workspaceId, sessionId) : ["roster", "none"],
+    queryFn: () => fetchSessionRoster(workspaceId!, sessionId),
+    enabled: !!workspaceId && isInProgress,
+  });
 
   const reviewQuery = useQuery({
     queryKey: ["session-review", workspaceId, sessionId],
@@ -77,14 +88,10 @@ export default function SessionModePage() {
 
   const session = sessionQuery.data;
 
-  // Derived display state (`sessions/session-status.ts`) — treats a
-  // SCHEDULED-past-end OR IN_PROGRESS-past-end row as `missed`. Used ONLY
-  // to adjust the copy on the pre-recording card; the underlying write
-  // path is unchanged (SCHEDULED → /start then record, IN_PROGRESS →
-  // record directly), so the teacher's `scheduledAt` never mutates and
-  // no duplicate attendance can be introduced. `durationMinutes` is
-  // required on the `Session` contract (`packages/contracts/src/
-  // scheduling.ts`), so no fabricated fallback is needed here.
+  // Derived display state — treats a SCHEDULED-past-end OR IN_PROGRESS-
+  // past-end row as `missed`. Purely display; the DB row's status is
+  // preserved as-is and nothing here mutates records. `durationMinutes`
+  // is required on the `Session` contract, so no fabricated fallback.
   const display = deriveSessionDisplay(
     { status: session.status, scheduledAt: session.scheduledAt, durationMinutes: session.durationMinutes },
     now,
@@ -97,12 +104,9 @@ export default function SessionModePage() {
         title="وضع الحصة"
         description={formatDateTime(session.scheduledAt)}
         actions={
-          <div className="flex items-center gap-3">
-            <SyncStatusBadge />
-            <Badge tone={isMissed ? "warning" : session.status === "IN_PROGRESS" ? "brand" : session.status === "COMPLETED" ? "success" : "neutral"}>
-              {isMissed ? "فائتة — لم تُسجَّل" : STATUS_LABEL[session.status] ?? session.status}
-            </Badge>
-          </div>
+          <Badge tone={isMissed ? "warning" : session.status === "IN_PROGRESS" ? "brand" : session.status === "COMPLETED" ? "success" : "neutral"}>
+            {isMissed ? "فائتة — لم تُسجَّل" : STATUS_LABEL[session.status] ?? session.status}
+          </Badge>
         }
       />
 
@@ -119,11 +123,7 @@ export default function SessionModePage() {
                 : "ابدأ الحصة لتسجيل الحضور والواجب."}
             </p>
           </div>
-          <Button
-            size="lg"
-            onClick={() => (writes.active ? void writes.start().catch(() => toast.error("تعذّر بدء الحصة محليًا")) : startMutation.mutate())}
-            loading={startMutation.isPending}
-          >
+          <Button size="lg" onClick={() => startMutation.mutate()} loading={startMutation.isPending}>
             <PlayCircle className="h-4 w-4" aria-hidden />
             {isMissed ? "تسجيل الحصة الآن" : "بدء الحصة"}
           </Button>
@@ -173,25 +173,25 @@ export default function SessionModePage() {
               })()
             ) : null}
             <Tabs value={tab} onValueChange={setTab} dir="rtl">
-            <TabsList>
-              <TabsTrigger value="attendance">الحضور</TabsTrigger>
-              <TabsTrigger value="homework">الواجب</TabsTrigger>
-              <TabsTrigger value="exam">الامتحان</TabsTrigger>
-              <TabsTrigger value="review">مراجعة وإنهاء</TabsTrigger>
-            </TabsList>
-            <TabsContent value="attendance">
-              <AttendanceTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} students={rosterQuery.data.students} />
-            </TabsContent>
-            <TabsContent value="homework">
-              <HomeworkTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} students={rosterQuery.data.students} />
-            </TabsContent>
-            <TabsContent value="exam">
-              <ExamTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} students={rosterQuery.data.students} hasExam={reviewQuery.data?.examSummary.hasExam ?? false} />
-            </TabsContent>
-            <TabsContent value="review">
-              <ReviewTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} onCompleted={() => sessionQuery.refetch()} />
-            </TabsContent>
-          </Tabs>
+              <TabsList>
+                <TabsTrigger value="attendance">الحضور</TabsTrigger>
+                <TabsTrigger value="homework">الواجب</TabsTrigger>
+                <TabsTrigger value="exam">الامتحان</TabsTrigger>
+                <TabsTrigger value="review">مراجعة وإنهاء</TabsTrigger>
+              </TabsList>
+              <TabsContent value="attendance">
+                <AttendanceTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} students={rosterQuery.data.students} />
+              </TabsContent>
+              <TabsContent value="homework">
+                <HomeworkTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} students={rosterQuery.data.students} />
+              </TabsContent>
+              <TabsContent value="exam">
+                <ExamTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} students={rosterQuery.data.students} hasExam={reviewQuery.data?.examSummary.hasExam ?? false} />
+              </TabsContent>
+              <TabsContent value="review">
+                <ReviewTab sessionId={sessionId} sessionVersion={rosterQuery.data.session.version} onCompleted={() => sessionQuery.refetch()} />
+              </TabsContent>
+            </Tabs>
           </>
         )
       ) : (
