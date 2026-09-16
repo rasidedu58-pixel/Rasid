@@ -56,6 +56,23 @@ export interface MissingRecordsSessionItem {
 const durationInterval = sql`(${sessions.durationMinutes} * interval '1 minute')`;
 
 /**
+ * Wrap a JS `Date` as an explicit `timestamptz` on the SQL side.
+ *
+ * `postgres.js` cannot safely infer the wire type of a bare `Date` param
+ * whose SQL slot is a raw `sql\`\`` expression (`scheduledAt + duration_minutes
+ * * interval '1 minute'`) — drizzle only attaches a column-type hint when
+ * one side of the comparison is a real column, not a computed expression.
+ * Without the hint, postgres.js threw `ERR_INVALID_ARG_TYPE` for every
+ * `/action-center` request on the deployed API. Passing the ISO string
+ * with an explicit `::timestamptz` cast side-steps the type inference
+ * entirely — postgres.js just sees a plain string, and Postgres itself
+ * does the timestamp coercion server-side.
+ */
+function asTimestamptz(now: Date) {
+  return sql`${now.toISOString()}::timestamptz`;
+}
+
+/**
  * IN_PROGRESS sessions in the CURRENT operating month, restricted to
  * `visibleGroupIds` ("ALL" or an explicit set), that genuinely have a
  * missing-records gap AND whose scheduled window has NOT yet ended.
@@ -100,7 +117,7 @@ export async function listSessionsWithMissingRecords(db: Db, workspaceId: string
         eq(sessions.status, "IN_PROGRESS"),
         // Owner directive: a past-slot IN_PROGRESS row is a MISSED session,
         // not a still-in-progress one — leave it for `listMissedSessions`.
-        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, asTimestamptz(now)),
         inArray(sessions.groupMonthId, [...groupMonthById.keys()]),
       ),
     );
@@ -216,7 +233,7 @@ export async function getNextSession(db: Db, workspaceId: string, visibleGroupId
         eq(sessions.workspaceId, workspaceId),
         eq(sessions.status, "IN_PROGRESS"),
         lte(sessions.scheduledAt, now),
-        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, asTimestamptz(now)),
         inArray(sessions.groupMonthId, visibleGroupMonthIds),
       ),
     )
@@ -239,7 +256,7 @@ export async function getNextSession(db: Db, workspaceId: string, visibleGroupId
         eq(sessions.workspaceId, workspaceId),
         eq(sessions.status, "SCHEDULED"),
         lte(sessions.scheduledAt, now),
-        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        gt(sql`${sessions.scheduledAt} + ${durationInterval}`, asTimestamptz(now)),
         inArray(sessions.groupMonthId, visibleGroupMonthIds),
       ),
     )
@@ -304,7 +321,7 @@ export async function listMissedSessions(db: Db, workspaceId: string, visibleGro
       and(
         eq(sessions.workspaceId, workspaceId),
         or(eq(sessions.status, "SCHEDULED"), eq(sessions.status, "IN_PROGRESS")),
-        lte(sql`${sessions.scheduledAt} + ${durationInterval}`, now),
+        lte(sql`${sessions.scheduledAt} + ${durationInterval}`, asTimestamptz(now)),
         inArray(sessions.groupMonthId, visibleGroupMonthIds),
       ),
     )
