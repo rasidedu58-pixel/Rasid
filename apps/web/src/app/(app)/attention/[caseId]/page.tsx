@@ -14,9 +14,19 @@ import { qk } from "../../../../lib/query-keys";
 import { fetchAttentionCase, startFollowup, markMonitoring, closeAttentionCase } from "../../../../lib/api/attention";
 import { fetchStudentDetail } from "../../../../lib/api/students";
 import { ContactGuardianDialog } from "../../../../components/attention/contact-guardian-dialog";
-import { ContactActivityList } from "../../../../components/attention/contact-activity-list";
-import { useOfflineRuntime } from "../../../../offline/runtime/offline-runtime";
-import { SyncStatusBadge } from "../../../../offline/components/sync-status-badge";
+// `ContactActivityList` is also untracked local WIP (part of the same
+// unshipped offline/contact-logs tree) — its component file is not in
+// git, so the online-only build ships without it. The list still comes
+// back with the offline commit whenever that lands.
+// `useOfflineRuntime` + `SyncStatusBadge` live under `apps/web/src/offline/*`
+// which is untracked WIP (owner directive: no partial offline files enter
+// git under this hotfix). The offline-integrated version of this page is
+// preserved in git at commit 973ef7a — recover it later with
+// `git show 973ef7a:apps/web/src/app/\(app\)/attention/\[caseId\]/page.tsx >
+// apps/web/src/app/\(app\)/attention/\[caseId\]/page.tsx` once the offline
+// PWA tree is committable. Phase 15 additions (reasonSummary + evidence
+// rendering + empty states + honest labels) stay in on this online-only
+// path.
 
 const STATUS_LABEL: Record<string, string> = { NEW: "جديدة", IN_FOLLOWUP: "قيد المتابعة", CONTACTED: "تم التواصل", MONITORING: "تحت الملاحظة", CLOSED: "مغلقة" };
 const EVIDENCE_SOURCE_LABEL: Record<string, string> = { SESSION_RECORD: "سجل حصة", SESSION: "حصة" };
@@ -108,7 +118,6 @@ export default function AttentionCaseDetailPage() {
   const { caseId } = useParams<{ caseId: string }>();
   const { workspaceId, canWrite } = useWorkspace();
   const queryClient = useQueryClient();
-  const rt = useOfflineRuntime();
   const [contactOpen, setContactOpen] = useState(false);
 
   const caseQuery = useQuery({
@@ -131,21 +140,11 @@ export default function AttentionCaseDetailPage() {
 
   if (caseQuery.isLoading) return <LoadingRegion className="min-h-[60vh]" />;
   if (caseQuery.isError || !caseQuery.data) {
-    // Flag off: identical to today (full-page error, no offline concerns).
-    if (!rt.enabled) return <ErrorState onRetry={() => caseQuery.refetch()} />;
-    // Flag on: the case itself may be unreachable (offline reopen §D-Final-1
-    // test 6), but any locally-queued contact-log activity for THIS case is
-    // durable in Dexie and independent of this fetch — still show it, rather
-    // than hiding real un-synced work behind a blank error screen.
-    return (
-      <>
-        <PageHeader title="تفاصيل الحالة" description="تعذّر تحميل بيانات الحالة الآن." actions={<SyncStatusBadge />} />
-        <ErrorState onRetry={() => caseQuery.refetch()} />
-        <div className="mt-4">
-          <ContactActivityList attentionCaseId={caseId} />
-        </div>
-      </>
-    );
+    // Online-only: a fetch failure is a full-page error with a retry. The
+    // offline-aware fallback (which showed the still-durable local
+    // ContactActivityList) is preserved in git at 973ef7a — it comes back
+    // when the offline PWA tree is committed.
+    return <ErrorState onRetry={() => caseQuery.refetch()} />;
   }
 
   const item = caseQuery.data;
@@ -159,7 +158,6 @@ export default function AttentionCaseDetailPage() {
         description={`كود الطالب: ${item.student.studentCode}`}
         actions={
           <div className="flex items-center gap-3">
-            <SyncStatusBadge />
             <StatusDot tone={item.priority === "HIGH" ? "danger" : "warning"} label={item.priority === "HIGH" ? "عاجلة" : "متوسطة"} />
             <Badge tone="neutral">{STATUS_LABEL[item.status] ?? item.status}</Badge>
           </div>
@@ -211,7 +209,9 @@ export default function AttentionCaseDetailPage() {
           </div>
         ) : null}
 
-        <ContactActivityList attentionCaseId={item.id} />
+        {/* ContactActivityList lives with the offline WIP tree — see the
+            import comment. Restored automatically when that tree is
+            committed. */}
 
         {canWrite("CORE_OPERATIONS") ? (
           <SectionCard title="الإجراءات">
