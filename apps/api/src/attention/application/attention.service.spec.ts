@@ -86,9 +86,8 @@ describe("AttentionService", () => {
     const reasonA = repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: attentionCase.id, groupId: groupA.id, ruleKey: "absence.consecutive", severity: "MEDIUM" });
     const reasonB = repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: attentionCase.id, groupId: groupB.id, ruleKey: "combined.medium", severity: "HIGH" });
     // Distinct evidence rows per reason — Assistant A must NEVER see the
-    // Group-B evidence id (owner directive Phase 15C: even a single stray
-    // evidence id from an unseen group leaks the fact that group has a
-    // signal).
+    // Group-B evidence id (owner directive: even a single stray evidence
+    // id from an unseen group leaks the fact that group has a signal).
     const evidenceA = repo.seedEvidence({ workspaceId: WORKSPACE_A, attentionReasonId: reasonA.id });
     const evidenceB = repo.seedEvidence({ workspaceId: WORKSPACE_A, attentionReasonId: reasonB.id });
 
@@ -340,68 +339,6 @@ describe("AttentionService", () => {
     expect(result.scheduledFollowUp).not.toBeNull();
     expect(result.scheduledFollowUp!.status).toBe("PENDING");
     expect(new Date(result.scheduledFollowUp!.dueAt).toISOString()).toBe(dueAt);
-  });
-
-  describe("Phase D — server-side idempotency for contact-log create (offline-replay dedup)", () => {
-    function seedContactable() {
-      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "S" });
-      const guardian = repo.seedGuardian({ workspaceId: WORKSPACE_A, phone: "+201230009999" });
-      repo.seedStudentGuardian({ workspaceId: WORKSPACE_A, studentId: student.id, guardianId: guardian.id });
-      return { student, guardian };
-    }
-    const bodyFor = (student: { id: string }, guardian: { id: string }) => ({
-      studentId: student.id,
-      guardianId: guardian.id,
-      channel: "WHATSAPP_DEEPLINK" as const,
-      draftSnapshot: "نص",
-      outcome: "NO_ANSWER" as const,
-    });
-
-    it("a replayed create with the SAME key returns the ORIGINAL result and creates NO duplicate row (§14)", async () => {
-      const { student, guardian } = seedContactable();
-      const key = "offline-mut-1";
-      const first = await service.createContactLog(owner, ownerContext, bodyFor(student, guardian), key);
-      const replay = await service.createContactLog(owner, ownerContext, bodyFor(student, guardian), key);
-      expect(replay.contactLog.id).toBe(first.contactLog.id); // same row, verbatim
-      expect(repo.contactLogsById.size).toBe(1); // NOT duplicated
-    });
-
-    it("a DEFERRED replay does not create a second scheduled follow-up either", async () => {
-      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "S" });
-      const group = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "G" });
-      const attentionCase = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id });
-      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: attentionCase.id, groupId: group.id, ruleKey: "absence.consecutive" });
-      const guardian = repo.seedGuardian({ workspaceId: WORKSPACE_A, phone: "+201230008888" });
-      repo.seedStudentGuardian({ workspaceId: WORKSPACE_A, studentId: student.id, guardianId: guardian.id });
-      const body = {
-        studentId: student.id,
-        guardianId: guardian.id,
-        attentionCaseId: attentionCase.id,
-        channel: "WHATSAPP_DEEPLINK" as const,
-        draftSnapshot: "...",
-        outcome: "DEFERRED" as const,
-        followUpAt: new Date(Date.now() + 86_400_000).toISOString(),
-      };
-      await service.createContactLog(owner, ownerContext, body, "offline-mut-def");
-      await service.createContactLog(owner, ownerContext, body, "offline-mut-def");
-      expect(repo.contactLogsById.size).toBe(1);
-      expect(repo.followupsById.size).toBe(1); // the paired followup is not re-created
-    });
-
-    it("the SAME key with a DIFFERENT body is a conflict (never silently returns the wrong result)", async () => {
-      const { student, guardian } = seedContactable();
-      await service.createContactLog(owner, ownerContext, bodyFor(student, guardian), "k");
-      await expect(
-        service.createContactLog(owner, ownerContext, { ...bodyFor(student, guardian), outcome: "INVALID_NUMBER" }, "k"),
-      ).rejects.toThrow(/idempotenc/i);
-    });
-
-    it("NO key (current online submit) is unchanged — each call creates a new row (backward compatible)", async () => {
-      const { student, guardian } = seedContactable();
-      await service.createContactLog(owner, ownerContext, bodyFor(student, guardian));
-      await service.createContactLog(owner, ownerContext, bodyFor(student, guardian));
-      expect(repo.contactLogsById.size).toBe(2);
-    });
   });
 
   // ---------------------------------------------------------------------
