@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { attentionRuleLabel, formatEgpMinor } from "@academic-precision/contracts";
+import { attentionCardSubtitle, attentionRuleLabel, formatEgpMinor, type AttentionReasonDto } from "@academic-precision/contracts";
 import type { ActionCenterResponse } from "@academic-precision/contracts";
 import type {
   AttentionCaseListItem,
@@ -114,14 +114,47 @@ export class ActionCenterService {
       count: open.length,
       // Title explains WHO and WHY (student name + the case's primary reason),
       // never a generic "حالة انتباه" — e.g. "أحمد محمد — غياب متكرر".
+      // `subtitle` (optional, rolling-deploy safe) carries the concrete
+      // detail line derived from the primary reason's real evidence — e.g.
+      // "3 من آخر 5 حصص" — so the dashboard row explains WHY without the
+      // teacher having to open the case.
       items: open.map((i) => ({
         entityType: "attention_case",
         entityId: i.case.id,
         reason: `${i.studentName} — ${attentionRuleLabel(i.primaryRuleKey)}`,
         urgency: i.case.priority === "HIGH" ? ("HIGH" as const) : ("MEDIUM" as const),
         nextAction: i.case.status === "NEW" ? "ابدأ المتابعة" : "تواصل مع ولي الأمر",
+        subtitle: this.buildAttentionSubtitle(i),
       })),
     };
+  }
+
+  /**
+   * Build the optional card subtitle from a case's primary reason. Uses
+   * the shared `attentionCardSubtitle` in `@academic-precision/contracts`
+   * so the exact wording matches the case detail page (single source of
+   * truth). Returns undefined when there is no primary reason or the
+   * evidence does not contain a concrete count / date — in that case the
+   * teacher sees the main line alone (no fabricated subtitle).
+   */
+  private buildAttentionSubtitle(item: AttentionCaseListItem): string | undefined {
+    if (!item.primaryReason) return undefined;
+    const reasonDto: AttentionReasonDto = {
+      id: "primary", // synthetic id — the DTO is only used by attentionCardSubtitle, which does not read it
+      ruleKey: item.primaryReason.ruleKey,
+      severity: item.primaryReason.severity,
+      groupId: "", // ditto — not read by the helper
+      firstDetectedAt: item.primaryReason.firstDetectedAt.toISOString(),
+      lastDetectedAt: item.primaryReason.lastDetectedAt.toISOString(),
+      evidence: item.primaryReason.evidence.map((e, idx) => ({
+        id: `primary-${idx}`,
+        sourceType: e.sourceType as "SESSION_RECORD" | "SESSION",
+        sourceId: "",
+        observedAt: e.observedAt.toISOString(),
+        snapshot: e.snapshot,
+      })),
+    };
+    return attentionCardSubtitle(reasonDto);
   }
 
   private toFollowUpsSection(items: FollowupListItem[], now: Date) {

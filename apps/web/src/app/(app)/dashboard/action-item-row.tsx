@@ -15,9 +15,18 @@ export interface ActionItem {
   reason: string;
   urgency: "LOW" | "MEDIUM" | "HIGH";
   nextAction: string;
+  /**
+   * Optional single-line justification derived from a real signal on the
+   * server (see `attentionCardSubtitle` in `@academic-precision/contracts`
+   * + `toAttentionSection` in the API's action-center service). When
+   * present it explains WHY the row exists in concrete terms (e.g.
+   * "3 من آخر 5 حصص") — the teacher no longer has to open the case
+   * page to understand the cause. Optional for rolling-deploy safety.
+   */
+  subtitle?: string;
 }
 
-/** Every row explains WHY it exists (`reason`) and WHAT to do about it (`nextAction`) — never a bare "طالب يحتاج متابعة" without cause (§21). */
+/** Every row explains WHY it exists (`reason` + optional `subtitle`) and WHAT to do about it (`nextAction`) — never a bare "طالب يحتاج متابعة" without cause (§21). */
 export function ActionItemRow({ item }: { item: ActionItem }) {
   const urgency = URGENCY_LABEL[item.urgency] ?? URGENCY_LABEL.LOW!;
   return (
@@ -30,7 +39,10 @@ export function ActionItemRow({ item }: { item: ActionItem }) {
       </Badge>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="text-sm font-medium text-text-primary">{item.reason}</p>
-        <p className="text-xs text-text-secondary">{item.nextAction}</p>
+        {item.subtitle ? (
+          <p className="text-xs leading-relaxed text-text-secondary">{item.subtitle}</p>
+        ) : null}
+        <p className="text-xs text-text-tertiary">{item.nextAction}</p>
       </div>
       {/* ChevronLeft (‹) already points the correct "forward/detail" direction in an RTL document — no rotation needed. */}
       <ChevronLeft className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden />

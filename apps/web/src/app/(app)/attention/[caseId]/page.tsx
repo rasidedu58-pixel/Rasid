@@ -5,8 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, MessageCircle } from "lucide-react";
-import { attentionRuleLabel } from "@academic-precision/contracts";
-import type { AttentionEvidenceDto } from "@academic-precision/contracts";
+import { attentionReasonSummary, attentionRuleLabel } from "@academic-precision/contracts";
+import type { AttentionEvidenceDto, AttentionReasonDto } from "@academic-precision/contracts";
 import { Badge, Button, Card, ErrorState, LoadingRegion, SectionCard, StatusDot, cn, formatDate, formatRelativeToNow, toast } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { useWorkspace } from "../../../../lib/workspace-provider";
@@ -14,16 +14,53 @@ import { qk } from "../../../../lib/query-keys";
 import { fetchAttentionCase, startFollowup, markMonitoring, closeAttentionCase } from "../../../../lib/api/attention";
 import { fetchStudentDetail } from "../../../../lib/api/students";
 import { ContactGuardianDialog } from "../../../../components/attention/contact-guardian-dialog";
+import { ContactActivityList } from "../../../../components/attention/contact-activity-list";
+import { useOfflineRuntime } from "../../../../offline/runtime/offline-runtime";
+import { SyncStatusBadge } from "../../../../offline/components/sync-status-badge";
 
 const STATUS_LABEL: Record<string, string> = { NEW: "جديدة", IN_FOLLOWUP: "قيد المتابعة", CONTACTED: "تم التواصل", MONITORING: "تحت الملاحظة", CLOSED: "مغلقة" };
 const EVIDENCE_SOURCE_LABEL: Record<string, string> = { SESSION_RECORD: "سجل حصة", SESSION: "حصة" };
+const ATTENDANCE_STATUS_LABEL: Record<string, string> = { PRESENT: "حاضر", ABSENT: "غياب", LATE: "تأخير" };
+const HOMEWORK_STATUS_LABEL: Record<string, string> = { DONE: "أدّى", PARTIAL: "أدى جزئيًا", NOT_DONE: "لم يؤدِ", NO_HOMEWORK: "لا يوجد واجب" };
 
 /**
- * Progressive disclosure for a reason's evidence (§2B). The evidence
- * `snapshot` is an untyped freeform record, so we deliberately surface only
- * the honest, stable fields — the source kind and when it was observed —
- * rather than dumping raw internal snapshot keys. Collapsed by default to
- * keep the reasons list scan-friendly.
+ * Human-safe description of a single evidence row from its `snapshot`.
+ * The snapshot is an untyped freeform record (see `rule-engine.ts`) so we
+ * ONLY surface a whitelist of stable fields — attendance / homework
+ * status, or an exam score paired with its threshold. NEVER dumps raw
+ * JSON to the teacher, and NEVER invents a description if the snapshot
+ * doesn't carry a recognised signal (fall back to the source-type label
+ * alone in that case).
+ */
+function evidenceLine(e: AttentionEvidenceDto): string {
+  const snap = (e.snapshot ?? {}) as {
+    attendanceStatus?: string;
+    homeworkStatus?: string;
+    examScore?: number;
+    threshold?: number;
+  };
+  if (snap.attendanceStatus) {
+    const label = ATTENDANCE_STATUS_LABEL[snap.attendanceStatus] ?? snap.attendanceStatus;
+    return `الحضور: ${label}`;
+  }
+  if (snap.homeworkStatus) {
+    const label = HOMEWORK_STATUS_LABEL[snap.homeworkStatus] ?? snap.homeworkStatus;
+    return `الواجب: ${label}`;
+  }
+  if (typeof snap.examScore === "number") {
+    return typeof snap.threshold === "number"
+      ? `درجة الامتحان: ${snap.examScore} (الحد الأدنى ${snap.threshold})`
+      : `درجة الامتحان: ${snap.examScore}`;
+  }
+  return EVIDENCE_SOURCE_LABEL[e.sourceType] ?? e.sourceType;
+}
+
+/**
+ * Progressive disclosure for a reason's evidence. Renders the honest
+ * fields from each evidence's `snapshot` via `evidenceLine`, alongside
+ * the source kind and observation date. Collapsed by default. If the
+ * reason has zero evidence rows, the caller renders an explicit honest
+ * empty state instead of this collapsible.
  */
 function ReasonEvidence({ evidence }: { evidence: AttentionEvidenceDto[] }) {
   const [open, setOpen] = useState(false);
@@ -42,9 +79,12 @@ function ReasonEvidence({ evidence }: { evidence: AttentionEvidenceDto[] }) {
       {open ? (
         <ul className="mt-2 flex flex-col gap-1.5 border-s-2 border-border ps-3">
           {evidence.map((e) => (
-            <li key={e.id} className="flex items-center justify-between gap-2 text-xs text-text-secondary">
-              <span>{EVIDENCE_SOURCE_LABEL[e.sourceType] ?? e.sourceType}</span>
-              <span className="tabular-nums text-text-tertiary">{formatDate(e.observedAt)}</span>
+            <li key={e.id} className="flex items-start justify-between gap-2 text-xs text-text-secondary">
+              <span className="min-w-0">
+                <span className="block">{evidenceLine(e)}</span>
+                <span className="mt-0.5 block text-[11px] text-text-tertiary">{EVIDENCE_SOURCE_LABEL[e.sourceType] ?? e.sourceType}</span>
+              </span>
+              <span className="shrink-0 tabular-nums text-text-tertiary">{formatDate(e.observedAt)}</span>
             </li>
           ))}
         </ul>
@@ -53,10 +93,22 @@ function ReasonEvidence({ evidence }: { evidence: AttentionEvidenceDto[] }) {
   );
 }
 
+/**
+ * Honest empty state for a reason that has no evidence rows attached —
+ * happens for legacy rows before the rule engine started writing evidence
+ * atomically. Never fabricates a signal.
+ */
+function ReasonEmpty() {
+  return (
+    <p className="mt-2 text-xs text-text-tertiary">لا توجد أدلة تفصيلية مسجّلة لهذا السبب.</p>
+  );
+}
+
 export default function AttentionCaseDetailPage() {
   const { caseId } = useParams<{ caseId: string }>();
   const { workspaceId, canWrite } = useWorkspace();
   const queryClient = useQueryClient();
+  const rt = useOfflineRuntime();
   const [contactOpen, setContactOpen] = useState(false);
 
   const caseQuery = useQuery({
@@ -78,7 +130,23 @@ export default function AttentionCaseDetailPage() {
   const closeMutation = useMutation({ mutationFn: (v: number) => closeAttentionCase(workspaceId!, caseId, { version: v }), ...transitionOptions });
 
   if (caseQuery.isLoading) return <LoadingRegion className="min-h-[60vh]" />;
-  if (caseQuery.isError || !caseQuery.data) return <ErrorState onRetry={() => caseQuery.refetch()} />;
+  if (caseQuery.isError || !caseQuery.data) {
+    // Flag off: identical to today (full-page error, no offline concerns).
+    if (!rt.enabled) return <ErrorState onRetry={() => caseQuery.refetch()} />;
+    // Flag on: the case itself may be unreachable (offline reopen §D-Final-1
+    // test 6), but any locally-queued contact-log activity for THIS case is
+    // durable in Dexie and independent of this fetch — still show it, rather
+    // than hiding real un-synced work behind a blank error screen.
+    return (
+      <>
+        <PageHeader title="تفاصيل الحالة" description="تعذّر تحميل بيانات الحالة الآن." actions={<SyncStatusBadge />} />
+        <ErrorState onRetry={() => caseQuery.refetch()} />
+        <div className="mt-4">
+          <ContactActivityList attentionCaseId={caseId} />
+        </div>
+      </>
+    );
+  }
 
   const item = caseQuery.data;
   const primaryGuardian = studentQuery.data?.guardians.find((g) => g.isPrimary) ?? studentQuery.data?.guardians[0];
@@ -91,6 +159,7 @@ export default function AttentionCaseDetailPage() {
         description={`كود الطالب: ${item.student.studentCode}`}
         actions={
           <div className="flex items-center gap-3">
+            <SyncStatusBadge />
             <StatusDot tone={item.priority === "HIGH" ? "danger" : "warning"} label={item.priority === "HIGH" ? "عاجلة" : "متوسطة"} />
             <Badge tone="neutral">{STATUS_LABEL[item.status] ?? item.status}</Badge>
           </div>
@@ -98,21 +167,31 @@ export default function AttentionCaseDetailPage() {
       />
 
       <div className="flex flex-col gap-4">
-        <SectionCard title="أسباب ظهور الحالة" description="كل سبب مبني على قاعدة محددة وأدلة فعلية — لا تخمين.">
-          <div className="flex flex-col gap-3">
-            {item.reasons.map((reason) => (
-              <Card key={reason.id} className={`border-s-2 p-3 ${reason.severity === "HIGH" ? "border-s-danger" : "border-s-warning"}`}>
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-text-primary">{attentionRuleLabel(reason.ruleKey)}</p>
-                  <Badge tone={reason.severity === "HIGH" ? "danger" : "warning"}>{reason.severity === "HIGH" ? "عالية" : "متوسطة"}</Badge>
-                </div>
-                <p className="mt-1 text-xs text-text-tertiary">
-                  من {formatDate(reason.firstDetectedAt)} — {reason.evidence.length} دليل مسجّل
-                </p>
-                <ReasonEvidence evidence={reason.evidence} />
-              </Card>
-            ))}
-          </div>
+        <SectionCard title="سبب المتابعة" description="كل سبب مبني على قاعدة محددة وأدلة فعلية — لا تخمين.">
+          {item.reasons.length === 0 ? (
+            <p className="text-sm text-text-secondary">
+              لم يُسجَّل سبب تفصيلي لهذه الحالة بعد.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {item.reasons.map((reason: AttentionReasonDto) => (
+                <Card key={reason.id} className={`border-s-2 p-3 ${reason.severity === "HIGH" ? "border-s-danger" : "border-s-warning"}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-text-primary">{attentionRuleLabel(reason.ruleKey)}</p>
+                    <Badge tone={reason.severity === "HIGH" ? "danger" : "warning"}>{reason.severity === "HIGH" ? "عالية" : "متوسطة"}</Badge>
+                  </div>
+                  {/* Human summary sentence — count derived from real snapshot
+                      fields (never a raw `evidence.length` heuristic), with
+                      the "آخر رصد" date attached. */}
+                  <p className="mt-1 text-sm leading-relaxed text-text-secondary">{attentionReasonSummary(reason)}</p>
+                  <p className="mt-1 text-xs text-text-tertiary">
+                    فُتحت منذ {formatDate(reason.firstDetectedAt)}
+                  </p>
+                  {reason.evidence.length === 0 ? <ReasonEmpty /> : <ReasonEvidence evidence={reason.evidence} />}
+                </Card>
+              ))}
+            </div>
+          )}
         </SectionCard>
 
         {item.nextFollowUp || item.lastContact ? (
@@ -131,6 +210,8 @@ export default function AttentionCaseDetailPage() {
             ) : null}
           </div>
         ) : null}
+
+        <ContactActivityList attentionCaseId={item.id} />
 
         {canWrite("CORE_OPERATIONS") ? (
           <SectionCard title="الإجراءات">

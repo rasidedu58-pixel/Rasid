@@ -236,5 +236,101 @@ describe("StudentsService", () => {
       const results = await service.listStudents(owner, ownerContext, { q: created.student.studentCode, searchBy: "code" });
       expect(results.items.map((s) => s.id)).toContain(created.student.id);
     });
+
+    it("auto-detects a 4-5-digit numeric query as CODE (never routes it to phone)", async () => {
+      // Two students in the same workspace get sequential numeric codes.
+      const first = await service.createStudent(owner, ownerContext, { name: "طالب ١" }, null);
+      const second = await service.createStudent(owner, ownerContext, { name: "طالب ٢" }, null);
+      expect(first.student.studentCode).toBe("00001");
+      expect(second.student.studentCode).toBe("00002");
+
+      // Auto mode (no `searchBy`) — plain digits get routed to code.
+      const byFull = await service.listStudents(owner, ownerContext, { q: "00002" });
+      expect(byFull.items.map((s) => s.id)).toEqual([second.student.id]);
+    });
+
+    it("accepts partial numeric input by left-padding to 5 digits (00042 for '42')", async () => {
+      // Seed 41 students so the next new student gets code 00042.
+      for (let i = 0; i < 41; i += 1) {
+        await service.createStudent(owner, ownerContext, { name: `طالب ${i}` }, null);
+      }
+      const target = await service.createStudent(owner, ownerContext, { name: "الهدف" }, null);
+      expect(target.student.studentCode).toBe("00042");
+
+      const results = await service.listStudents(owner, ownerContext, { q: "42" });
+      expect(results.items.map((s) => s.id)).toContain(target.student.id);
+    });
+
+    it("Arabic-Indic digits (٠٠٠٤٢) resolve to the same student as Latin (00042)", async () => {
+      for (let i = 0; i < 41; i += 1) {
+        await service.createStudent(owner, ownerContext, { name: `س ${i}` }, null);
+      }
+      const target = await service.createStudent(owner, ownerContext, { name: "هدف" }, null);
+      expect(target.student.studentCode).toBe("00042");
+
+      const arabic = await service.listStudents(owner, ownerContext, { q: "٤٢" });
+      expect(arabic.items.map((s) => s.id)).toContain(target.student.id);
+    });
+
+    it("preserves legacy AP-XXXXXX search (case-insensitive) alongside the new numeric codes", async () => {
+      const legacy = repo.seedStudent({ workspaceId: WORKSPACE_A, studentCode: "AP-ABC123", name: "قديم" });
+      const foundExact = await service.listStudents(owner, ownerContext, { q: "AP-ABC123" });
+      const foundLower = await service.listStudents(owner, ownerContext, { q: "ap-abc123" });
+      expect(foundExact.items.map((s) => s.id)).toContain(legacy.id);
+      expect(foundLower.items.map((s) => s.id)).toContain(legacy.id);
+    });
+
+    it("still routes long digit strings to guardianPhone (7+ digits) — new numeric code search MUST NOT break phone lookup", async () => {
+      // A 5-digit input goes to code; 6+ digits go to phone.
+      const created = await service.createStudent(
+        owner,
+        ownerContext,
+        {
+          name: "طالب برقم ولي أمر",
+          guardians: [{ name: "محمد", phone: "+201001234567", relationship: "FATHER", isPrimary: true }],
+        },
+        null,
+      );
+      // Query mirrors the stored normalized value (`+2010…` → `2010…`) — the
+      // point of this test is that the 12-digit phone still routes to phone
+      // mode after the new numeric-code heuristic; the underlying in-memory
+      // search is exact-match, and the phone-vs-code routing is what we're
+      // pinning here.
+      const results = await service.listStudents(owner, ownerContext, { q: "+201001234567" });
+      expect(results.items.map((s) => s.id)).toContain(created.student.id);
+    });
+
+    it("sequential codes are workspace-scoped: workspace B starts back at 00001 regardless of A's counter", async () => {
+      const otherOwner: VerifiedSupabaseToken = { id: "u-owner-b", email: "b@example.com" };
+      const otherMembership = teamRepo.seedMembership({ workspaceId: WORKSPACE_B, userId: otherOwner.id, roleLabel: "OWNER" });
+      const otherContext: WorkspaceContext = { workspaceId: WORKSPACE_B, membership: otherMembership };
+
+      // 3 students in A → codes 00001..00003.
+      for (let i = 0; i < 3; i += 1) await service.createStudent(owner, ownerContext, { name: `A${i}` }, null);
+      // First student in B → 00001 (independent counter).
+      const firstInB = await service.createStudent(otherOwner, otherContext, { name: "B1" }, null);
+      expect(firstInB.student.studentCode).toBe("00001");
+    });
+
+    it("legacy AP-XXXXXX rows do NOT interfere with the next numeric sequence (regex filter skips them)", async () => {
+      // Two legacy rows seeded, plus a real new student.
+      repo.seedStudent({ workspaceId: WORKSPACE_A, studentCode: "AP-OLD001", name: "قديم ١" });
+      repo.seedStudent({ workspaceId: WORKSPACE_A, studentCode: "AP-OLD002", name: "قديم ٢" });
+      const first = await service.createStudent(owner, ownerContext, { name: "جديد" }, null);
+      expect(first.student.studentCode).toBe("00001");
+    });
+
+    it("unexpected non-5-digit numeric legacy codes are IGNORED by the counter (tighter regex ^\\d{5}$)", async () => {
+      // Hypothetical stray rows a script once seeded: pure-digit codes
+      // that are NOT 5 chars. The tightened regex ^\d{5}$ (mirrored on
+      // both the real DB path and the in-memory fixture) skips them, so
+      // the next numeric-code generation still starts at 00001 rather
+      // than colliding with or being confused by them.
+      repo.seedStudent({ workspaceId: WORKSPACE_A, studentCode: "123", name: "غريب ١" });
+      repo.seedStudent({ workspaceId: WORKSPACE_A, studentCode: "9999999", name: "غريب ٢" });
+      const first = await service.createStudent(owner, ownerContext, { name: "جديد" }, null);
+      // Counter starts at 00001 — the 3-digit and 7-digit rows are skipped.
+      expect(first.student.studentCode).toBe("00001");
+    });
   });
 });

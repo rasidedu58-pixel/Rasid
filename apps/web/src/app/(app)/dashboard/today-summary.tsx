@@ -6,6 +6,15 @@ export interface SummaryCell {
   value: string;
   sub?: string;
   tone?: "default" | "success" | "warning" | "danger" | "brand";
+  /**
+   * Optional deep-link target for this cell. Populated ONLY when there is
+   * a real filtered surface for the metric (e.g. `/attention?tab=followups`
+   * for follow-ups); left undefined for metrics whose destination does
+   * not exist as a supported filter — the cell then renders as a plain
+   * non-interactive tile rather than a link that lies about landing you
+   * somewhere useful.
+   */
+  href?: string;
 }
 
 /**
@@ -23,7 +32,7 @@ export function TodaySummary({ cells }: { cells: SummaryCell[] }) {
       <h2 className="mb-3 text-sm font-semibold text-text-secondary">ملخص اليوم</h2>
       <MetricStrip columns={columns}>
         {cells.map((c) => (
-          <MetricCell key={c.key} label={c.label} value={c.value} sub={c.sub} tone={c.tone} />
+          <MetricCell key={c.key} label={c.label} value={c.value} sub={c.sub} tone={c.tone} href={c.href} />
         ))}
       </MetricStrip>
     </section>

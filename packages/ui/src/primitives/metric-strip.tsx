@@ -28,6 +28,13 @@ export function MetricStrip({ children, className, columns = 4 }: { children: Re
  * numbers), and an optional sub-line. `tone` tints only the value — reserved
  * for a genuinely semantic reading (e.g. an outstanding balance in danger),
  * never decoration.
+ *
+ * Pass `href` (a Next.js route or plain URL) to make the whole cell a
+ * click target that navigates to the filtered surface — used by the
+ * dashboard's Today Summary so «متابعات مستحقة» opens the follow-ups
+ * tab directly. When `href` is omitted the cell renders as a plain
+ * `div` (never a fake button), so the strip does NOT invite clicks
+ * for metrics that lack a real destination.
  */
 export function MetricCell({
   label,
@@ -35,12 +42,14 @@ export function MetricCell({
   sub,
   tone = "default",
   icon,
+  href,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   tone?: "default" | "success" | "warning" | "danger" | "brand";
   icon?: ReactNode;
+  href?: string;
 }) {
   const valueTone: Record<NonNullable<typeof tone>, string> = {
     default: "text-text-primary",
@@ -49,14 +58,25 @@ export function MetricCell({
     danger: "text-danger",
     brand: "text-brand",
   };
-  return (
-    <div className="flex flex-col gap-1 px-4 py-3">
+  const body = (
+    <>
       <span className="flex items-center gap-1.5 text-xs font-medium text-text-tertiary">
         {icon}
         {label}
       </span>
       <span className={cn("text-lg font-semibold leading-none tabular-nums", valueTone[tone])}>{value}</span>
       {sub ? <span className="text-xs text-text-secondary">{sub}</span> : null}
-    </div>
+    </>
   );
+  if (href) {
+    return (
+      <a
+        href={href}
+        className="focus-ring flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-brand-subtle/30"
+      >
+        {body}
+      </a>
+    );
+  }
+  return <div className="flex flex-col gap-1 px-4 py-3">{body}</div>;
 }

@@ -41,42 +41,91 @@ const REVOKED_STATUS = "REVOKED";
 // Student code generation
 // ---------------------------------------------------------------------------
 
-const STUDENT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I — avoids visual ambiguity
-const STUDENT_CODE_SUFFIX_LENGTH = 6;
-const STUDENT_CODE_MAX_ATTEMPTS = 10;
+/**
+ * New student codes are 5-digit zero-padded strings ("NNNNN"), workspace-
+ * scoped. This gives 99,999 codes per workspace — a ~20× safety margin
+ * over the largest CUSTOM plan's active-student cap (~5,000), even
+ * assuming perpetual code non-reuse (deleted students never free their
+ * code — kept intentionally so printed / exported records stay unique
+ * across time).
+ *
+ * Format decision (owner-approved Phase 4 UX task):
+ *   • digits only, no letters, no dashes — trivial to read, dictate,
+ *     and search on any keyboard.
+ *   • zero-padded fixed length so the code is always exactly 5 chars,
+ *     stored as `text` (never coerced to `number`, which would eat the
+ *     leading zeros — that's why every field on the wire is a string).
+ *
+ * The legacy `AP-XXXXXX` shape produced by earlier releases is NOT
+ * mass-migrated — existing rows keep their codes, and both the search
+ * heuristic (`inferSearchMode` in the students service) and the DB's
+ * free-form `text` column continue to accept them side by side.
+ */
+const STUDENT_CODE_DIGITS = 5;
+const STUDENT_CODE_MAX_SEQUENCE = 10 ** STUDENT_CODE_DIGITS - 1; // 99999
 
-function randomStudentCodeSuffix(): string {
-  let out = "";
-  for (let i = 0; i < STUDENT_CODE_SUFFIX_LENGTH; i += 1) {
-    out += STUDENT_CODE_ALPHABET[Math.floor(Math.random() * STUDENT_CODE_ALPHABET.length)];
-  }
-  return out;
+/**
+ * Postgres regex anchored on EXACTLY 5 digits — the shape the new
+ * generator emits. Tightening this from `^[0-9]+$` to `^[0-9]{5}$` was a
+ * deliberate safety-check step: a stray legacy row with a non-5-digit
+ * pure-numeric code (unknown to us, hypothetical, but possible if a
+ * script ever seeded such a value) is now IGNORED by the counter
+ * instead of contributing to the next-seq calculation. The DB `UNIQUE`
+ * constraint on `(workspace_id, student_code)` is the last-mile safety
+ * net either way.
+ */
+const NUMERIC_CODE_REGEX_PG = `^[0-9]{${STUDENT_CODE_DIGITS}}$`;
+
+function formatNumericStudentCode(sequence: number): string {
+  return String(sequence).padStart(STUDENT_CODE_DIGITS, "0");
 }
 
 /**
- * Generates a stable, human-facing, workspace-scoped student code:
- * `AP-XXXXXX` where `XXXXXX` is 6 random characters from a 33-symbol
- * alphabet excluding visually-ambiguous characters (0/O, 1/I). This gives
- * ~33^6 (~1.3 billion) combinations per workspace, checked against the
- * `UNIQUE(workspace_id, student_code)` constraint with a small retry loop —
- * collision probability is negligible for any realistic single workspace's
- * student count, and the retry loop makes the (tiny) residual risk a
- * non-issue rather than a hard failure. Not sequential — sequential codes
- * would require either a per-workspace counter table (extra write
- * contention/complexity not justified for a display code) or leaking
- * enrollment-order information the product doesn't need to expose.
+ * Exhaustion error — thrown ONLY when a workspace has ever assigned every
+ * numeric code from `00001` through `99999`. Callers surface this as a
+ * platform-side event (contact support / raise limits), not a random 500.
+ */
+export class StudentCodeSpaceExhaustedError extends Error {
+  readonly workspaceId: string;
+  constructor(workspaceId: string) {
+    super(`Workspace ${workspaceId} has exhausted the numeric student-code space (max ${STUDENT_CODE_MAX_SEQUENCE}).`);
+    this.name = "StudentCodeSpaceExhaustedError";
+    this.workspaceId = workspaceId;
+  }
+}
+
+/**
+ * Generate the next numeric student code for a workspace, serialised on
+ * a transaction-scoped advisory lock so two concurrent creates in the
+ * same workspace can never pick the same sequence:
+ *
+ *   1. `pg_advisory_xact_lock(hashtext(workspace_id))` — releases at
+ *      commit/rollback automatically; two callers on the same workspace
+ *      queue on this lock (no external ROW LOCK on `students` needed).
+ *   2. `SELECT MAX(student_code::int) + 1 FROM students WHERE
+ *       workspace_id = :ws AND student_code ~ '^[0-9]+$'` — only rows
+ *       with an entirely-numeric legacy-safe code contribute; legacy
+ *       `AP-XXXXXX` rows are skipped by the regex and never miscast.
+ *   3. Return the zero-padded 5-digit string.
+ *
+ * Called INSIDE the same transaction that inserts the student
+ * (`insertStudentWithUniqueCode` below), so the lock is held from the
+ * moment the code is picked through the moment the row is written —
+ * the classic advisory-lock idiom.
  */
 export async function generateUniqueStudentCode(db: Db, workspaceId: string): Promise<string> {
-  for (let attempt = 0; attempt < STUDENT_CODE_MAX_ATTEMPTS; attempt += 1) {
-    const candidate = `AP-${randomStudentCodeSuffix()}`;
-    const existing = await db
-      .select({ id: students.id })
-      .from(students)
-      .where(and(eq(students.workspaceId, workspaceId), eq(students.studentCode, candidate)))
-      .limit(1);
-    if (existing.length === 0) return candidate;
+  await db.execute(rawSql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
+  const [row] = await db.execute<{ next_seq: number }>(rawSql`
+    SELECT COALESCE(MAX(student_code::int), 0) + 1 AS next_seq
+    FROM students
+    WHERE workspace_id = ${workspaceId}
+      AND student_code ~ ${NUMERIC_CODE_REGEX_PG}
+  `);
+  const nextSeq = Number(row?.next_seq ?? 1);
+  if (!Number.isFinite(nextSeq) || nextSeq > STUDENT_CODE_MAX_SEQUENCE) {
+    throw new StudentCodeSpaceExhaustedError(workspaceId);
   }
-  throw new Error("Failed to generate a unique student_code after multiple attempts.");
+  return formatNumericStudentCode(nextSeq);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,35 +158,61 @@ export async function insertStudent(db: Db, input: InsertStudentInput): Promise<
 }
 
 /**
- * Concurrency-safe student creation. Generates a random display code and
- * inserts with ON CONFLICT DO NOTHING on `students_workspace_student_code_unique`;
- * on the (astronomically rare) event that a simultaneous insert grabbed the
- * same code between generation and write, the insert returns no row → we pick
- * a new code and retry, so a code collision never surfaces as a 500. This does
- * NOT dedup students by name/phone: a student has no business identity key
- * (identical names are real, distinct people, and auto-merge is deliberately
- * prohibited), so two concurrent "create <same name>" requests correctly
- * produce two distinct students — the guarantee here is "no false failure",
- * not "one row".
+ * Concurrency-safe student creation.
+ *
+ * `generateUniqueStudentCode` runs INSIDE the same transaction as the
+ * insert, so the advisory lock (`pg_advisory_xact_lock(hashtext(ws))`)
+ * covers both the "pick next sequence" read AND the row write —
+ * two concurrent creates on the same workspace serialise on the lock,
+ * each seeing the other's committed row before assigning their own
+ * code, and the DB's `UNIQUE(workspace_id, student_code)` constraint
+ * is the final belt-and-braces defense.
+ *
+ * `db.transaction` composes cleanly when the caller ALREADY holds a
+ * transaction (drizzle's own idempotency): a nested `db.transaction`
+ * inside `withRuntimeContext` becomes a savepoint on the same
+ * connection, which is exactly what we want here — the advisory lock
+ * stays tied to the outer transaction's lifetime and releases at the
+ * end of the whole request.
+ *
+ * Belt-and-braces: even under the advisory lock, we still use
+ * `.onConflictDoNothing(...)` on the DB unique constraint and retry
+ * once if the insert produced no row — the theoretical scenario is a
+ * pool boundary where two callers somehow bypass the lock (should
+ * not happen, but if it did, we recover instead of surfacing a 500).
+ *
+ * This does NOT dedup students by name/phone: a student has no
+ * business identity key (identical names are real, distinct people,
+ * and auto-merge is deliberately prohibited), so two concurrent
+ * "create <same name>" requests correctly produce two distinct
+ * students.
  */
 export async function insertStudentWithUniqueCode(
   db: Db,
   input: { workspaceId: string; name: string; searchNameNormalized: string },
 ): Promise<StudentRow> {
-  for (let attempt = 0; attempt < STUDENT_CODE_MAX_ATTEMPTS; attempt += 1) {
-    const [inserted] = await db
-      .insert(students)
-      .values({
-        workspaceId: input.workspaceId,
-        studentCode: `AP-${randomStudentCodeSuffix()}`,
-        name: input.name,
-        searchNameNormalized: input.searchNameNormalized,
-      })
-      .onConflictDoNothing({ target: [students.workspaceId, students.studentCode] })
-      .returning();
-    if (inserted) return inserted;
-  }
-  throw new Error("Failed to insert a student with a unique student_code after multiple attempts.");
+  return db.transaction(async (tx) => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const code = await generateUniqueStudentCode(tx, input.workspaceId);
+      const [inserted] = await tx
+        .insert(students)
+        .values({
+          workspaceId: input.workspaceId,
+          studentCode: code,
+          name: input.name,
+          searchNameNormalized: input.searchNameNormalized,
+        })
+        .onConflictDoNothing({ target: [students.workspaceId, students.studentCode] })
+        .returning();
+      if (inserted) return inserted;
+      // No row = a concurrent insert grabbed this exact code between our
+      // lock-scoped read and the write (extremely unlikely under the
+      // advisory lock, but the retry costs nothing). Re-generate and try
+      // once more; a second miss surfaces as an explicit error rather
+      // than a silent infinite loop.
+    }
+    throw new Error("Failed to insert a student with a unique student_code after 2 attempts.");
+  });
 }
 
 export interface UpdateStudentInput {

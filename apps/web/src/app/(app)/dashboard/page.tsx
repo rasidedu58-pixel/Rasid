@@ -113,6 +113,17 @@ export default function DashboardPage() {
         : "يومك هادئ — لا توجد حالات تحتاج تدخلك.";
 
   // ── Today strip (real cells only) ──
+  //
+  // Each cell only carries an `href` when there is a REAL filtered
+  // destination that would surface exactly this metric's items. Owner
+  // directive (dashboard reorder): «لا تضف روابط بفلاتر غير مدعومة».
+  //   - `sessions` / `urgent` — no dedicated filtered page exists; the
+  //     items themselves are already in the queue below on this same
+  //     dashboard, so a link would just point back into the current
+  //     screen. Left as a plain non-interactive tile.
+  //   - `followups` → the follow-ups tab (same route the individual
+  //     action-item rows use).
+  //   - `collection` → the finance page (same route as its action items).
   const cells: SummaryCell[] = [];
   if (canGroups && todayQuery.data) {
     const total = todayQuery.data.items.length;
@@ -122,8 +133,8 @@ export default function DashboardPage() {
     }
   }
   cells.push({ key: "urgent", label: "يحتاج إجراء الآن", value: arNum(urgent.length), tone: urgent.length > 0 ? "danger" : "default" });
-  if (data.followUpsDue) cells.push({ key: "followups", label: "متابعات مستحقة", value: arNum(data.followUpsDue.count) });
-  if (data.collection) cells.push({ key: "collection", label: "تحصيل متأخر", value: arNum(data.collection.count), tone: data.collection.count > 0 ? "warning" : "default" });
+  if (data.followUpsDue) cells.push({ key: "followups", label: "متابعات مستحقة", value: arNum(data.followUpsDue.count), href: "/attention?tab=followups" });
+  if (data.collection) cells.push({ key: "collection", label: "تحصيل متأخر", value: arNum(data.collection.count), tone: data.collection.count > 0 ? "warning" : "default", href: "/finance" });
 
   const container: Variants = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
   const item: Variants = reduce
@@ -151,6 +162,19 @@ export default function DashboardPage() {
       ) : null}
 
       <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col gap-6">
+        {/*
+          Owner directive (Phase 15C dashboard reorder): «ملخص اليوم» must
+          be one of the first things the teacher sees, not buried after
+          the decision queue. Placed here — directly after the greeting +
+          subscription banner — before Guided Setup / Next Session / the
+          queue itself.
+        */}
+        {cells.length > 0 ? (
+          <motion.div variants={item}>
+            <TodaySummary cells={cells} />
+          </motion.div>
+        ) : null}
+
         <motion.div variants={item}>
           <GuidedSetupSummary />
         </motion.div>
@@ -182,12 +206,6 @@ export default function DashboardPage() {
             </section>
           )}
         </motion.div>
-
-        {cells.length > 0 ? (
-          <motion.div variants={item}>
-            <TodaySummary cells={cells} />
-          </motion.div>
-        ) : null}
       </motion.div>
     </>
   );

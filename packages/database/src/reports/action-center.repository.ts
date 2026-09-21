@@ -18,7 +18,7 @@ import { workspaces } from "../schema/workspaces";
 import { deriveEligibleEnrollmentIds } from "../session-mode/roster";
 import { deriveMissingRecords } from "../session-mode/missing-records";
 import type { Db } from "../repositories/identity.repository";
-import { listAttentionCasesForWorkspace, listAttentionReasonsForCases, listScheduledFollowups, type AttentionCaseRow, type AttentionReasonRow, type ScheduledFollowupRow } from "../repositories/attention.repository";
+import { listAttentionCasesForWorkspace, listAttentionEvidenceForReasons, listAttentionReasonsForCases, listScheduledFollowups, type AttentionCaseRow, type AttentionEvidenceRow, type AttentionReasonRow, type ScheduledFollowupRow } from "../repositories/attention.repository";
 import { listCollectionQueue, type CollectionQueueRow } from "../repositories/finance.repository";
 import { findSubscriptionByWorkspaceId, type SubscriptionRow } from "../repositories/subscriptions.repository";
 
@@ -380,12 +380,26 @@ export interface ActionCenterDataParams {
   nextSession: { visibleGroupIds: "ALL" | string[] };
 }
 
-/** An attention case enriched with the student name + its primary (highest-severity)
- *  reason rule key, so the action-center item title can state WHO and WHY. */
+/**
+ * An attention case enriched with the student name + its primary
+ * (highest-severity) reason + the same reason's evidence snapshots, so
+ * the action-center row can say WHO (student) and WHY (rule label +
+ * concrete detail like "3 من آخر 5 حصص"). `primaryReason` is null only
+ * for a case that has zero reasons — a defensive placeholder for
+ * legacy rows before the rule engine started attaching them.
+ */
+export interface AttentionCasePrimaryReason {
+  ruleKey: string;
+  severity: "MEDIUM" | "HIGH";
+  firstDetectedAt: Date;
+  lastDetectedAt: Date;
+  evidence: Array<{ observedAt: Date; sourceType: string; snapshot: Record<string, unknown> }>;
+}
 export interface AttentionCaseListItem {
   case: AttentionCaseRow;
   studentName: string;
   primaryRuleKey: string | null;
+  primaryReason: AttentionCasePrimaryReason | null;
 }
 
 /** A due follow-up enriched with the student name, so its item names WHO. */
@@ -452,10 +466,60 @@ export async function loadActionCenterData(db: Db, p: ActionCenterDataParams): P
     list.push(r);
     reasonsByCase.set(r.attentionCaseId, list);
   }
+  // Pick the primary reason per case (HIGH severity wins; otherwise the
+  // first). Then fetch evidence for just those primary-reason ids so the
+  // Action Center row can carry a concrete cause line without fetching
+  // every reason's evidence.
+  //
+  // GROUP-SCOPE LEAK GUARD (matches `computeVisiblePriority` on the case
+  // detail path): a case is LISTED if it has at least one reason in a
+  // visible group, but a case may also have reasons in groups the caller
+  // does NOT have scope over. Picking the primary from the FULL reason
+  // set would surface a reason (and, worse, its evidence) from an
+  // invisible group. Filter reasons to the caller's `restrictToGroupIds`
+  // FIRST — an `undefined` scope (ALL_GROUPS / owner) skips the filter.
+  const visibleRestrict = p.attention?.restrictToGroupIds;
+  const isReasonVisible = (r: AttentionReasonRow): boolean =>
+    visibleRestrict === undefined || visibleRestrict.includes(r.groupId);
+  const primaryReasonByCase = new Map<string, AttentionReasonRow>();
+  if (attentionCases) {
+    for (const c of attentionCases) {
+      const rs = (reasonsByCase.get(c.id) ?? []).filter(isReasonVisible);
+      const primary = rs.find((r) => r.severity === "HIGH") ?? rs[0];
+      if (primary) primaryReasonByCase.set(c.id, primary);
+    }
+  }
+  const primaryReasonIds = [...primaryReasonByCase.values()].map((r) => r.id);
+  const primaryEvidenceRows: AttentionEvidenceRow[] = primaryReasonIds.length
+    ? await listAttentionEvidenceForReasons(db, primaryReasonIds)
+    : [];
+  const evidenceByReason = new Map<string, AttentionEvidenceRow[]>();
+  for (const e of primaryEvidenceRows) {
+    const list = evidenceByReason.get(e.attentionReasonId) ?? [];
+    list.push(e);
+    evidenceByReason.set(e.attentionReasonId, list);
+  }
   const attentionItems: AttentionCaseListItem[] | undefined = attentionCases?.map((c) => {
-    const rs = reasonsByCase.get(c.id) ?? [];
-    const primary = rs.find((r) => r.severity === "HIGH") ?? rs[0];
-    return { case: c, studentName: nameById.get(c.studentId) ?? "طالب", primaryRuleKey: primary?.ruleKey ?? null };
+    const primary = primaryReasonByCase.get(c.id);
+    const primaryReason: AttentionCasePrimaryReason | null = primary
+      ? {
+          ruleKey: primary.ruleKey,
+          severity: primary.severity as "MEDIUM" | "HIGH",
+          firstDetectedAt: primary.firstDetectedAt,
+          lastDetectedAt: primary.lastDetectedAt,
+          evidence: (evidenceByReason.get(primary.id) ?? []).map((e) => ({
+            observedAt: e.observedAt,
+            sourceType: e.sourceType,
+            snapshot: (e.evidenceSnapshot ?? {}) as Record<string, unknown>,
+          })),
+        }
+      : null;
+    return {
+      case: c,
+      studentName: nameById.get(c.studentId) ?? "طالب",
+      primaryRuleKey: primary?.ruleKey ?? null,
+      primaryReason,
+    };
   });
   const followupItems: FollowupListItem[] | undefined = followups?.map((f) => ({ followup: f, studentName: nameById.get(f.studentId) ?? "طالب" }));
 

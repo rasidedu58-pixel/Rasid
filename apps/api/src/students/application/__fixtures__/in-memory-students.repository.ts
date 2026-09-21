@@ -267,8 +267,21 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
     return [...this.sessionsById.values()].filter((s) => s.groupMonthId === groupMonthId);
   }
 
-  async generateUniqueStudentCode(): Promise<string> {
-    return `AP-${randomUUID().slice(0, 6).toUpperCase()}`;
+  /**
+   * Mirrors the real DB generator: numeric per-workspace sequence,
+   * zero-padded to 5 digits. The regex is anchored on EXACTLY 5 digits
+   * (`^\d{5}$`) — same tightened shape the real Postgres query now uses
+   * — so a stray legacy row with a non-5-digit numeric code is IGNORED
+   * by the counter instead of corrupting the next sequence. Legacy
+   * `AP-XXXXXX` seeds are skipped for the same reason. NEVER re-uses a
+   * removed student's code.
+   */
+  async generateUniqueStudentCode(workspaceId: string): Promise<string> {
+    const numericSeqs = [...this.studentsById.values()]
+      .filter((s) => s.workspaceId === workspaceId && /^\d{5}$/.test(s.studentCode))
+      .map((s) => Number(s.studentCode));
+    const next = (numericSeqs.length === 0 ? 0 : Math.max(...numericSeqs)) + 1;
+    return String(next).padStart(5, "0");
   }
 
   async findStudentById(id: string): Promise<StudentRow | undefined> {
@@ -280,7 +293,8 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
   }
 
   async insertStudentWithUniqueCode(input: { workspaceId: string; name: string; searchNameNormalized: string }): Promise<StudentRow> {
-    return this.seedStudent({ ...input, studentCode: `AP-${randomUUID().slice(0, 6).toUpperCase()}` });
+    const studentCode = await this.generateUniqueStudentCode(input.workspaceId);
+    return this.seedStudent({ ...input, studentCode });
   }
 
   async updateStudentWithVersion(

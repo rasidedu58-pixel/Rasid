@@ -78,15 +78,19 @@ describe("AttentionService", () => {
     expect(detail.reasons[0]!.ruleKey).toBe("absence.consecutive");
   });
 
-  it("6+multi-group: a Student with a unified Case containing Evidence from Group A AND Group B — Assistant A sees only A, Assistant B sees only B, Owner sees both", async () => {
+  it("6+multi-group: a Student with a unified Case containing Evidence from Group A AND Group B — Assistant A sees only A's REASONS AND EVIDENCE, Assistant B sees only B, Owner sees both", async () => {
     const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "Multi-Group Student" });
     const groupA = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group A" });
     const groupB = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "Group B" });
     const attentionCase = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id, priority: "HIGH" });
     const reasonA = repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: attentionCase.id, groupId: groupA.id, ruleKey: "absence.consecutive", severity: "MEDIUM" });
     const reasonB = repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: attentionCase.id, groupId: groupB.id, ruleKey: "combined.medium", severity: "HIGH" });
-    repo.seedEvidence({ workspaceId: WORKSPACE_A, attentionReasonId: reasonA.id });
-    repo.seedEvidence({ workspaceId: WORKSPACE_A, attentionReasonId: reasonB.id });
+    // Distinct evidence rows per reason — Assistant A must NEVER see the
+    // Group-B evidence id (owner directive Phase 15C: even a single stray
+    // evidence id from an unseen group leaks the fact that group has a
+    // signal).
+    const evidenceA = repo.seedEvidence({ workspaceId: WORKSPACE_A, attentionReasonId: reasonA.id });
+    const evidenceB = repo.seedEvidence({ workspaceId: WORKSPACE_A, attentionReasonId: reasonB.id });
 
     const { user: assistantA, context: contextA } = await seedAssistant("assistant-a@example.com", [groupA.id]);
     const { user: assistantB, context: contextB } = await seedAssistant("assistant-b@example.com", [groupB.id]);
@@ -95,15 +99,31 @@ describe("AttentionService", () => {
     expect(detailA.reasons).toHaveLength(1);
     expect(detailA.reasons[0]!.ruleKey).toBe("absence.consecutive");
     expect(detailA.priority).toBe("MEDIUM"); // never leaks Group B's HIGH severity
+    // Reason IDs — no Group-B reason surfaces to Assistant A.
+    const reasonIdsA = detailA.reasons.map((r) => r.id);
+    expect(reasonIdsA).toContain(reasonA.id);
+    expect(reasonIdsA).not.toContain(reasonB.id);
+    // Evidence IDs — the SAME must hold for evidence rows.
+    const evidenceIdsA = detailA.reasons.flatMap((r) => r.evidence.map((e) => e.id));
+    expect(evidenceIdsA).toContain(evidenceA.id);
+    expect(evidenceIdsA).not.toContain(evidenceB.id);
+    // Group IDs on the returned reasons — never a Group-B id.
+    expect(detailA.reasons.map((r) => r.groupId)).not.toContain(groupB.id);
 
     const detailB = await service.getAttentionCase(assistantB, contextB, attentionCase.id);
     expect(detailB.reasons).toHaveLength(1);
     expect(detailB.reasons[0]!.ruleKey).toBe("combined.medium");
     expect(detailB.priority).toBe("HIGH");
+    const evidenceIdsB = detailB.reasons.flatMap((r) => r.evidence.map((e) => e.id));
+    expect(evidenceIdsB).toContain(evidenceB.id);
+    expect(evidenceIdsB).not.toContain(evidenceA.id);
 
     const detailOwner = await service.getAttentionCase(owner, ownerContext, attentionCase.id);
     expect(detailOwner.reasons).toHaveLength(2);
     expect(detailOwner.priority).toBe("HIGH");
+    const ownerEvidenceIds = detailOwner.reasons.flatMap((r) => r.evidence.map((e) => e.id));
+    expect(ownerEvidenceIds).toContain(evidenceA.id);
+    expect(ownerEvidenceIds).toContain(evidenceB.id);
 
     // The list endpoint follows the exact same rule.
     const listA = await service.listAttentionCases(assistantA, contextA, {});
@@ -320,6 +340,68 @@ describe("AttentionService", () => {
     expect(result.scheduledFollowUp).not.toBeNull();
     expect(result.scheduledFollowUp!.status).toBe("PENDING");
     expect(new Date(result.scheduledFollowUp!.dueAt).toISOString()).toBe(dueAt);
+  });
+
+  describe("Phase D — server-side idempotency for contact-log create (offline-replay dedup)", () => {
+    function seedContactable() {
+      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "S" });
+      const guardian = repo.seedGuardian({ workspaceId: WORKSPACE_A, phone: "+201230009999" });
+      repo.seedStudentGuardian({ workspaceId: WORKSPACE_A, studentId: student.id, guardianId: guardian.id });
+      return { student, guardian };
+    }
+    const bodyFor = (student: { id: string }, guardian: { id: string }) => ({
+      studentId: student.id,
+      guardianId: guardian.id,
+      channel: "WHATSAPP_DEEPLINK" as const,
+      draftSnapshot: "نص",
+      outcome: "NO_ANSWER" as const,
+    });
+
+    it("a replayed create with the SAME key returns the ORIGINAL result and creates NO duplicate row (§14)", async () => {
+      const { student, guardian } = seedContactable();
+      const key = "offline-mut-1";
+      const first = await service.createContactLog(owner, ownerContext, bodyFor(student, guardian), key);
+      const replay = await service.createContactLog(owner, ownerContext, bodyFor(student, guardian), key);
+      expect(replay.contactLog.id).toBe(first.contactLog.id); // same row, verbatim
+      expect(repo.contactLogsById.size).toBe(1); // NOT duplicated
+    });
+
+    it("a DEFERRED replay does not create a second scheduled follow-up either", async () => {
+      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "S" });
+      const group = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "G" });
+      const attentionCase = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: attentionCase.id, groupId: group.id, ruleKey: "absence.consecutive" });
+      const guardian = repo.seedGuardian({ workspaceId: WORKSPACE_A, phone: "+201230008888" });
+      repo.seedStudentGuardian({ workspaceId: WORKSPACE_A, studentId: student.id, guardianId: guardian.id });
+      const body = {
+        studentId: student.id,
+        guardianId: guardian.id,
+        attentionCaseId: attentionCase.id,
+        channel: "WHATSAPP_DEEPLINK" as const,
+        draftSnapshot: "...",
+        outcome: "DEFERRED" as const,
+        followUpAt: new Date(Date.now() + 86_400_000).toISOString(),
+      };
+      await service.createContactLog(owner, ownerContext, body, "offline-mut-def");
+      await service.createContactLog(owner, ownerContext, body, "offline-mut-def");
+      expect(repo.contactLogsById.size).toBe(1);
+      expect(repo.followupsById.size).toBe(1); // the paired followup is not re-created
+    });
+
+    it("the SAME key with a DIFFERENT body is a conflict (never silently returns the wrong result)", async () => {
+      const { student, guardian } = seedContactable();
+      await service.createContactLog(owner, ownerContext, bodyFor(student, guardian), "k");
+      await expect(
+        service.createContactLog(owner, ownerContext, { ...bodyFor(student, guardian), outcome: "INVALID_NUMBER" }, "k"),
+      ).rejects.toThrow(/idempotenc/i);
+    });
+
+    it("NO key (current online submit) is unchanged — each call creates a new row (backward compatible)", async () => {
+      const { student, guardian } = seedContactable();
+      await service.createContactLog(owner, ownerContext, bodyFor(student, guardian));
+      await service.createContactLog(owner, ownerContext, bodyFor(student, guardian));
+      expect(repo.contactLogsById.size).toBe(2);
+    });
   });
 
   // ---------------------------------------------------------------------

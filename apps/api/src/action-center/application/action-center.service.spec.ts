@@ -13,7 +13,7 @@ describe("ActionCenterService", () => {
   let teamRepo: InMemoryTeamRepository;
   let resolver: PermissionResolverService;
 
-  let attentionCases: Array<{ id: string; status: string; priority: string; groupId: string }>;
+  let attentionCases: Array<{ id: string; status: string; priority: string; groupId: string; primaryReason?: { ruleKey: string; severity: "MEDIUM" | "HIGH"; groupId: string; evidence: Array<{ observedAt: Date; sourceType: string; snapshot: Record<string, unknown> }> } | null }>;
   let followups: Array<{ id: string; status: string; dueAt: Date; groupId: string }>;
   let collectionRows: CollectionQueueRow[];
   let subscriptionState: string | null;
@@ -54,11 +54,30 @@ describe("ActionCenterService", () => {
           attentionCases: p.attention
             ? (attentionCases
                 .filter((c) => inScope(c.groupId, p.attention!.restrictToGroupIds))
-                .map((c) => ({
-                  case: { id: c.id, status: c.status, priority: c.priority, workspaceId: WORKSPACE_A, studentId: "s", openedAt: new Date(), lastQualifiedAt: new Date(), contactedAt: null, monitoringSince: null, closedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 },
-                  studentName: "أحمد محمد",
-                  primaryRuleKey: "ATTENDANCE_ABSENCE_STREAK",
-                })) as never)
+                .map((c) => {
+                  // Mirror the real repo's leak-guard: expose `primaryReason`
+                  // ONLY when its own groupId is within the caller's scope.
+                  // A case can survive the outer scope filter (via any
+                  // visible reason) yet have its raw primary reason live in
+                  // a group the caller cannot see — that reason MUST NOT
+                  // enrich the row.
+                  const pr = c.primaryReason ?? null;
+                  const visiblePR = pr && inScope(pr.groupId, p.attention!.restrictToGroupIds) ? pr : null;
+                  return {
+                    case: { id: c.id, status: c.status, priority: c.priority, workspaceId: WORKSPACE_A, studentId: "s", openedAt: new Date(), lastQualifiedAt: new Date(), contactedAt: null, monitoringSince: null, closedAt: null, createdAt: new Date(), updatedAt: new Date(), version: 1 },
+                    studentName: "أحمد محمد",
+                    primaryRuleKey: visiblePR?.ruleKey ?? null,
+                    primaryReason: visiblePR
+                      ? {
+                          ruleKey: visiblePR.ruleKey,
+                          severity: visiblePR.severity,
+                          firstDetectedAt: new Date(),
+                          lastDetectedAt: new Date(),
+                          evidence: visiblePR.evidence,
+                        }
+                      : null,
+                  };
+                }) as never)
             : undefined,
           followups: p.followups
             ? (followups
@@ -155,7 +174,23 @@ describe("ActionCenterService", () => {
   });
 
   it("attention items name WHO and WHY (student + concrete reason), and collection shows amounts in ج.م — never قرش or raw minor units", async () => {
-    attentionCases.push({ id: "case-1", status: "NEW", priority: "HIGH", groupId: GROUP_A });
+    // Phase 15 update: the mock now derives `primaryRuleKey` from the
+    // seeded `primaryReason` (mirroring the real repo). Provide a
+    // realistic primary reason with a rule key the engine actually
+    // emits — `absence.frequency` — so the item's reason line reads
+    // "<student> — غياب متكرر" instead of the honest fallback.
+    attentionCases.push({
+      id: "case-1",
+      status: "NEW",
+      priority: "HIGH",
+      groupId: GROUP_A,
+      primaryReason: {
+        ruleKey: "absence.frequency",
+        severity: "HIGH",
+        groupId: GROUP_A,
+        evidence: [],
+      },
+    });
     collectionRows.push({ obligation: { id: "ob-1", remainingMinor: 30000, status: "UNPAID" } as never, studentId: "s-1", studentName: "مصطفى ماهر", studentCode: "AP-1", groupMonthId: "gm-1", groupId: GROUP_A });
 
     const result = await service.getActionCenter(owner, ownerContext);
@@ -268,6 +303,62 @@ describe("ActionCenterService", () => {
       expect(lastParams?.missed?.visibleGroupIds).toEqual([GROUP_A]);
       // Only GA's missed session should be visible; group-b never leaks.
       expect(result.missedSessions?.items.map((i) => i.entityId)).toEqual(["s-in-a"]);
+    });
+
+    it("Phase 15 — attention item carries a subtitle derived from the primary reason's real evidence", async () => {
+      attentionCases.push({
+        id: "case-1",
+        status: "NEW",
+        priority: "MEDIUM",
+        groupId: GROUP_A,
+        primaryReason: {
+          ruleKey: "absence.frequency",
+          severity: "MEDIUM",
+          groupId: GROUP_A,
+          evidence: [
+            { observedAt: new Date("2026-09-14T09:00:00Z"), sourceType: "SESSION_RECORD", snapshot: { attendanceStatus: "ABSENT", windowSize: 5 } },
+            { observedAt: new Date("2026-09-17T09:00:00Z"), sourceType: "SESSION_RECORD", snapshot: { attendanceStatus: "ABSENT", windowSize: 5 } },
+            { observedAt: new Date("2026-09-21T09:00:00Z"), sourceType: "SESSION_RECORD", snapshot: { attendanceStatus: "ABSENT", windowSize: 5 } },
+          ],
+        },
+      });
+      const result = await service.getActionCenter(owner, ownerContext);
+      expect(result.attention?.items[0]?.subtitle).toBe("3 من آخر 5 حصص");
+    });
+
+    it("Phase 15 — GROUP-SCOPE LEAK GUARD: subtitle is undefined when the case's primary reason lives in a group the caller cannot see", async () => {
+      // Case with primary reason in group-b (invisible), but the case
+      // ITSELF may still be listed because the caller's scope allowed it
+      // to surface via other means. In production this is the class of
+      // leak the visible-group filter guards against — a subtitle sourced
+      // from a hidden group's evidence must never appear.
+      attentionCases.push({
+        id: "case-hidden",
+        status: "NEW",
+        priority: "MEDIUM",
+        groupId: GROUP_A,
+        primaryReason: {
+          ruleKey: "absence.frequency",
+          severity: "MEDIUM",
+          groupId: "group-b", // NOT in the scope below
+          evidence: [
+            { observedAt: new Date(), sourceType: "SESSION_RECORD", snapshot: { attendanceStatus: "ABSENT", windowSize: 5 } },
+          ],
+        },
+      });
+      const assistant: VerifiedSupabaseToken = { id: "u-scoped", email: "s@example.com" };
+      const m = teamRepo.seedMembership({ workspaceId: WORKSPACE_A, userId: assistant.id, roleLabel: "ASSISTANT" });
+      await teamRepo.replaceMembershipGrants({
+        workspaceId: WORKSPACE_A, membershipId: m.id, createdByUserId: owner.id,
+        desiredGrants: [{ permissionKey: "followup.read", scopeType: "SELECTED_GROUPS", groupIds: [GROUP_A] }],
+      });
+      const result = await service.getActionCenter(assistant, { workspaceId: WORKSPACE_A, membership: m });
+      // The item is still listed (case-level scope allowed it), but its
+      // subtitle MUST be absent — never fabricated from a hidden group's
+      // signal.
+      const item = result.attention?.items[0];
+      expect(item?.entityId).toBe("case-hidden");
+      expect(item?.subtitle).toBeUndefined();
     });
 
     it("scoped assistant's collection scope is the UNION of finance grants, never wider", async () => {

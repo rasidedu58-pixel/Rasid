@@ -165,6 +165,16 @@ const actionItemSchema = z.object({
   reason: z.string(),
   urgency: z.enum(["LOW", "MEDIUM", "HIGH"]),
   nextAction: z.string(),
+  /**
+   * Optional one-line justification shown UNDER the main `reason` on the
+   * dashboard card. Populated for attention items with a concrete cause
+   * derived from the case's primary reason + real evidence (see
+   * `attentionCardSubtitle` in `./attention`). OPTIONAL for rolling-
+   * deploy safety: a new client parsing an old-API response ignores its
+   * absence, and a new-API response reaching an old client harmlessly
+   * carries an extra field.
+   */
+  subtitle: z.string().optional(),
 });
 
 /**

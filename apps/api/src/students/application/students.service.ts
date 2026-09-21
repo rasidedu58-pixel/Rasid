@@ -35,6 +35,14 @@ import { STUDENTS_REPOSITORY, type StudentsRepositoryPort } from "./ports/studen
 
 const DEFAULT_LIST_LIMIT = 50;
 const GLOBAL_CONTEXT = "GLOBAL";
+
+/**
+ * Fixed width of the new numeric student code (`NNNNN`). Kept in lockstep
+ * with `packages/database/src/repositories/students.repository.ts` — a
+ * teacher who types just `42` should match a stored `00042`, so the
+ * search query is left-padded to this width before the DB comparison.
+ */
+const STUDENT_CODE_QUERY_MAX_DIGITS = 5;
 type ScopedPermission = "students.view_basic" | "students.edit";
 
 /**
@@ -86,7 +94,7 @@ export class StudentsService {
     if (query.q) {
       const mode = query.searchBy ?? this.inferSearchMode(query.q);
       if (mode === "code") {
-        studentCode = query.q.trim();
+        studentCode = this.normalizeCodeQuery(query.q);
       } else if (mode === "guardianPhone") {
         guardianNormalizedPhone = normalizePhone(query.q);
       } else {
@@ -136,10 +144,63 @@ export class StudentsService {
     };
   }
 
-  /** Heuristic auto-detection when the caller doesn't pass an explicit `searchBy`. */
+  /**
+   * Normalise the raw user input for code search. Two rules, applied in
+   * order:
+   *
+   *   1. Legacy `AP-XXXXXX` codes are uppercase, dash-separated, and the
+   *      DB stores them exactly that way — a case-insensitive typing
+   *      goes through `.toUpperCase()` first so `ap-abc123` matches the
+   *      stored `AP-ABC123`.
+   *   2. New numeric codes: strip everything that isn't a digit (this
+   *      also converts Arabic-Indic digits via `normalizePhone`, which
+   *      already does that job), then left-pad to the fixed 5-char
+   *      width so a teacher who types just `42` matches the stored
+   *      `00042` — preserving the zero-padding that lives in the DB.
+   *
+   * NEVER converts to `Number`: the stored value is a string with
+   * leading zeros, and `Number(00042)` becomes `42` which loses them.
+   */
+  private normalizeCodeQuery(raw: string): string {
+    const trimmed = raw.trim();
+    if (/^AP-/i.test(trimmed)) return trimmed.toUpperCase();
+    // Numeric path — Arabic-Indic digits normalised too.
+    const digits = normalizePhone(trimmed);
+    if (digits.length === 0) return trimmed; // fall through unchanged; downstream exact-match will find nothing
+    if (digits.length >= STUDENT_CODE_QUERY_MAX_DIGITS) return digits;
+    return digits.padStart(STUDENT_CODE_QUERY_MAX_DIGITS, "0");
+  }
+
+  /**
+   * Heuristic auto-detection when the caller doesn't pass an explicit
+   * `searchBy`. The three modes match the three real ways a teacher writes
+   * a search query, and disambiguation is by length + shape:
+   *
+   *   • Legacy `AP-XXXXXX` codes → `code` mode (exact match on stored
+   *     value; leading dash makes them unambiguous).
+   *   • NEW numeric codes are 5 digits with leading zeros preserved. A
+   *     teacher who types `12` or `00042` is looking for a code — not a
+   *     phone. Cap the code-mode window at 5 digits so a real 7+-digit
+   *     guardian phone still routes to phone mode; between 4–5 digits is
+   *     the "code range" where phones never live (they are 8+ digits in
+   *     every locale we ship to).
+   *   • Anything else with 6+ digit-like characters, once normalised
+   *     (including Arabic-Indic digits) → guardian phone.
+   *   • Otherwise → name search.
+   *
+   * Arabic-Indic digits are already accepted by the existing phone regex
+   * (`٠-٩` in the character class) and the numeric-code regex below
+   * mirrors that so `٠٠٠٤٢` routes the same way as `00042`. Number.parse
+   * is deliberately NOT used anywhere here — a string with leading zeros
+   * must not lose them mid-flight.
+   */
   private inferSearchMode(q: string): "name" | "code" | "guardianPhone" {
     const trimmed = q.trim();
     if (/^AP-/i.test(trimmed)) return "code";
+    // New numeric codes: 1–5 characters of Arabic-Indic OR Latin digits.
+    // A raw 4- or 5-digit query goes to `code`; longer digit strings are
+    // phones (8-11 typical).
+    if (/^[0-9٠-٩]{1,5}$/.test(trimmed)) return "code";
     if (/^[+\d\s\-()٠-٩]+$/.test(trimmed) && normalizePhone(trimmed).length >= 6) return "guardianPhone";
     return "name";
   }
