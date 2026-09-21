@@ -1,5 +1,10 @@
 "use client";
 
+// Phase 15C dashboard: TodaySummary hoisted to the top of the shell,
+// action-item rows carry a real reason subtitle, and both `متابعات
+// مستحقة` / `تحصيل متأخر` cells deep-link to their filtered surfaces.
+// See the accompanying commit's message for the full track.
+
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
