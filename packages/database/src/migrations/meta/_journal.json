@@ -491,6 +491,13 @@
       "when": 1789900000000,
       "tag": "0071_fix_app_runtime_subscriptions_insert",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0072_platform_leads",
+      "breakpoints": true
     }
   ]
 }

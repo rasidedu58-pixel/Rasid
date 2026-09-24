@@ -21,4 +21,5 @@ export * from "./reports";
 export * from "./onboarding";
 export * from "./platform-admin";
 export * from "./platform-operations";
+export * from "./platform-leads";
 export * from "./platform-status";

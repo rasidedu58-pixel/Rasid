@@ -81,6 +81,34 @@ export function followUpStatusTone(status: string): "success" | "warning" | "dan
   }
 }
 
+export const PLATFORM_LEAD_STATUS_LABEL: Record<string, string> = {
+  NEW: "جديد",
+  CONTACTED: "تم التواصل",
+  FOLLOW_UP: "يحتاج متابعة",
+  POSTPONED: "مؤجّل",
+  CONVERTED: "تحوّل لعميل",
+  NOT_INTERESTED: "غير مهتم",
+};
+
+export function platformLeadStatusTone(status: string): "success" | "warning" | "danger" | "neutral" | "brand" {
+  switch (status) {
+    case "CONVERTED":
+      return "success";
+    case "NEW":
+      return "brand";
+    case "FOLLOW_UP":
+      return "warning";
+    case "POSTPONED":
+      return "neutral";
+    case "CONTACTED":
+      return "neutral";
+    case "NOT_INTERESTED":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
 export const PLATFORM_ROLE_LABEL: Record<string, string> = {
   PLATFORM_OWNER: "مالك المنصة",
   OPERATIONS_ADMIN: "مدير عمليات",

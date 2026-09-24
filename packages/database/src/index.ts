@@ -22,6 +22,7 @@ export * from "./onboarding/setup-status.repository";
 export * from "./repositories/notifications.repository";
 export * from "./repositories/platform-admin.repository";
 export * from "./repositories/platform-operations.repository";
+export * from "./repositories/platform-leads.repository";
 export * from "./repositories/platform-staff.repository";
 export * from "./repositories/platform-customer-invitations.repository";
 export * from "./repositories/workspace-features.repository";

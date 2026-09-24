@@ -44,6 +44,9 @@ export const PLATFORM_PERMISSIONS = [
   "platform.billing.manage", // confirm / reject a payment request (a real financial action — never SUPPORT_AGENT)
   // --- Workspace feature overrides ---
   "platform.features.manage", // enable / disable / revoke a per-workspace feature override
+  // --- Leads (Phase 16 Part B): follow-up on new self-service signups ---
+  "platform.leads.view", // list leads + metrics
+  "platform.leads.manage", // update a lead's status / follow-up date / note
   // --- Owner-only: platform staff / role management ---
   "platform.staff.manage",
 ] as const;
@@ -76,9 +79,19 @@ export const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[
     "platform.health.details",
     "platform.operating_months.manage",
     "platform.features.manage",
+    "platform.leads.view",
+    "platform.leads.manage",
   ],
-  // SUPPORT_AGENT deliberately has NEITHER platform.billing.* — no financial confirm.
-  SUPPORT_AGENT: ["platform.customers.view", "platform.support.view", "platform.support.manage", "platform.health.view"],
+  // SUPPORT_AGENT works the lead queue (contact + follow-up) but is not the
+  // financial confirm role — same rationale as support follow-ups.
+  SUPPORT_AGENT: [
+    "platform.customers.view",
+    "platform.support.view",
+    "platform.support.manage",
+    "platform.health.view",
+    "platform.leads.view",
+    "platform.leads.manage",
+  ],
 };
 
 export function hasPlatformPermission(role: PlatformRole | null | undefined, permission: PlatformPermission): boolean {

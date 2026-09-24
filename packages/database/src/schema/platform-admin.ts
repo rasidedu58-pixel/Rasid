@@ -213,6 +213,37 @@ export const platformOperatingMonthOverrides = pgTable("platform_operating_month
   revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, { onDelete: "set null" }),
 });
 
+/**
+ * Phase 16 Part B — Platform Leads. Every NEW self-service signup (a brand-new
+ * Owner + Workspace) becomes one lead row so the Rasid team can follow it up
+ * from a Platform-Admin-only surface. A small follow-up ledger, NOT a CRM.
+ *
+ * Same access model as the other PLATFORM tables — no RLS, GRANT-governed.
+ * Two roles touch it: `app_runtime` (INSERT-only, from the signup hook) and
+ * `app_platform_admin` (SELECT + narrow-column UPDATE from the console).
+ *
+ * NO PII lives here: name / phone / email are read live from `users` via
+ * `ownerUserId`. `updatedBy` is nullable because the first row is
+ * System-generated (no admin actor); `CONVERTED` is a manual status in V1
+ * (an active paid subscription is a UI hint, never an auto-trigger).
+ */
+export const platformLeads = pgTable("platform_leads", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  workspaceId: uuid("workspace_id").notNull().unique(),
+  ownerUserId: uuid("owner_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("NEW"),
+  lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
+  nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true }),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+});
+
 export const platformAuditEvents = pgTable("platform_audit_events", {
   id: uuid("id")
     .primaryKey()

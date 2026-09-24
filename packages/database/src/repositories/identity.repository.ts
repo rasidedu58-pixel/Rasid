@@ -24,6 +24,7 @@ import { memberships } from "../schema/permissions";
 import { workspaces } from "../schema/workspaces";
 import type * as schema from "../schema/index";
 import { provisionSubscriptionForNewWorkspaceTransaction } from "./subscriptions.repository";
+import { insertLeadForNewWorkspaceTx } from "./platform-leads.repository";
 
 export type Db = PostgresJsDatabase<typeof schema>;
 
@@ -180,6 +181,16 @@ export async function createUserWorkspaceMembership(
       workspaceId: newWorkspace.id,
       ownerUserId: newUser.id,
       email: input.email,
+    });
+
+    // Phase 16 Part B — the SAME transaction records this brand-new signup as
+    // a Platform-Admin lead (runs as app_runtime, INSERT-only, idempotent on
+    // workspace_id). Only reached on the NEW-workspace branch, so no existing
+    // workspace is ever backfilled. A failure here would (correctly) roll back
+    // the whole provision — the lead is part of "a new customer exists".
+    await insertLeadForNewWorkspaceTx(tx, {
+      workspaceId: newWorkspace.id,
+      ownerUserId: newUser.id,
     });
 
     return { user: newUser, workspace: newWorkspace, membership: newMembership };

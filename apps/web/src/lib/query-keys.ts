@@ -88,5 +88,7 @@ export const qk = {
     workspaceFeatures: (workspaceId: string) => ["platform-admin", "workspaces", "features", workspaceId] as const,
     status: () => ["platform-admin", "platform-status"] as const,
     monthOverrides: (workspaceId: string) => ["platform-admin", "workspaces", "month-overrides", workspaceId] as const,
+    leads: (params?: Record<string, unknown>) => ["platform-admin", "leads", params] as const,
+    leadMetrics: () => ["platform-admin", "leads", "metrics"] as const,
   },
 } as const;

@@ -7,6 +7,7 @@ import { PlatformStaffController, PlatformStaffInviteController } from "./api/pl
 import { PlatformCustomerFeatureController, PlatformOnboardingController } from "./api/platform-customer-feature.controller";
 import { PlatformBillingController } from "./api/platform-billing.controller";
 import { PlatformCustomController } from "./api/platform-custom.controller";
+import { PlatformLeadsController } from "./api/platform-leads.controller";
 import { PlatformAdminGuard } from "./api/guards/platform-admin.guard";
 import { PlatformPermissionGuard } from "./api/guards/platform-permission.guard";
 import { PlatformAdminService } from "./application/platform-admin.service";
@@ -16,6 +17,7 @@ import { PlatformCustomerFeatureService } from "./application/platform-customer-
 import { PlatformStatusService } from "./application/platform-status.service";
 import { PlatformBillingService } from "./application/platform-billing.service";
 import { PlatformCustomService } from "./application/platform-custom.service";
+import { PlatformLeadsService } from "./application/platform-leads.service";
 
 /**
  * Phase 12 — Rasid Platform Admin. `SupabaseAuthGuard`/`TOKEN_VERIFIER`
@@ -38,6 +40,7 @@ import { PlatformCustomService } from "./application/platform-custom.service";
     PlatformOnboardingController,
     PlatformBillingController,
     PlatformCustomController,
+    PlatformLeadsController,
   ],
   providers: [
     PlatformAdminService,
@@ -47,6 +50,7 @@ import { PlatformCustomService } from "./application/platform-custom.service";
     PlatformStatusService,
     PlatformBillingService,
     PlatformCustomService,
+    PlatformLeadsService,
     PlatformAdminGuard,
     PlatformPermissionGuard,
     SupabaseAuthGuard,
