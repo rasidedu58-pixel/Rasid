@@ -16,7 +16,8 @@ import { useWorkspace } from "../../../lib/workspace-provider";
 import { qk } from "../../../lib/query-keys";
 import { fetchActionCenter } from "../../../lib/api/reports";
 import { fetchSessions } from "../../../lib/api/scheduling";
-import { ActionItemRow, type ActionItem } from "./action-item-row";
+import { ActionItemRow } from "./action-item-row";
+import { buildActionSections, SECTION_ITEM_CAP, type ActionSection } from "./action-sections";
 import { NextSessionCard } from "./next-session-card";
 import { GuidedSetupSummary } from "../../../components/onboarding/guided-setup-summary";
 import { TodaySummary, type SummaryCell } from "./today-summary";
@@ -97,14 +98,22 @@ export default function DashboardPage() {
     );
   }
 
-  // ── Decision queue (the action-center buckets) ──
-  // `missedSessions` is placed FIRST — «فائتة — لم تُسجَّل» is the highest-
-  // urgency operational gap for a teacher (server marks each item HIGH).
-  const buckets: Array<{ items: ActionItem[] } | undefined> = [data.missedSessions, data.missingRecords, data.followUpsDue, data.attention, data.collection];
-  const allItems = buckets.flatMap((b) => b?.items ?? []);
+  // ── Decision queue — TYPED sections, most-operational first ──
+  //
+  // The queue is grouped BY TYPE (not by a flat urgency mix), so the
+  // teacher scans "what kind of thing needs me" at a glance instead of a
+  // long homogeneous list. Each section is capped at 3 items with a
+  // "عرض الكل (N)" link to its own filtered surface, and an empty section
+  // is hidden entirely (never a wall of empty states). Within a section,
+  // items are ordered by urgency (HIGH → MEDIUM → LOW); the server already
+  // returns each bucket in its own recency/priority order, which the
+  // stable sort preserves as the tie-break.
+  //
+  // Typed sections (pure builder — see `action-sections.ts`), most-
+  // operational first, empty ones dropped, urgency-sorted within each.
+  const sections = buildActionSections(data);
+  const allItems = sections.flatMap((s) => s.items);
   const urgent = allItems.filter((i) => i.urgency === "HIGH");
-  const followUpSoon = allItems.filter((i) => i.urgency === "MEDIUM");
-  const contextual = allItems.filter((i) => i.urgency === "LOW");
 
   // ── Daily context (qualitative — always true, no risky number/noun agreement) ──
   const now = new Date();
@@ -188,9 +197,9 @@ export default function DashboardPage() {
           <NextSessionCard session={data.nextSession ?? null} />
         </motion.div>
 
-        {/* Needs attention — the decision queue */}
+        {/* Needs attention — the typed decision queue */}
         <motion.div variants={item}>
-          {allItems.length === 0 ? (
+          {sections.length === 0 ? (
             <EmptyState
               icon={<Sparkles className="h-8 w-8 text-brand" aria-hidden />}
               title="لا يوجد ما يحتاج إجراء الآن"
@@ -198,16 +207,10 @@ export default function DashboardPage() {
             />
           ) : (
             <section aria-label="يحتاج إجراء" className="flex flex-col gap-6">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-text-primary">يحتاج إجراء</h2>
-                <Link href="/attention" className="inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline">
-                  عرض كل الحالات
-                  <ArrowLeft className="h-4 w-4" aria-hidden />
-                </Link>
-              </div>
-              {urgent.length > 0 ? <ActionGroup title="يحتاج إجراء الآن" items={urgent} variant="urgent" /> : null}
-              {followUpSoon.length > 0 ? <ActionGroup title="يحتاج متابعة قريبًا" items={followUpSoon} variant="normal" /> : null}
-              {contextual.length > 0 ? <ActionGroup title="معلومات سياقية" items={contextual} variant="quiet" /> : null}
+              <h2 className="text-base font-semibold text-text-primary">يحتاج إجراء</h2>
+              {sections.map((s) => (
+                <ActionSectionBlock key={s.key} section={s} />
+              ))}
             </section>
           )}
         </motion.div>
@@ -217,31 +220,43 @@ export default function DashboardPage() {
 }
 
 /**
- * One urgency group. The urgent group is visually heaviest (a danger dot + a
- * danger-tinted count) so the eye lands there first; follow-up and contextual
- * groups get progressively quieter.
+ * One typed section: heading + count, up to {@link SECTION_ITEM_CAP} rows,
+ * and a "عرض الكل (N)" link to its own filtered surface when there are more.
+ * Never renders when empty (the parent filters those out first).
  */
-function ActionGroup({ title, items, variant }: { title: string; items: ActionItem[]; variant: "urgent" | "normal" | "quiet" }) {
+function ActionSectionBlock({ section }: { section: ActionSection }) {
+  const shown = section.items.slice(0, SECTION_ITEM_CAP);
+  const total = section.items.length;
+  const hasUrgent = section.items.some((i) => i.urgency === "HIGH");
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center gap-2.5">
-        {variant === "urgent" ? <span className="h-2 w-2 rounded-full bg-danger" aria-hidden /> : null}
-        <h3 className={variant === "urgent" ? "text-sm font-semibold text-text-primary" : "text-sm font-semibold text-text-secondary"}>{title}</h3>
+        {hasUrgent ? <span className="h-2 w-2 rounded-full bg-danger" aria-hidden /> : null}
+        <h3 className="text-sm font-semibold text-text-primary">{section.title}</h3>
         <span
           className={
-            variant === "urgent"
+            hasUrgent
               ? "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-danger-subtle px-1.5 text-xs font-semibold text-danger"
               : "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-surface-sunken px-1.5 text-xs font-medium text-text-tertiary"
           }
         >
-          {arNum(items.length)}
+          {arNum(total)}
         </span>
       </div>
       <div className="flex flex-col gap-2">
-        {items.map((item) => (
+        {shown.map((item) => (
           <ActionItemRow key={`${item.entityType}-${item.entityId}`} item={item} />
         ))}
       </div>
+      {total > SECTION_ITEM_CAP ? (
+        <Link
+          href={section.viewAllHref}
+          className="inline-flex items-center gap-1 self-start text-sm font-medium text-brand hover:underline"
+        >
+          عرض الكل ({arNum(total)})
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+        </Link>
+      ) : null}
     </section>
   );
 }

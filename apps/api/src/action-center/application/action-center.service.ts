@@ -94,7 +94,7 @@ export class ActionCenterService {
       attention: followupGrant ? this.toAttentionSection(data.attentionCases ?? []) : undefined,
       followUpsDue: followupGrant ? this.toFollowUpsSection(data.followups ?? [], now) : undefined,
       missingRecords: attendanceGrant ? this.toMissingRecordsSection(data.missingRecords ?? []) : undefined,
-      missedSessions: attendanceGrant ? this.toMissedSessionsSection(data.missedSessions ?? []) : undefined,
+      missedSessions: attendanceGrant ? this.toMissedSessionsSection(data.missedSessions ?? [], now) : undefined,
       collection: paymentsGrant || financeGrant ? this.toCollectionSection(data.collection ?? []) : undefined,
       subscriptionWarning: isOwner ? this.toSubscriptionWarning(data.subscription) : undefined,
       asOf: now.toISOString(),
@@ -194,17 +194,37 @@ export class ActionCenterService {
    * the teacher needs to reconcile, distinct from a merely-partial live
    * session (missing-records = MEDIUM).
    */
-  private toMissedSessionsSection(missed: MissedSessionItem[]) {
+  private toMissedSessionsSection(missed: MissedSessionItem[], now: Date) {
     return {
       count: missed.length,
       items: missed.map((s) => ({
         entityType: "session",
         entityId: s.sessionId,
         reason: `فائتة — لم تُسجَّل في مجموعة «${s.groupName}»`,
+        // Concrete "how overdue" line, derived from the real scheduledAt —
+        // e.g. «فات موعدها منذ يومين». Owner directive (Part A section 1).
+        subtitle: this.overdueSubtitle(s.scheduledAt, now),
         urgency: "HIGH" as const,
         nextAction: "تسجيل الحصة الآن",
       })),
     };
+  }
+
+  /**
+   * Human "how long ago the slot ended" line for a missed session. Uses
+   * the real `scheduledAt` vs `now` — never a fabricated value. Returns
+   * `undefined` (no subtitle) when the difference is under a minute, so
+   * the card never claims a stale duration.
+   */
+  private overdueSubtitle(scheduledAt: Date, now: Date): string | undefined {
+    const diffMs = now.getTime() - scheduledAt.getTime();
+    if (diffMs < 60_000) return undefined;
+    const minutes = Math.floor(diffMs / 60_000);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    if (days >= 1) return days === 1 ? "فات موعدها منذ يوم — سجّلها أو راجع حالتها" : `فات موعدها منذ ${days} أيام — سجّلها أو راجع حالتها`;
+    if (hours >= 1) return hours === 1 ? "فات موعدها منذ ساعة — سجّلها أو راجع حالتها" : `فات موعدها منذ ${hours} ساعات — سجّلها أو راجع حالتها`;
+    return `فات موعدها منذ ${minutes} دقيقة — سجّلها أو راجع حالتها`;
   }
 
   private toCollectionSection(rows: CollectionQueueRow[]) {

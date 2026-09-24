@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CalendarClock, CheckCircle2, ClipboardList, Clock, Users, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, CalendarRange, CheckCircle2, ClipboardList, Clock, Users, XCircle } from "lucide-react";
 import {
   Badge,
   Button,
@@ -24,6 +25,7 @@ import { qk } from "../../../lib/query-keys";
 import { fetchSessionReview } from "../../../lib/api/session-mode";
 import { cancelSession } from "../../../lib/api/scheduling";
 import { deriveSessionDisplay, primaryActionLabel, sessionEnd } from "./session-status";
+import { RescheduleSessionDialog } from "./reschedule-session-dialog";
 
 const arNum = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
 
@@ -46,6 +48,7 @@ export function SessionQuickDrawer({
   const router = useRouter();
   const { workspaceId, hasPermission } = useWorkspace();
   const confirm = useConfirmDialog();
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
 
   const display = item ? deriveSessionDisplay(item) : null;
   // The review (attendance/homework/exam completeness) is only meaningful once
@@ -75,6 +78,9 @@ export function SessionQuickDrawer({
   const end = sessionEnd(item);
   const canManage = hasPermission("sessions.manage");
   const canCancel = canManage && item.status === "SCHEDULED";
+  // Reschedule requires the same SCHEDULED-only precondition the backend
+  // `rescheduleSessionTransaction` enforces (original must be SCHEDULED).
+  const canReschedule = canManage && item.status === "SCHEDULED";
   const missingCount = review.data?.missingRecords.length ?? 0;
 
   return (
@@ -171,6 +177,12 @@ export function SessionQuickDrawer({
               فتح الحصة كاملة
             </Button>
           ) : null}
+          {canReschedule ? (
+            <Button variant="ghost" onClick={() => setRescheduleOpen(true)}>
+              <CalendarRange className="h-4 w-4" aria-hidden />
+              تغيير موعد الحصة
+            </Button>
+          ) : null}
           {canCancel ? (
             <Button variant="ghost" className="text-danger hover:bg-danger-subtle hover:text-danger" onClick={() => confirm.openDialog()}>
               إلغاء الحصة
@@ -187,6 +199,18 @@ export function SessionQuickDrawer({
           loading={cancel.isPending}
           onConfirm={() => cancel.mutate()}
         />
+
+        {canReschedule ? (
+          <RescheduleSessionDialog
+            item={item}
+            open={rescheduleOpen}
+            onOpenChange={setRescheduleOpen}
+            onChanged={() => {
+              onChanged?.();
+              onOpenChange(false);
+            }}
+          />
+        ) : null}
       </SheetContent>
     </Sheet>
   );

@@ -273,6 +273,9 @@ describe("ActionCenterService", () => {
         expect(item.urgency).toBe("HIGH");
         expect(item.nextAction).toBe("تسجيل الحصة الآن");
         expect(item.reason).toContain("فائتة — لم تُسجَّل");
+        // Part A: each missed item carries a concrete overdue subtitle
+        // derived from the real scheduledAt (these are days-old sessions).
+        expect(item.subtitle).toContain("فات موعدها منذ");
       }
 
       // Assistant with follow-up access but NO attendance → missedSessions
