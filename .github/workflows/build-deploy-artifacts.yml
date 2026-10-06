@@ -100,8 +100,18 @@ jobs:
           fi
           echo "no module-resolution failure"
 
+      - name: Bundle the server config alongside the artifacts
+        # The units / Caddy fragment / cron file / env templates / maintenance
+        # scripts travel WITH the build, so the server receives one coherent
+        # drop instead of needing a source checkout to install config from.
+        run: |
+          mkdir -p deploy/out/config
+          cp -r deploy/systemd deploy/caddy deploy/cron deploy/env deploy/scripts deploy/out/config/
+          rm -f deploy/out/config/scripts/build-artifacts.sh deploy/out/config/scripts/ship.sh
+          test -f deploy/out/config/scripts/install-config.sh
+
       - name: Report sizes
-        run: du -sh deploy/out/api deploy/out/web
+        run: du -sh deploy/out/api deploy/out/web deploy/out/config
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

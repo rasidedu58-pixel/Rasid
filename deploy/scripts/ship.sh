@@ -31,6 +31,14 @@ rsync -az --delete "$OUT/api/"  "$TARGET:/opt/rasid/api/"
 echo "==> syncing web"
 rsync -az --delete "$OUT/web/"  "$TARGET:/opt/rasid/web/"
 
+# The config drop is reference material the server installs FROM; syncing it
+# changes nothing live. install-config.sh is never run automatically — it
+# rewrites units and the Caddy fragment, which is a deliberate act.
+if [ -d "$OUT/config" ]; then
+  echo "==> syncing config reference (installs nothing)"
+  rsync -az --delete "$OUT/config/" "$TARGET:/opt/rasid/config/"
+fi
+
 echo "==> fixing ownership and restarting"
 ssh "$TARGET" 'set -e
   chown -R rasid:rasid /opt/rasid/api /opt/rasid/web
