@@ -2,3 +2,11 @@
 # on Linux GitHub Actions runners regardless of a contributor's git settings.
 *.sh text eol=lf
 .github/workflows/*.yml text eol=lf
+
+# Deployment assets are consumed by Linux: bash, systemd (including
+# EnvironmentFile parsing), cron and Caddy. A stray CR does not just look
+# untidy — it becomes part of the value. `PORT=7100` is not a number, a
+# cron line with CR does not run, and `set -euo pipefail` aborts the script
+# with a mangled error. Force LF for everything that ships to a server.
+deploy/** text eol=lf
+*.mjs text eol=lf

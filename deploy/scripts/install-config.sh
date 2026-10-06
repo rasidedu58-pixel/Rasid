@@ -23,6 +23,33 @@ for d in systemd caddy cron env; do
 done
 id rasid >/dev/null 2>&1 || { echo "FATAL: system user 'rasid' does not exist — run the provisioning step first" >&2; exit 1; }
 
+# Refuse to install anything carrying Windows line endings. A CR is not
+# cosmetic here: systemd's EnvironmentFile would read PORT as "7100<CR>"
+# (not a number), a cron line with CR never runs, and a unit's ExecStart path
+# would gain an invisible character. Copying this tree from a Windows machine
+# is the normal way that happens, and it fails LOUDLY here instead of as a
+# baffling runtime fault later.
+# grep -U (no CRLF translation) is REQUIRED: a grep running in text mode
+# strips CR before matching, so a plain grep reports a poisoned file as
+# clean. On Linux it is a harmless no-op; without it the guard silently
+# never fires when run from a Windows shell.
+CR="$(printf '\r')"
+CRLF_HITS=""
+for f in "$SRC"/systemd/*.service "$SRC"/caddy/*.caddy "$SRC"/cron/* "$SRC"/env/*.example "$SRC"/scripts/*; do
+  [ -f "$f" ] || continue
+  if LC_ALL=C grep -qU "$CR" "$f" 2>/dev/null; then CRLF_HITS="$CRLF_HITS
+  $f"; fi
+done
+if [ -n "$CRLF_HITS" ]; then
+  echo "FATAL: these files contain CRLF line endings and would break at runtime:" >&2
+  printf "%b
+" "$CRLF_HITS" >&2
+  echo "" >&2
+  echo "Fix on the server with:   sed -i 's/\r$//' <file>" >&2
+  echo "Or re-copy from a checkout where .gitattributes has normalised them." >&2
+  exit 1
+fi
+
 echo "==> directories"
 install -d -m 755 -o rasid -g rasid /opt/rasid/api /opt/rasid/web /opt/rasid/gotrue /var/lib/rasid
 install -d -m 755 -o root  -g root  /opt/rasid/bin
