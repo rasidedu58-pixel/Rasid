@@ -1,0 +1,113 @@
+name: Build deploy artifacts
+
+# Produces the two artifacts the self-hosted VPS runs, on Linux.
+#
+# WHY THIS EXISTS AND IS MANUAL:
+#  * The target host is a 1.9 GB box shared with an unrelated production
+#    product. `next build` peaks near 1.5-2 GB, so it must not run there.
+#  * `output: "standalone"` recreates pnpm's symlink tree, which Windows
+#    refuses without Developer Mode — so a Windows workstation cannot produce
+#    this artifact at all. Linux CI is the reliable builder.
+#  * It is `workflow_dispatch` only: it builds and uploads. It never deploys,
+#    never touches the server, and holds no server credentials.
+#
+# The public origin is an INPUT because every NEXT_PUBLIC_* value is compiled
+# INTO the web bundle. An artifact is only valid for the origin it was built
+# for; building for the wrong one yields a bundle that calls the wrong API.
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_origin:
+        description: "Public origin, no trailing slash (e.g. https://rasid.204.44.93.211.sslip.io)"
+        required: true
+        default: "https://rasid.204.44.93.211.sslip.io"
+      anon_key:
+        description: "GoTrue anon key (public, not a secret — inlined into the bundle)"
+        required: true
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Reject a trailing slash in the origin
+        # A trailing slash produces doubled slashes in the derived JWKS and
+        # issuer URLs, and the issuer must match GoTrue character for
+        # character or every request 401s with a valid-looking token.
+        run: |
+          case "${{ inputs.public_origin }}" in
+            */) echo "::error::public_origin must not end with '/'"; exit 1;;
+          esac
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace
+        env:
+          NODE_ENV: production
+          NEXT_PUBLIC_API_URL: ${{ inputs.public_origin }}/api/v1
+          NEXT_PUBLIC_APP_URL: ${{ inputs.public_origin }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ inputs.public_origin }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ inputs.anon_key }}
+          NEXT_PUBLIC_OFFLINE: "false"
+        run: pnpm build
+
+      - name: Assemble API artifact
+        # `pnpm deploy` resolves workspace dependencies into a REAL, flat
+        # node_modules rather than a symlink farm — that is what makes the
+        # result safe to copy to a host that has no pnpm.
+        run: |
+          pnpm --filter @academic-precision/api deploy --prod deploy/out/api
+          test -f deploy/out/api/dist/main.js
+
+      - name: Assemble web artifact
+        # Next does not copy public/ or .next/static into the standalone
+        # output; doing it here is required, not an optimisation.
+        run: |
+          cp -r apps/web/.next/standalone deploy/out/web
+          mkdir -p deploy/out/web/apps/web/.next
+          cp -r apps/web/.next/static deploy/out/web/apps/web/.next/static
+          if [ -d apps/web/public ]; then cp -r apps/web/public deploy/out/web/apps/web/public; fi
+          test -f deploy/out/web/apps/web/server.js
+
+      - name: Smoke-check the built API artifact boots
+        # Catches a packaging fault (a dependency left unresolved) here rather
+        # than as a crash-loop on the server. No database is reachable, so the
+        # process is expected to fail on connect — what matters is that it does
+        # not die with a module-resolution error.
+        run: |
+          cd deploy/out/api
+          set +e
+          OUT=$(HOST=127.0.0.1 PORT=7999 NODE_ENV=production timeout 20s node dist/main.js 2>&1)
+          echo "$OUT" | tail -30
+          if echo "$OUT" | grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module"; then
+            echo "::error::API artifact is incomplete — missing module at runtime"
+            exit 1
+          fi
+          echo "no module-resolution failure"
+
+      - name: Report sizes
+        run: du -sh deploy/out/api deploy/out/web
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rasid-deploy-${{ github.sha }}
+          path: deploy/out/
+          retention-days: 14
+          # Preserve the executable bits and symlinks inside the artifact.
+          include-hidden-files: true

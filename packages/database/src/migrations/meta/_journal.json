@@ -498,6 +498,13 @@
       "when": 1790000000000,
       "tag": "0072_platform_leads",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790100000000,
+      "tag": "0073_connection_limit_vps_recalibration",
+      "breakpoints": true
     }
   ]
 }

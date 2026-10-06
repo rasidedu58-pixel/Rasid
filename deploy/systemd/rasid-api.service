@@ -1,0 +1,52 @@
+# Rasid — API (NestJS/Fastify).
+#
+# Unit naming follows the host's existing convention: <project>-<role>.service.
+# Runs as the dedicated unprivileged `rasid` system user, binds to loopback
+# only (HOST=127.0.0.1 in the env file) and is reachable exclusively through
+# Caddy. The artifact is a `pnpm deploy` output: dist/ plus a real, flat
+# node_modules, so this host needs no pnpm and no build toolchain.
+[Unit]
+Description=Rasid — API (NestJS)
+Documentation=https://github.com/
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=rasid
+Group=rasid
+WorkingDirectory=/opt/rasid/api
+EnvironmentFile=/etc/rasid/api.env
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=3
+# A failing boot must not hammer the shared box forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+KillSignal=SIGTERM
+# The app installs SIGTERM handlers for graceful shutdown; give them room.
+TimeoutStopSec=30
+
+# --- Hardening: this box is shared with an unrelated product. ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+# The only writable path it needs; everything else is read-only.
+ReadWritePaths=/var/lib/rasid
+# Loopback + DNS only. No raw sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Guard against one service eating the 1.9 GB host.
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

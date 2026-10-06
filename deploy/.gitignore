@@ -1,0 +1,11 @@
+# Build artifacts assembled by deploy/scripts/build-artifacts.sh (or CI).
+# These are large, machine-specific, and regenerated on every build — they must
+# never enter git. Scoped to this directory on purpose: the repository root's
+# .gitignore carries unrelated in-flight changes and is left untouched.
+out/
+
+# Filled-in copies of the *.env.example templates. The examples are tracked;
+# the real files hold role passwords, the GoTrue signing key and API keys, and
+# must stay local / on the server only.
+*.env
+!*.env.example

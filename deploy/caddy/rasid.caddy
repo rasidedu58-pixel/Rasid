@@ -1,0 +1,73 @@
+# ═══════════════════════════════════════════════════════════════════════
+# Rasid — routing. Installs to /etc/caddy/conf.d/rasid.caddy
+# ═══════════════════════════════════════════════════════════════════════
+# This file is the ONLY Caddy change Rasid makes. The host's main Caddyfile
+# already does `import /etc/caddy/conf.d/*.caddy` and explicitly must not be
+# edited when adding a project, and no other project's fragment is touched.
+#
+# SINGLE-ORIGIN DESIGN — the reason this file is so short:
+# one hostname serves web + API + auth, and NO path rewriting is needed,
+# because each upstream already owns its prefix natively:
+#   * the API sets a global prefix of /api/v1 (NestJS setGlobalPrefix)
+#   * GoTrue serves under /auth/v1
+# That alignment is what lets the API's existing token verifier work verbatim:
+# it derives the JWKS URL and the issuer from one base URL, so with
+# SUPABASE_URL = https://<this host>, it resolves to
+#   https://<host>/auth/v1/.well-known/jwks.json   (served by GoTrue)
+#   https://<host>/auth/v1                          (the issuer GoTrue signs)
+# It also makes browser->API same-origin, which removes CORS and cookie-scope
+# from the list of things that can break in production.
+#
+# ORDER MATTERS: Caddy evaluates `handle` blocks in written order, so the two
+# specific prefixes must precede the catch-all. Moving the catch-all up would
+# silently swallow auth and API traffic into the Next.js server.
+#
+# SWITCHING TO A REAL DOMAIN LATER is a coordinated change, not a one-liner:
+# the hostname below IS the token issuer. Changing it invalidates every live
+# session, so it must happen together with SUPABASE_URL (api.env),
+# GOTRUE_API_EXTERNAL_URL / GOTRUE_SITE_URL / GOTRUE_URI_ALLOW_LIST /
+# GOTRUE_JWT_ISSUER (gotrue.env) and a web REBUILD (NEXT_PUBLIC_* are inlined
+# at build time). Everyone re-logs in afterwards.
+
+rasid.204.44.93.211.sslip.io {
+	encode zstd gzip
+
+	# --- Auth (GoTrue) ---
+	handle /auth/v1/* {
+		reverse_proxy 127.0.0.1:7120
+	}
+
+	# --- API (NestJS) — owns /api/v1 itself, so pass the path through as-is ---
+	handle /api/v1/* {
+		reverse_proxy 127.0.0.1:7100
+	}
+
+	# --- Everything else: the Next.js server (SSR/RSC, static assets) ---
+	handle {
+		reverse_proxy 127.0.0.1:7110
+	}
+
+	header {
+		# Caddy terminates TLS here, so HSTS belongs here. includeSubDomains is
+		# deliberately omitted while the host is a shared sslip.io name; revisit
+		# when the real domain lands.
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		# Don't advertise the server software.
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/rasid.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
+
+# ── When the paid domain is attached, add (and point DNS A records here): ──
+# www.example.com {
+# 	redir https://example.com{uri} permanent
+# }

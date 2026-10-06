@@ -1,0 +1,46 @@
+# Rasid — Web (Next.js 14 App Router, server-rendered).
+#
+# Runs the `output: "standalone"` artifact: `node apps/web/server.js`. Next's
+# standalone server reads HOSTNAME (not HOST) to choose its bind address, so
+# the env file sets HOSTNAME=127.0.0.1.
+#
+# IMPORTANT: every NEXT_PUBLIC_* value is inlined into the bundle at BUILD
+# time, not read here. Changing a public value means rebuilding and reshipping
+# the artifact — setting it in this unit's env file does nothing. See
+# deploy/env/web.build.env.example.
+[Unit]
+Description=Rasid — Web (Next.js)
+After=network-online.target rasid-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rasid
+Group=rasid
+WorkingDirectory=/opt/rasid/web
+EnvironmentFile=/etc/rasid/web.env
+ExecStart=/usr/bin/node apps/web/server.js
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=300
+StartLimitBurst=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/var/lib/rasid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

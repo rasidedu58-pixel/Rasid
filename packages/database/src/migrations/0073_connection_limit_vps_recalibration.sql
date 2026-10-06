@@ -1,0 +1,49 @@
+-- 0073 — Self-hosted VPS: role CONNECTION LIMIT recalibration, from measured evidence.
+--
+-- WHY THIS EXISTS: 0050 sized the role limits for Supabase, whose cluster gave
+-- this project 60 backend connections AND was not shared with another product.
+-- Production now runs on a self-hosted PostgreSQL 16 cluster that is SHARED
+-- with a second, unrelated project. Carrying 0050's 36-connection reservation
+-- onto a 50-connection shared cluster would leave almost no headroom and would
+-- turn any burst in the neighbouring project into hard 53300 failures here —
+-- or ours into failures there. 0050 is NOT edited (migrations are forward-only);
+-- this one supersedes its numbers.
+--
+-- Live-measured layer map (2026-10-06, target server):
+--   max_connections ................................. 50
+--   superuser_reserved_connections ..................  3
+--   = usable by non-superuser roles ................. 47
+--   neighbouring project, steady state (measured) ... 15
+--       (its PostgREST role 11 across two environments, its auth role 2,
+--        admin/psql 2; background workers do not consume these slots)
+--   neighbouring project role limits ................ UNCAPPED (rolconnlimit -1)
+--
+-- Budget after this migration (backend connections):
+--   app_runtime ......... 14   (DB_POOL_MAX default 10 + 4 for transient
+--                               overlap: a redeploy's old process draining
+--                               while the new one warms, plus a migration run)
+--   app_platform_admin ..  4   (PLATFORM_ADMIN_DB_POOL_MAX default 3 + 1)
+--   app_worker ..........  4   (WORKER_DB_POOL_MAX default 3 + 1; the worker
+--                               is not deployed yet, so this reserves nothing
+--                               in practice — the cap exists before the need)
+--   sum(app roles) ...... 22   (steady-state demand is 13)
+--   neighbour ........... 15
+--   total worst case .... 37 of 47 → 10 connections true headroom
+--
+-- ASYMMETRY, STATED PLAINLY: these caps protect the neighbouring project from
+-- us. They cannot protect us from it, because its roles carry no limit. Capping
+-- its roles would be the technically correct completion of this budget, but it
+-- is another product's configuration and is deliberately left untouched. Its
+-- usage has been stable across 19 days of uptime; this is a monitored
+-- acceptance, not an oversight.
+--
+-- If more parallelism is genuinely needed later, raise the pool env vars FIRST
+-- (they are the real demand), then these caps, and only then consider raising
+-- the cluster's max_connections — which costs shared memory on a 1.9 GB host
+-- and affects the neighbouring project too.
+
+ALTER ROLE "app_runtime" CONNECTION LIMIT 14;
+--> statement-breakpoint
+ALTER ROLE "app_platform_admin" CONNECTION LIMIT 4;
+--> statement-breakpoint
+ALTER ROLE "app_worker" CONNECTION LIMIT 4;

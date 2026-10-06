@@ -1,0 +1,14 @@
+# Rasid scheduled jobs. Installs to /etc/cron.d/rasid (mode 644, root-owned).
+# One file per project, matching the host's existing convention. This file
+# never references another project's scripts or schedules.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# Daily database dump at 02:30 UTC — ahead of the neighbouring project's 03:00
+# dump and its ~03:31 cleanup, so the two never compete for the 2 cores.
+30 2 * * *   root  KEEP_DAYS=14 /opt/rasid/bin/backup-db.sh >> /var/log/rasid-backup.log 2>&1
+
+# Monthly restore test, 1st at 04:10 UTC. Restores the newest dump into a
+# throwaway database and drops it. An untested backup is not a backup.
+10 4 1 * *   root  /opt/rasid/bin/restore-test.sh >> /var/log/rasid-backup.log 2>&1

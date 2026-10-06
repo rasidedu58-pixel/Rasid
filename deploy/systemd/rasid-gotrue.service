@@ -1,0 +1,47 @@
+# Rasid — GoTrue (self-hosted Supabase Auth).
+#
+# Replaces hosted Supabase Auth. It is the same software, so the token shape
+# the API already verifies (sub / email / user_metadata) is preserved, and it
+# signs ASYMMETRICALLY (ES256) because the API's verifier accepts JWKS only —
+# there is no shared-secret path in the code.
+#
+# It owns the `auth` schema inside the SAME `rasid` database, under its own
+# dedicated role. The application roles are NOT granted access to that schema:
+# the app learns identity from the verified token, never by reading auth tables.
+[Unit]
+Description=Rasid — GoTrue (auth)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=rasid
+Group=rasid
+WorkingDirectory=/opt/rasid/gotrue
+EnvironmentFile=/etc/rasid/gotrue.env
+ExecStart=/opt/rasid/gotrue/auth
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=300
+StartLimitBurst=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# A Go binary; this is generous.
+MemoryMax=192M
+
+[Install]
+WantedBy=multi-user.target

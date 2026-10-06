@@ -153,9 +153,16 @@ async function bootstrap() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port, "0.0.0.0");
+  // `HOST` exists for self-hosted deployments whose security model is
+  // "only the reverse proxy is reachable; every backend binds to loopback".
+  // The default stays `0.0.0.0` deliberately: container/PaaS runtimes route
+  // traffic from outside the process namespace and MUST have all interfaces
+  // bound, so defaulting to loopback would silently break them. A host that
+  // wants loopback sets HOST=127.0.0.1 explicitly in its environment file.
+  const host = process.env.HOST ?? "0.0.0.0";
+  await app.listen(port, host);
   // eslint-disable-next-line no-console
-  console.log(`Academic Precision API listening on port ${port} (prefix: /${API_PREFIX})`);
+  console.log(`Academic Precision API listening on ${host}:${port} (prefix: /${API_PREFIX})`);
 }
 
 bootstrap().catch((error) => {
