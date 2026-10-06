@@ -56,8 +56,18 @@ echo "==> cron"
 install -m 644 -o root -g root "$SRC/cron/rasid" /etc/cron.d/rasid
 
 echo "==> caddy fragment"
-# Caddy needs a writable log directory before it is told to log there.
-install -d -m 755 -o caddy -g caddy /var/log/caddy 2>/dev/null || install -d -m 755 /var/log/caddy
+# Caddy needs a writable log directory before it is told to log there — but if
+# it already exists it is SHARED with other projects' logs. Creating it is
+# ours to do; re-stating its mode or ownership is not. `install -d` would
+# silently apply the mode to an existing directory, which on this host would
+# loosen 750 to 755 and expose a neighbour's access logs. So: create only when
+# absent, and otherwise touch nothing.
+if [ -d /var/log/caddy ]; then
+  echo "    /var/log/caddy exists — leaving its mode and ownership untouched (shared)"
+else
+  install -d -m 750 -o caddy -g caddy /var/log/caddy
+  echo "    created /var/log/caddy (750 caddy:caddy)"
+fi
 install -m 644 -o root -g root "$SRC/caddy/rasid.caddy" /etc/caddy/conf.d/rasid.caddy
 
 # Validate the WHOLE config — ours plus every neighbour's — before reloading.
