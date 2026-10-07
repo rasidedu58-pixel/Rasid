@@ -25,4 +25,30 @@ if [ "$TABLES" -lt 20 ]; then
   exit 1
 fi
 
-echo "rasid-restore-test: ok $NEWEST restored $TABLES public tables into $SCRATCH (dropped)"
+# Counting tables is NOT enough, and the previous version of this script stopped
+# there. A dump taken with --no-acl restores every table and still leaves the
+# application roles with no privileges at all — so the table count passes while
+# the restored database is unusable. Assert the privileges directly.
+#
+# `students` is a core tenant table that app_runtime must be able to read and
+# write; if its grants came back, the ACLs survived the round trip.
+for PRIV in SELECT INSERT UPDATE; do
+  OK=$(sudo -u postgres psql -At --dbname "$SCRATCH" \
+    -c "SELECT has_table_privilege('app_runtime','public.students','$PRIV');")
+  if [ "$OK" != "t" ]; then
+    echo "rasid-restore-test: FAIL app_runtime lacks $PRIV on public.students after restore" >&2
+    echo "  the dump carries no ACLs — a restore from it would not serve traffic." >&2
+    exit 1
+  fi
+done
+
+# RLS is the tenant-isolation boundary; a restore that drops it would silently
+# expose every workspace's rows to every other workspace.
+RLS=$(sudo -u postgres psql -At --dbname "$SCRATCH" \
+  -c "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND rowsecurity;")
+if [ "$RLS" -lt 10 ]; then
+  echo "rasid-restore-test: FAIL only $RLS public tables have RLS enabled after restore" >&2
+  exit 1
+fi
+
+echo "rasid-restore-test: ok $NEWEST restored $TABLES public tables, $RLS RLS-enabled, app_runtime grants intact (dropped $SCRATCH)"

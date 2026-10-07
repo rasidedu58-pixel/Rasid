@@ -47,6 +47,18 @@ ssh "$TARGET" 'set -e
   sleep 3
   systemctl is-active rasid-api rasid-web'
 
-echo "==> post-deploy health (loopback, through nothing)"
-ssh "$TARGET" 'curl -fsS -m 10 http://127.0.0.1:7100/api/v1/health && echo && curl -fsS -m 10 -o /dev/null -w "web: HTTP %{http_code}\n" http://127.0.0.1:7110/'
+# /ready, NOT /health. `/health` is pure liveness: it answers "the process
+# accepts HTTP" without touching a dependency, so a service started with a
+# wrong or unreachable DATABASE_URL reports healthy and the deploy looks
+# successful — the API boots fully with no database at all. `/ready` runs
+# pingDatabase() and returns 503 when the pool cannot reach Postgres, which is
+# the question a deploy actually needs answered.
+echo "==> post-deploy readiness (loopback, through nothing)"
+ssh "$TARGET" 'set -e
+  curl -fsS -m 15 http://127.0.0.1:7100/api/v1/ready \
+    || { echo "FATAL: API is up but NOT ready — it cannot reach the database."; \
+         echo "       Check DATABASE_URL in /etc/rasid/api.env and: journalctl -u rasid-api -n 50"; \
+         exit 1; }
+  echo
+  curl -fsS -m 15 -o /dev/null -w "web: HTTP %{http_code}\n" http://127.0.0.1:7110/'
 echo "==> done"

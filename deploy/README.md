@@ -21,7 +21,7 @@ toolchain — only `node`, which is already installed (v20.20.2).
 | Web port | `7110` | `9000`/`9001` taken |
 | GoTrue port | `7120` | `9998`/`9999` taken |
 | Database | `rasid` | own database; roles `app_runtime`, `app_platform_admin`, `app_worker`, `rasid_auth` |
-| Role limits | 14 / 4 / 4 | cluster `max_connections` is **50 shared** — see migration `0073` |
+| Role limits | 14 / 4 / 4 / 7 | cluster `max_connections` is **50 shared** — `0073` for the three app roles, `0074` for `rasid_auth` (GoTrue) |
 | Backup | 02:30 UTC | neighbour dumps at 03:00, cleans ~03:31 |
 
 ## Layout on the server
@@ -61,7 +61,16 @@ deploy/scripts/ship.sh root@<host>
 `ship.sh` syncs only `/opt/rasid/{api,web}`, fixes ownership, restarts the two
 units, and checks health on loopback.
 
-## Two traps worth remembering
+## Three traps worth remembering
+
+**0. A mailed auth link must land on GoTrue, not on the app.**
+`GOTRUE_MAILER_URLPATHS_*` are GoTrue's own paths (`/auth/v1/verify`), not app
+routes. Pointing them at an app page skips the token exchange entirely, so
+signup confirmation and password recovery fail while looking configured. The
+app route is supplied per request as `redirect_to` by the client — the web app
+has no callback page at all, and `forgot-password` passes `/reset-password`.
+
+
 
 **1. `NEXT_PUBLIC_*` is compiled in, not read at runtime.** Setting one in
 `/etc/rasid/web.env` does nothing. Changing a public origin requires a rebuild
@@ -83,3 +92,11 @@ must be copied off-server. The host's own runbook names this same gap.
 Role connection caps protect the neighbour from us; they cannot protect us from
 the neighbour, whose roles are uncapped. That is another product's config and is
 deliberately left alone — a monitored acceptance, not an oversight.
+
+Dumps keep ACLs and ownership (`pg_dump` with neither `--no-acl` nor
+`--no-owner`): 38 migrations issue GRANTs, so a dump without them restores a
+schema the app roles cannot use. Roles are cluster-global and therefore dumped
+separately to `roles-<date>.sql`, which contains password hashes and belongs in
+the same off-server copy as `/etc/rasid/*.env`. The monthly restore test asserts
+`app_runtime`'s grants on `public.students` and a floor on RLS-enabled tables,
+not just a table count — a table count passes a dump that cannot serve traffic.

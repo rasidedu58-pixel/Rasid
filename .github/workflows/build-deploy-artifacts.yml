@@ -119,5 +119,13 @@ jobs:
           name: rasid-deploy-${{ github.sha }}
           path: deploy/out/
           retention-days: 14
-          # Preserve the executable bits and symlinks inside the artifact.
+          # Dotfiles matter here (.next/, .env-less configs), hence this flag.
+          #
+          # Be aware of what upload-artifact does NOT keep: it zips the tree,
+          # so symlinks are dereferenced into real files and the executable bit
+          # is lost. The artifact still WORKS — `pnpm deploy` already produced a
+          # real flat node_modules, and nothing on the server is launched from a
+          # symlink — but a downloaded script may need `bash <script>` rather
+          # than `./<script>`. install-config.sh re-applies every mode with
+          # `install -m` on the server, so the final permissions are correct.
           include-hidden-files: true

@@ -13,6 +13,12 @@ Description=Rasid — GoTrue (auth)
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
+# Rate-limit restarts: a failing boot must not hammer a box shared with a live
+# product. These two directives are read from [Unit] ONLY — systemd ignores
+# them in [Service] (logging "Unknown key name ... ignoring"), which is where
+# they previously sat, leaving this guard inert.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -23,8 +29,6 @@ EnvironmentFile=/etc/rasid/gotrue.env
 ExecStart=/opt/rasid/gotrue/auth
 Restart=always
 RestartSec=3
-StartLimitIntervalSec=300
-StartLimitBurst=5
 KillSignal=SIGTERM
 TimeoutStopSec=20
 

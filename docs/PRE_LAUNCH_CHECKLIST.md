@@ -5,6 +5,36 @@ Status as of **2026-08-25**. This is a living document — update status honestl
 as gates close; never mark something PASS without real evidence (see
 `docs/RELEASE_GATES.md` for the fuller narrative behind each open gate).
 
+> ## ⚠️ PARTLY SUPERSEDED — read this first
+>
+> This was written for the **Vercel + Railway + Supabase** deployment. The
+> product is now self-hosted on a single VPS, so every row naming those
+> providers describes infrastructure that no longer exists. Infrastructure and
+> hosting rows are superseded by
+> `docs/VPS_SELF_HOSTING_MIGRATION_PLAN.md`; the business/product rows
+> (billing, auth flows, security coverage) still stand.
+>
+> Specific rows now known to be out of date:
+>
+> - **"`/health` and `/ready` both return a trivial `{status:"ok"}`"** — no
+>   longer true. `/ready` calls `pingDatabase()` and returns 503 when Postgres
+>   is unreachable (`apps/api/src/health/health.service.ts`).
+> - **"Connection budget headroom" (⛔)** — that 60-connection Supabase
+>   analysis is obsolete. The VPS cluster shares 50 connections with an
+>   unrelated project; see migrations `0073` and `0074`, which leave 3 spare.
+> - **"Backup exists (Supabase automatic)" / "Restore drill executed"** —
+>   backups are now `deploy/scripts/backup-db.sh` (daily 02:30 UTC) with a
+>   monthly automated restore test that asserts grants and RLS, not just a
+>   table count.
+> - **"Auth email delivery" / "rate limiting" (Supabase dashboard)** — auth is
+>   now self-hosted GoTrue; email goes via Resend SMTP, and its rate limits are
+>   GoTrue's own configuration.
+> - **"Swagger/API docs exposure decision"** — decided: off when
+>   `NODE_ENV=production`, `API_DOCS_ENABLED=true` to override.
+>
+> **Still open and still blocking real payment:** the single-`PADDLE_PRICE_ID`
+> row below. Six displayed tiers, one price.
+
 Legend: ✅ PASS · ⚠️ PARTIAL/RISK · ⛔ BLOCKER · 👤 EXTERNAL/HUMAN ACTION
 
 ## Infrastructure

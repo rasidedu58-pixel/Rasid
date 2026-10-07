@@ -133,9 +133,18 @@ IP and does not collide with the neighbour's bare name.
 ```
 max_connections 50 - superuser_reserved 3      = 47 usable
 neighbour, measured steady state                = 15
-Rasid caps (14 + 4 + 4)                         = 22   (steady demand 13)
-worst case                                      = 37 of 47 -> 10 spare
+Rasid app caps (14 + 4 + 4)                     = 22   (steady demand 13)
+rasid_auth / GoTrue (migration 0074)            =  7   (pool 5 + 2 overlap)
+worst case                                      = 44 of 47 -> 3 spare
 ```
+
+**Correction (migration `0074`).** The original budget above counted only the
+three application roles and omitted `rasid_auth`, the role GoTrue connects
+with — which was uncapped, and whose pool size was unset, leaving it free to
+consume the whole stated headroom. `GOTRUE_DB_MAX_POOL_SIZE=5` is now explicit
+in `gotrue.env` and `rasid_auth` is capped at 7. The real headroom is 3, not
+10. If that proves too tight, the lever is the cluster's `max_connections`
+(which costs shared memory and affects the neighbour), not an uncapped role.
 
 Migration `0073` supersedes `0050`'s 36-connection reservation, which was
 sized for Supabase's 60-connection single-tenant cluster. `0050` is not
@@ -242,6 +251,23 @@ Read-only verification precedes every mutating step; each step stops on failure.
 
 ---
 
+## 6b. Corrections applied to these assets after review
+
+Found by reviewing the assets against the code they deploy, before any of
+steps 4-14 ran. Each was capable of failing the cutover on its own:
+
+| Fault | Effect if unfixed | Fix |
+|---|---|---|
+| `GOTRUE_MAILER_URLPATHS_*` set to `/auth/callback` | **No such route exists in the web app.** The link bypasses `/auth/v1/verify`, so the one-time token is never consumed — signup confirmation and password recovery both fail. Would have failed the step-11 gate. | Set to `/auth/v1/verify`; dropped the non-existent `/auth/callback` from `GOTRUE_URI_ALLOW_LIST` |
+| `backup-db.sh` used `--no-owner --no-acl` | 38 migrations issue GRANTs; stripping ACLs restores a complete-looking schema the app roles cannot read or write. `auth` would also not be owned by `rasid_auth`. | Both flags removed; roles dumped separately via `pg_dumpall --roles-only` |
+| `restore-test.sh` only counted tables | Would have reported the above dump as **ok** every month | Now asserts `app_runtime`'s SELECT/INSERT/UPDATE on `public.students` and an RLS-enabled floor |
+| `StartLimitIntervalSec`/`StartLimitBurst` in `[Service]` | systemd reads them from `[Unit]` only and ignores them with a warning — the crash-loop guard was inert on a 1.9 GB shared box | Moved to `[Unit]` (verified with `systemd-analyze verify`) |
+| `rasid_auth` absent from the connection budget, pool unset | Silently spent the 10-connection headroom the budget depended on | `GOTRUE_DB_MAX_POOL_SIZE=5` + `rasid_auth` capped at 7 (migration `0074`) |
+| `GRANT CONNECT ON DATABASE postgres` in `0006`/`0032`/`0048` | Supabase's database name. CONNECT on `rasid` came only from PUBLIC's default, so the routine hardening step `REVOKE CONNECT ON DATABASE rasid FROM PUBLIC` would lock all three roles out of production. Reproduced on PostgreSQL 16.15. | Migration `0074` grants CONNECT on `current_database()` and revokes the explicit grants on `postgres` |
+| `/api/v1/docs` mounted unconditionally | Caddy proxies `/api/v1/*` here, so Swagger published the full API surface publicly | Off when `NODE_ENV=production`; `API_DOCS_ENABLED=true` overrides |
+| `ship.sh` health-checked `/health` | Liveness only — it touches no dependency. The API boots fully with **no** database, so a wrong `DATABASE_URL` reported a successful deploy. | Now checks `/ready` (runs `pingDatabase()`, 503 on failure) with a diagnostic message |
+| `build-artifacts.sh` produced no `deploy/out/config` | Only CI built it; `ship.sh` syncs it `if [ -d ]`, so a local build shipped silently without units, Caddy fragment or cron | Added the config stage, matching CI |
+
 ## 7. Open items
 
 1. **Domain.** Launch runs on `sslip.io`. Switching later invalidates every
@@ -258,6 +284,14 @@ Read-only verification precedes every mutating step; each step stops on failure.
    change that must be made with a verified second session open.
 5. **Single unmanaged host.** No autoscale; patching, monitoring and backup
    verification are now ours.
+6. **The build needs outbound `fonts.googleapis.com`.** `apps/web`'s root
+   layout uses `next/font/google` for IBM Plex Sans Arabic, fetched at build
+   time, so a network-restricted builder fails the web build after compiling.
+   Self-hosting the font would remove the dependency.
+7. **Pricing tiers are not individually purchasable.** All six displayed tiers
+   route to one `PADDLE_PRICE_ID`. Unrelated to the VPS move, but it gates
+   taking real money — see `docs/PRE_LAUNCH_CHECKLIST.md`.
+8. **Connection headroom is 3, not 10** (see the corrected budget above).
 
 ## 8. Out of scope
 

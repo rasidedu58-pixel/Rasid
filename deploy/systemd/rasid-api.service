@@ -11,6 +11,12 @@ Documentation=https://github.com/
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
+# Rate-limit restarts: a failing boot must not hammer a box shared with a live
+# product. These two directives are read from [Unit] ONLY — systemd ignores
+# them in [Service] (logging "Unknown key name ... ignoring"), which is where
+# they previously sat, leaving this guard inert.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -21,9 +27,6 @@ EnvironmentFile=/etc/rasid/api.env
 ExecStart=/usr/bin/node dist/main.js
 Restart=always
 RestartSec=3
-# A failing boot must not hammer the shared box forever.
-StartLimitIntervalSec=300
-StartLimitBurst=5
 KillSignal=SIGTERM
 # The app installs SIGTERM handlers for graceful shutdown; give them room.
 TimeoutStopSec=30

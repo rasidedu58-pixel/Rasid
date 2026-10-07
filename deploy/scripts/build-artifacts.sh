@@ -94,7 +94,21 @@ cp -r apps/web/.next/static "$OUT/web/apps/web/.next/static"
 if [ -d apps/web/public ]; then cp -r apps/web/public "$OUT/web/apps/web/public"; fi
 [ -f "$OUT/web/apps/web/server.js" ] || { echo "FATAL: web artifact missing apps/web/server.js" >&2; exit 1; }
 
+# ── 5. Config drop ──────────────────────────────────────────────────────────
+# ship.sh syncs deploy/out/config only `if [ -d ]`, and install-config.sh runs
+# FROM that directory on the server. Without this stage a local build shipped
+# the two artifacts and silently no units, no Caddy fragment and no cron — the
+# CI workflow built it but this script did not, so the two paths disagreed.
+# The build/ship scripts themselves are workstation tools and are excluded.
+rm -rf "$OUT/config"
+mkdir -p "$OUT/config"
+for d in systemd caddy cron env scripts; do
+  cp -r "$REPO_ROOT/deploy/$d" "$OUT/config/$d"
+done
+rm -f "$OUT/config/scripts/build-artifacts.sh" "$OUT/config/scripts/ship.sh"
+[ -f "$OUT/config/scripts/install-config.sh" ] || { echo "FATAL: config drop missing install-config.sh" >&2; exit 1; }
+
 echo
 echo "==> artifacts ready"
-du -sh "$OUT/api" "$OUT/web"
+du -sh "$OUT/api" "$OUT/web" "$OUT/config"
 echo "    next: deploy/scripts/ship.sh <user@host>"

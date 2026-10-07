@@ -505,6 +505,13 @@
       "when": 1790100000000,
       "tag": "0073_connection_limit_vps_recalibration",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790100000001,
+      "tag": "0074_vps_connect_grants_and_auth_role_cap",
+      "breakpoints": true
     }
   ]
 }

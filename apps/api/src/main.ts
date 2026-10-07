@@ -49,7 +49,10 @@ async function bootstrap() {
   // client IP) treat all traffic as a single client instead of isolating
   // abusive callers. Harmless locally (no proxy present, `req.ip` still
   // resolves to the direct connection).
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ trustProxy: true }));
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ trustProxy: true }),
+  );
 
   app.setGlobalPrefix(API_PREFIX);
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -88,32 +91,52 @@ async function bootstrap() {
   // unused there.
   const fastifyInstance = app.getHttpAdapter().getInstance();
   fastifyInstance.removeContentTypeParser("application/json");
-  fastifyInstance.addContentTypeParser("application/json", { parseAs: "string" }, (req, body: string, done) => {
-    (req as unknown as { rawBody?: string }).rawBody = body;
-    if (body.length === 0) {
-      done(null, {});
-      return;
-    }
-    try {
-      done(null, JSON.parse(body));
-    } catch (error) {
-      done(error as Error, undefined);
-    }
-  });
+  fastifyInstance.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (req, body: string, done) => {
+      (req as unknown as { rawBody?: string }).rawBody = body;
+      if (body.length === 0) {
+        done(null, {});
+        return;
+      }
+      try {
+        done(null, JSON.parse(body));
+      } catch (error) {
+        done(error as Error, undefined);
+      }
+    },
+  );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle("Academic Precision API")
-    .setDescription(
-      "Teacher V1 API — identity/auth/workspace, RBAC, scheduling, students, session mode, " +
-        "finance, attention/follow-up, billing/entitlements, reports, notifications, and the " +
-        "Action Center (Phases 1-9). Every route is rate-limited (Phase 10) — see response " +
-        "headers for the caller's remaining quota.",
-    )
-    .setVersion("v1")
-    .addBearerAuth({ type: "http", scheme: "bearer", bearerFormat: "JWT" })
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup(`${API_PREFIX}/docs`, app, document);
+  // Swagger describes every route, DTO and permission surface of the whole
+  // API. On the self-hosted VPS, Caddy proxies /api/v1/* straight here, so an
+  // unconditionally mounted /api/v1/docs is a public endpoint publishing the
+  // full attack surface of a production system.
+  //
+  // Default: mounted outside production, off in production. Set
+  // API_DOCS_ENABLED=true to override deliberately (e.g. a staging host).
+  const docsEnabled = process.env.API_DOCS_ENABLED
+    ? process.env.API_DOCS_ENABLED === "true"
+    : process.env.NODE_ENV !== "production";
+
+  if (docsEnabled) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle("Academic Precision API")
+      .setDescription(
+        "Teacher V1 API — identity/auth/workspace, RBAC, scheduling, students, session mode, " +
+          "finance, attention/follow-up, billing/entitlements, reports, notifications, and the " +
+          "Action Center (Phases 1-9). Every route is rate-limited (Phase 10) — see response " +
+          "headers for the caller's remaining quota.",
+      )
+      .setVersion("v1")
+      .addBearerAuth({ type: "http", scheme: "bearer", bearerFormat: "JWT" })
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup(`${API_PREFIX}/docs`, app, document);
+  } else {
+    // Say so at boot: a silently absent /docs is otherwise read as a bug.
+    console.log("API docs disabled (set API_DOCS_ENABLED=true to expose /docs)");
+  }
 
   // Phase 15D — graceful shutdown. Railway sends SIGTERM on every deploy /
   // scale-down; without a handler the process is killed mid-request and the

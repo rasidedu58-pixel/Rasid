@@ -1,9 +1,14 @@
 # Academic Precision — Teacher V1
 
-A production-oriented, Arabic-first/RTL SaaS monorepo. This repository currently
-implements **Phase 0 — Repository & Foundation only**. No business feature
-(Students, Groups, Sessions, Finance, Attention, Subscriptions, Auth flows,
-Reports, etc.) is implemented yet.
+A production-oriented, Arabic-first/RTL SaaS monorepo. Teacher V1's feature set
+is implemented through Phase 15 (identity/auth, workspaces, RBAC, scheduling,
+students, session mode, finance, attention/follow-up, billing/entitlements,
+reports, notifications, platform admin) across 73 migrations.
+
+**Deployment target: a single self-hosted Ubuntu 24.04 VPS** — Next.js web,
+NestJS API and self-hosted GoTrue behind one Caddy origin, on one PostgreSQL 16
+database. See `deploy/README.md` for the assets and
+`docs/VPS_SELF_HOSTING_MIGRATION_PLAN.md` for the plan and its open items.
 
 For the full governing package and engineering rules, read, in order:
 
@@ -91,19 +96,39 @@ pnpm build
 - `.env.example` (repo root) lists every variable name + a one-line
   description. Never commit real values.
 - `development` — local `.env`/`.env.local` files, never committed.
-- `staging` / `production` — variables are configured in the hosting
-  provider (Vercel for `apps/web`; Render for `apps/api`/`apps/worker`), not
-  committed to the repository.
+- `production` — on the self-hosted VPS, runtime variables live in
+  `/etc/rasid/{api,web,gotrue}.env` (mode 640, root:rasid), never in git. Note
+  that `NEXT_PUBLIC_*` values are compiled INTO the web bundle at build time,
+  so changing one requires a rebuild and reship, not a restart — build-time
+  public values are set in `deploy/env/web.build.env`.
 - `apps/web` only ever reads `NEXT_PUBLIC_*` (browser-safe) values on the
   client; server-only secrets stay in `packages/config`'s server module and
   `apps/api`/`apps/worker`.
 
-## Current phase status
+## Deployment
 
-**Phase 0 only.** This repository is infrastructure/foundation: monorepo
-tooling, app/package skeletons, health endpoints, structural DB schema
-boundaries, CI baseline. No later-phase business features (Auth flows,
-Workspace onboarding, Groups/Sessions/Students/Finance/Attention/
-Subscriptions/Notifications/Reports/Center product) are implemented. Do not
-begin later-phase work without an explicit new phase authorization — see
-`00_READ_FIRST.md` section 6.
+Builds never run on the server (1.9 GB shared with an unrelated production
+product; `next build` peaks near 1.5-2 GB). Artifacts are built in CI or on a
+Linux workstation and rsynced:
+
+```bash
+cp deploy/env/web.build.env.example deploy/env/web.build.env   # fill it in
+deploy/scripts/build-artifacts.sh deploy/env/web.build.env
+deploy/scripts/ship.sh root@<host>
+```
+
+The build needs outbound access to `fonts.googleapis.com` (`next/font/google`
+fetches IBM Plex Sans Arabic at build time).
+
+`deploy/README.md` documents the reserved ports, the single-origin routing, and
+the two traps that cost the most time: `NEXT_PUBLIC_*` being compile-time, and
+the public origin doubling as the auth token issuer.
+
+## Current status
+
+Feature phases through 15 are implemented. Before a public launch, read
+`docs/PRE_LAUNCH_CHECKLIST.md` for the remaining human/external gates — notably
+that all six displayed pricing tiers currently route to a single
+`PADDLE_PRICE_ID`, so tier-specific payment is not yet possible. Scope
+boundaries and the source-of-truth hierarchy remain as described in
+`00_READ_FIRST.md`.
