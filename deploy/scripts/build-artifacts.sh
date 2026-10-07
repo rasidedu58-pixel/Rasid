@@ -48,7 +48,10 @@ set -a
 # shellcheck disable=SC1090
 . "$BUILD_ENV"
 set +a
-export NODE_ENV=production
+
+# NODE_ENV is deliberately NOT exported yet — see step 2. A build env file that
+# sets it itself would reintroduce the bug, so clear it here.
+unset NODE_ENV
 
 : "${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL must be set in $BUILD_ENV}"
 : "${NEXT_PUBLIC_SUPABASE_URL:?NEXT_PUBLIC_SUPABASE_URL must be set in $BUILD_ENV}"
@@ -71,7 +74,19 @@ echo "    AUTH : $NEXT_PUBLIC_SUPABASE_URL"
 # ── 2. Install + build the whole workspace ──────────────────────────────────
 # Workspace packages publish from dist/ (their package.json main points there),
 # so they must be built before the API bundle is assembled.
+#
+# ORDER MATTERS, AND NODE_ENV MUST NOT BE SET FOR THE INSTALL. pnpm skips
+# devDependencies entirely when NODE_ENV=production ("devDependencies: skipped
+# because NODE_ENV is set to production"), and the build toolchain lives
+# there: turbo, the TypeScript compiler, the Nest CLI. Exporting it before the
+# install left no turbo on PATH and the build died with
+# "turbo: command not found" on a clean checkout. It only appeared to work
+# where a previous full install had already populated node_modules.
 pnpm install --frozen-lockfile
+
+# Now it is safe: next build and nest build read NODE_ENV, and turbo.json
+# lists it in build.env so the cache key reflects it.
+export NODE_ENV=production
 pnpm build
 
 # ── 3. API artifact: self-contained directory ───────────────────────────────
