@@ -1,0 +1,35 @@
+-- 0075 — app_runtime needs SELECT on platform_leads.workspace_id for its
+-- ON CONFLICT upsert to be allowed at all.
+--
+-- THE FAILURE: the first real login on the self-hosted deployment returned a
+-- 500. PostgreSQL logged:
+--
+--   app_runtime@rasid ERROR: permission denied for table platform_leads
+--   STATEMENT: insert into "platform_leads" (...) values (...)
+--              on conflict ("workspace_id") do nothing
+--
+-- 0072 granted `INSERT ON public.platform_leads TO app_runtime` and withheld
+-- SELECT on purpose: platform_leads is a platform-operations table with no
+-- tenant RLS, so letting the tenant runtime read it would expose every other
+-- teacher's lead record. That intent is right and is preserved here.
+--
+-- What 0072 missed is that `INSERT ... ON CONFLICT (col) DO NOTHING` is not a
+-- plain INSERT. Inferring the arbiter index and testing the conflicting row
+-- requires SELECT, so INSERT alone is rejected before a row is ever written.
+-- Reproduced on PostgreSQL 16.15 against a table with only INSERT granted:
+-- the plain INSERT succeeds and the identical statement with ON CONFLICT
+-- fails with exactly this error.
+--
+-- THE FIX, kept to the minimum that works. SELECT is granted on the conflict
+-- column ONLY. Verified on the same cluster:
+--   * ON CONFLICT insert         -> INSERT 0 1
+--   * same workspace_id again    -> INSERT 0 0   (correctly ignored)
+--   * select note, status        -> permission denied
+--   * select *                   -> permission denied
+-- So the upsert works and the commercial/operational columns stay unreadable
+-- by the tenant runtime, which is what 0072 set out to protect.
+--
+-- A blanket `GRANT SELECT ON platform_leads` would also have fixed the error
+-- and is the obvious thing to reach for. It is deliberately NOT used: it would
+-- let app_runtime read every row of a cross-tenant platform table.
+GRANT SELECT ("workspace_id") ON public.platform_leads TO app_runtime;

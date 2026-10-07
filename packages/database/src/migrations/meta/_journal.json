@@ -512,6 +512,13 @@
       "when": 1790100000001,
       "tag": "0074_vps_connect_grants_and_auth_role_cap",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790100000002,
+      "tag": "0075_platform_leads_on_conflict_select",
+      "breakpoints": true
     }
   ]
 }
