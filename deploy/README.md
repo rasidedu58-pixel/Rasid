@@ -41,14 +41,29 @@ toolchain — only `node`, which is already installed (v20.20.2).
 ## Routing: one origin, no rewriting
 
 ```
-/auth/v1/*  -> 127.0.0.1:7120   GoTrue
-/api/v1/*   -> 127.0.0.1:7100   API   (owns the prefix itself)
+/auth/v1/*  -> 127.0.0.1:7120   GoTrue   (prefix STRIPPED — handle_path)
+/api/v1/*   -> 127.0.0.1:7100   API      (owns the prefix itself — handle)
 /*          -> 127.0.0.1:7110   Web
 ```
 
-Each upstream already owns its prefix, so Caddy passes paths through untouched.
-That alignment is what lets the existing token verifier work with no code
-change: it derives both the JWKS URL and the issuer from one base origin.
+The two differ, and the difference is load-bearing. NestJS sets a global
+prefix of `/api/v1`, so the API owns that path natively and it passes through
+untouched. **GoTrue does not**: standalone, it serves at the root of its
+listener (`/token`, `/verify`, `/.well-known/jwks.json`). Hosted Supabase puts
+an API gateway in front to strip `/auth/v1`; here Caddy's `handle_path` does
+it. Verified against the running server:
+
+```console
+$ curl http://127.0.0.1:7120/.well-known/jwks.json
+{"keys":[{"alg":"ES256",...}]}
+```
+
+With a plain `handle`, GoTrue would receive `/auth/v1/token` and 404 every
+auth request — including the JWKS the API's verifier fetches.
+
+Externally the origin still looks uniform, which is what lets the existing
+token verifier work with no code change: it derives both the JWKS URL and the
+issuer from one base origin.
 
 ## Deploy
 

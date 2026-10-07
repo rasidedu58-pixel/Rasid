@@ -5,11 +5,11 @@
 # already does `import /etc/caddy/conf.d/*.caddy` and explicitly must not be
 # edited when adding a project, and no other project's fragment is touched.
 #
-# SINGLE-ORIGIN DESIGN — the reason this file is so short:
-# one hostname serves web + API + auth, and NO path rewriting is needed,
-# because each upstream already owns its prefix natively:
-#   * the API sets a global prefix of /api/v1 (NestJS setGlobalPrefix)
-#   * GoTrue serves under /auth/v1
+# SINGLE-ORIGIN DESIGN — one hostname serves web + API + auth. The two
+# upstreams differ in how they expect the path, so the two blocks differ:
+#   * the API sets a global prefix of /api/v1 (NestJS setGlobalPrefix), so it
+#     owns that prefix natively and the path passes through untouched
+#   * GoTrue serves at its listener's ROOT, so /auth/v1 must be STRIPPED
 # That alignment is what lets the API's existing token verifier work verbatim:
 # it derives the JWKS URL and the issuer from one base URL, so with
 # SUPABASE_URL = https://<this host>, it resolves to
@@ -33,7 +33,16 @@ rasid.204.44.93.211.sslip.io {
 	encode zstd gzip
 
 	# --- Auth (GoTrue) ---
-	handle /auth/v1/* {
+	# handle_path, NOT handle: the trailing _path STRIPS the matched prefix
+	# before proxying, and that is required here. Standalone GoTrue serves at
+	# the ROOT of its listener (/token, /signup, /verify,
+	# /.well-known/jwks.json) — it does NOT serve under /auth/v1. In hosted
+	# Supabase an API gateway strips that prefix; here Caddy must do it.
+	# Verified on the running server:
+	#     curl http://127.0.0.1:7120/.well-known/jwks.json   -> {"keys":[...]}
+	# With a plain `handle`, GoTrue would receive /auth/v1/token and answer
+	# 404 for every auth request, including the JWKS the API's verifier needs.
+	handle_path /auth/v1/* {
 		reverse_proxy 127.0.0.1:7120
 	}
 

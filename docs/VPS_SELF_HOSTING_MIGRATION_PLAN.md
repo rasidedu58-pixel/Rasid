@@ -107,8 +107,11 @@ https://rasid.204.44.93.211.sslip.io
   /*          ->  127.0.0.1:7110   Web
 ```
 
-Each upstream already owns its prefix, so Caddy passes paths through
-untouched. That alignment is what lets the existing verifier work verbatim
+The API owns `/api/v1` natively (NestJS `setGlobalPrefix`), so that path
+passes through untouched. GoTrue does **not** own `/auth/v1` — standalone it
+serves at its listener's root, so Caddy strips the prefix with `handle_path`
+(verified: `curl 127.0.0.1:7120/.well-known/jwks.json` returns the JWKS).
+Externally the origin is uniform, and that is what lets the verifier work
 with `SUPABASE_URL` set to the origin, and makes browser-to-API same-origin so
 CORS and cookie scope stop being failure modes.
 
