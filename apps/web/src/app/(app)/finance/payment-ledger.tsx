@@ -64,7 +64,7 @@ export function PaymentLedger() {
           <Chip key={m.label} active={method === m.value} onClick={() => setMethod(m.value)}>{m.label}</Chip>
         ))}
         <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-        <Chip active={onlyReversed} onClick={() => setOnlyReversed((v) => !v)}>المعكوسة فقط</Chip>
+        <Chip active={onlyReversed} onClick={() => setOnlyReversed((v) => !v)}>الملغاة فقط</Chip>
       </div>
 
       {query.isLoading ? (
@@ -107,13 +107,13 @@ export function PaymentLedger() {
                       <TableCell className="hidden text-sm tabular-nums text-text-secondary lg:table-cell">{formatDate(p.paidAt)}</TableCell>
                       <TableCell className="hidden text-sm text-text-tertiary xl:table-cell">{p.recordedByName ?? "—"}</TableCell>
                       <TableCell>
-                        <Badge tone={reversed ? "danger" : "success"}>{reversed ? "معكوسة" : "مسجّلة"}</Badge>
+                        <Badge tone={reversed ? "danger" : "success"}>{reversed ? "ملغاة" : "مسجّلة"}</Badge>
                       </TableCell>
                       <TableCell className="text-end">
                         {canReverse && !reversed ? (
                           <Button variant="ghost" size="sm" className="text-danger hover:bg-danger-subtle hover:text-danger" onClick={() => setReversing(p)}>
                             <RotateCcw className="h-4 w-4" aria-hidden />
-                            عكس
+                            إلغاء التسجيل
                           </Button>
                         ) : null}
                       </TableCell>

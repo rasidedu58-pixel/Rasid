@@ -9,6 +9,8 @@ export const qk = {
   workspaceContext: (workspaceId: string) => ["workspace-context", workspaceId] as const,
 
   students: {
+    /** Prefix root — every `students` key below starts with it (see `invalidateFinanceCaches`). */
+    all: (ws: string) => ["students", ws] as const,
     list: (ws: string, params?: Record<string, unknown>) => ["students", ws, "list", params] as const,
     detail: (ws: string, id: string) => ["students", ws, "detail", id] as const,
     obligations: (ws: string, id: string) => ["students", ws, id, "obligations"] as const,
@@ -34,6 +36,8 @@ export const qk = {
     review: (ws: string, id: string) => ["sessions", ws, id, "review"] as const,
   },
   finance: {
+    /** Prefix root — every `finance` key below starts with it (see `invalidateFinanceCaches`). */
+    all: (ws: string) => ["finance", ws] as const,
     collectionQueue: (ws: string) => ["finance", ws, "collection-queue"] as const,
     summary: (ws: string) => ["finance", ws, "summary"] as const,
     ledger: (ws: string, filters?: Record<string, unknown>) => ["finance", ws, "ledger", filters] as const,
@@ -52,6 +56,8 @@ export const qk = {
     entitlements: (ws: string) => ["entitlements", ws, "list"] as const,
   },
   reports: {
+    /** Prefix root — every `reports` key below starts with it (see `invalidateFinanceCaches`). */
+    all: (ws: string) => ["reports", ws] as const,
     student: (ws: string, id: string) => ["reports", ws, "student", id] as const,
     group: (ws: string, id: string) => ["reports", ws, "group", id] as const,
     monthly: (ws: string, monthId: string) => ["reports", ws, "monthly", monthId] as const,
