@@ -20,10 +20,18 @@ import {
   cn,
   toast,
 } from "@academic-precision/ui";
-import type { PrepareGroupCurrentMonthResponse } from "@academic-precision/contracts";
-import { createGroup, prepareGroupCurrentMonth } from "../../../lib/api/scheduling";
+import { confirmCreateMonth, createGroup, prepareGroupCurrentMonth, previewCreateMonth } from "../../../lib/api/scheduling";
 import { ApiRequestError } from "../../../lib/api/client";
 import { qk } from "../../../lib/query-keys";
+import {
+  DUE_DAY_EXPLAINER,
+  DUE_DAY_LABEL,
+  DUE_DAY_RANGE_HINT,
+  JOIN_FEE_POLICY_LABEL,
+  JOIN_FEE_POLICY_OPTIONS,
+  JOIN_FEE_POLICY_VALUE_LABEL,
+  MONTHLY_FEE_LABEL,
+} from "../../../lib/group-config-labels";
 import { useWorkspace } from "../../../lib/workspace-provider";
 
 // weekday 0 = Monday … 6 = Sunday (matches the session generator + existing forms).
@@ -42,9 +50,25 @@ const toMinutes = (t: string) => {
 const durationOf = (r: ScheduleRow) => toMinutes(r.endTime) - toMinutes(r.startTime);
 
 type Stage = "form" | "summary" | "need-month" | "retry-prepare";
+type JoinFeePolicy = (typeof JOIN_FEE_POLICY_OPTIONS)[number]["value"];
+
+/**
+ * What the wizard ends with — deliberately NOT
+ * `PrepareGroupCurrentMonthResponse` any more, because the group can now be
+ * made operational by either of two server paths (prepare-this-group, or
+ * bootstrap-the-first-month-with-this-group) and the summary only ever
+ * needed the session count out of them.
+ */
+interface WizardOutcome {
+  groupId: string;
+  generatedSessionCount: number;
+  alreadyPrepared: boolean;
+  /** True when this run also created the workspace's first operating month. */
+  bootstrappedMonth: boolean;
+}
 
 export function CreateGroupWizard() {
-  const { workspaceId, canWrite } = useWorkspace();
+  const { workspaceId, canWrite, isOwner } = useWorkspace();
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -58,10 +82,14 @@ export function CreateGroupWizard() {
   const [rows, setRows] = useState<ScheduleRow[]>([{ weekday: 5, startTime: "16:00", endTime: "18:00" }]);
   const [feeMajor, setFeeMajor] = useState("");
   const [dueDay, setDueDay] = useState("");
+  // Mid-month join policy — asked for HERE instead of being silently
+  // hardcoded to FULL, because it decides what a student who joins on the
+  // 15th actually owes (see `JOIN_FEE_POLICY_OPTIONS`).
+  const [joinFeePolicy, setJoinFeePolicy] = useState<JoinFeePolicy>("FULL");
 
   // Persisted across a failed prepare so a retry never re-creates the group.
   const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
-  const [summary, setSummary] = useState<{ groupId: string; res: PrepareGroupCurrentMonthResponse } | null>(null);
+  const [summary, setSummary] = useState<WizardOutcome | null>(null);
 
   function resetAll() {
     setStep(1);
@@ -72,6 +100,7 @@ export function CreateGroupWizard() {
     setRows([{ weekday: 5, startTime: "16:00", endTime: "18:00" }]);
     setFeeMajor("");
     setDueDay("");
+    setJoinFeePolicy("FULL");
     setCreatedGroupId(null);
     setSummary(null);
     submit.reset();
@@ -103,18 +132,61 @@ export function CreateGroupWizard() {
         // reflect Step 1 = COMPLETED so the user sees genuine progress.
         queryClient.invalidateQueries({ queryKey: qk.onboarding.status(workspaceId!) });
       }
-      const res = await prepareGroupCurrentMonth(workspaceId!, groupId, {
+      const config = {
         baseFeeMinor: Math.round(Number(feeMajor) * 100),
-        currencyCode: "EGP",
-        duePolicy: "PER_GROUP",
+        currencyCode: "EGP" as const,
+        duePolicy: "PER_GROUP" as const,
         dueDay: dueDay.trim() ? Number(dueDay) : null,
-        joinFeePolicy: "FULL",
+        joinFeePolicy,
         scheduleRules: rows.map((r) => ({ weekday: r.weekday, startTime: r.startTime, durationMinutes: durationOf(r) })),
-      });
-      return { groupId, res };
+      };
+
+      try {
+        const res = await prepareGroupCurrentMonth(workspaceId!, groupId, config);
+        return {
+          groupId,
+          generatedSessionCount: res.generatedSessionCount,
+          alreadyPrepared: res.status === "ALREADY_PREPARED",
+          bootstrappedMonth: false,
+        } satisfies WizardOutcome;
+      } catch (e) {
+        // An empty workspace has no CURRENT operating month yet, so the
+        // first group could never be prepared from here: the user was sent
+        // to /months/new and had to type the SAME fee, collection day and
+        // weekly schedule a second time. That re-entry is the bug.
+        //
+        // Everything the month needs is already in `config`, and the domain
+        // already supports this exact case: `evaluateMonthPrepEligibility`
+        // treats "no operating month at all" as bootstrap and creates the
+        // target month as CURRENT with no prep window, while
+        // `groupInitialConfig` is the approved way to give a brand-new group
+        // its first GroupMonth facts. So finish the job in one flow instead
+        // of bouncing the user. Month creation is owner-only (`assertOwner`),
+        // hence the `isOwner` guard — a non-owner still gets the recovery
+        // screen, which is the honest outcome for them.
+        if (!(e instanceof ApiRequestError && e.code === "NO_CURRENT_MONTH" && isOwner)) throw e;
+
+        const now = new Date();
+        const preview = await previewCreateMonth(workspaceId!, {
+          targetYear: now.getFullYear(),
+          targetMonth: now.getMonth() + 1,
+          selectedGroupIds: [groupId],
+          groupInitialConfig: { [groupId]: config },
+        });
+        const confirmed = await confirmCreateMonth(workspaceId!, { previewToken: preview.previewToken });
+        return {
+          groupId,
+          generatedSessionCount: confirmed.sessionCount,
+          alreadyPrepared: false,
+          bootstrappedMonth: true,
+        } satisfies WizardOutcome;
+      }
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: qk.groups.list(workspaceId!) });
+      // The bootstrap path also created an operating month + its sessions.
+      queryClient.invalidateQueries({ queryKey: qk.months.list(workspaceId!) });
+      queryClient.invalidateQueries({ queryKey: qk.months.prepEligibility(workspaceId!) });
       // The create → prepare-current-month flow writes group_months +
       // schedule_rules + GENERATED sessions in one server transaction —
       // that flips guided-setup Step 2 to COMPLETED and can flip Step 4
@@ -205,15 +277,27 @@ export function CreateGroupWizard() {
                   </div>
                 </Section>
               ) : (
-                <Section title="الرسوم والتشغيل" subtitle="رسوم هذا الشهر لهذه المجموعة.">
-                  <Field label="الرسوم الشهرية (جنيه)" htmlFor="g-fee" required>
+                <Section title="الرسوم والتحصيل" subtitle="رسوم هذه المجموعة وموعد تحصيلها.">
+                  <Field label={MONTHLY_FEE_LABEL} htmlFor="g-fee" required>
                     <Input id="g-fee" type="number" inputMode="numeric" min={0} value={feeMajor} onChange={(e) => setFeeMajor(e.target.value)} placeholder="مثال: 300" />
                   </Field>
-                  <Field label="يوم الاستحقاق في الشهر" htmlFor="g-dueday" hint="اختياري — من 1 إلى 28">
+                  <Field label={DUE_DAY_LABEL} htmlFor="g-dueday" hint={`اختياري — ${DUE_DAY_RANGE_HINT}`}>
                     <Input id="g-dueday" type="number" inputMode="numeric" min={1} max={28} value={dueDay} onChange={(e) => setDueDay(e.target.value)} placeholder="مثال: 5" />
+                    <p className="mt-1 text-xs text-text-tertiary">{DUE_DAY_EXPLAINER}</p>
+                  </Field>
+                  <Field label={JOIN_FEE_POLICY_LABEL} htmlFor="g-joinfee">
+                    <Select value={joinFeePolicy} onValueChange={(v) => setJoinFeePolicy(v as JoinFeePolicy)}>
+                      <SelectTrigger id="g-joinfee"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {JOIN_FEE_POLICY_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="mt-1 text-xs text-text-tertiary">يمكنك تغييرها لاحقًا من إعداد الشهر.</p>
                   </Field>
                   <div className="rounded-lg border border-dashed border-border bg-surface-sunken/40 px-3 py-2.5 text-xs text-text-secondary">
-                    ستُنشأ حصص هذا الشهر تلقائيًا من الجدول الأسبوعي، وتُضاف الرسوم عند تسجيل الطلاب.
+                    عند التأكيد ستُنشأ المجموعة ويُجهّز شهرها التشغيلي وتُولّد حصصه من الجدول الأسبوعي — دفعة واحدة دون إعادة إدخال أي بيانات. وتُضاف الرسوم على الطلاب عند تسجيلهم.
                   </div>
                 </Section>
               )}
@@ -240,8 +324,11 @@ export function CreateGroupWizard() {
             name={name}
             rows={rows}
             feeMajor={feeMajor}
-            generated={summary.res.generatedSessionCount}
-            already={summary.res.status === "ALREADY_PREPARED"}
+            dueDay={dueDay}
+            joinFeePolicy={joinFeePolicy}
+            generated={summary.generatedSessionCount}
+            already={summary.alreadyPrepared}
+            bootstrapped={summary.bootstrappedMonth}
             onOpenGroup={() => {
               const id = summary.groupId;
               handleOpenChange(false);
@@ -303,14 +390,20 @@ function Section({ title, subtitle, children }: { title: string; subtitle: strin
   );
 }
 
-function SummaryView({ name, rows, feeMajor, generated, already, onOpenGroup, onAnother }: { name: string; rows: ScheduleRow[]; feeMajor: string; generated: number; already: boolean; onOpenGroup: () => void; onAnother: () => void }) {
+function SummaryView({ name, rows, feeMajor, dueDay, joinFeePolicy, generated, already, bootstrapped, onOpenGroup, onAnother }: { name: string; rows: ScheduleRow[]; feeMajor: string; dueDay: string; joinFeePolicy: string; generated: number; already: boolean; bootstrapped: boolean; onOpenGroup: () => void; onAnother: () => void }) {
   return (
     <div className="flex flex-1 flex-col">
       <SheetHeader>
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success-subtle">
           <Check className="h-6 w-6 text-success" aria-hidden />
         </div>
-        <SheetTitle className="mt-3">{already ? "المجموعة مُجهّزة بالفعل لهذا الشهر" : "تم إنشاء المجموعة وتجهيز الشهر"}</SheetTitle>
+        <SheetTitle className="mt-3">
+          {already
+            ? "المجموعة مُجهّزة بالفعل لهذا الشهر"
+            : bootstrapped
+              ? "تم إنشاء المجموعة وتجهيز أول شهر تشغيلي"
+              : "تم إنشاء المجموعة وتجهيز الشهر"}
+        </SheetTitle>
       </SheetHeader>
       <div className="mt-5 flex flex-1 flex-col gap-3 overflow-y-auto">
         <SummaryRow label="المجموعة" value={name} />
@@ -326,6 +419,8 @@ function SummaryView({ name, rows, feeMajor, generated, already, onOpenGroup, on
           </div>
         </div>
         <SummaryRow label="الرسوم الشهرية" value={`${arNum(Number(feeMajor))} جنيه`} />
+        <SummaryRow label={DUE_DAY_LABEL} value={dueDay.trim() ? `يوم ${arNum(Number(dueDay))}` : "غير محدد"} />
+        <SummaryRow label={JOIN_FEE_POLICY_LABEL} value={JOIN_FEE_POLICY_VALUE_LABEL[joinFeePolicy] ?? joinFeePolicy} />
         <div className="flex items-center justify-between rounded-lg border border-brand/30 bg-brand-subtle/20 px-4 py-3">
           <span className="text-sm text-text-secondary">الحصص المولّدة لهذا الشهر</span>
           <span className="text-lg font-bold tabular-nums text-brand">{arNum(generated)}</span>

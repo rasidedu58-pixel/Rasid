@@ -13,6 +13,13 @@ import { fetchGroupReport } from "../../../../lib/api/reports";
 import { EditConfigDialog } from "./edit-config-dialog";
 import { ScheduleEditorDialog } from "./schedule-editor-dialog";
 import { EnrollStudentDialog } from "./enroll-student-dialog";
+import {
+  DUE_DAY_LABEL,
+  DUE_POLICY_LABEL,
+  DUE_POLICY_VALUE_LABEL,
+  JOIN_FEE_POLICY_LABEL,
+  JOIN_FEE_POLICY_VALUE_LABEL,
+} from "../../../../lib/group-config-labels";
 
 const SESSION_STATUS_LABEL: Record<string, { label: string; tone: "brand" | "success" | "neutral" | "danger" | "warning" }> = {
   SCHEDULED: { label: "مجدولة", tone: "neutral" },
@@ -22,8 +29,7 @@ const SESSION_STATUS_LABEL: Record<string, { label: string; tone: "brand" | "suc
   RESCHEDULED: { label: "مؤجّلة", tone: "warning" },
 };
 
-const DUE_POLICY_LABEL: Record<string, string> = { UNIFIED: "موحّدة", PER_GROUP: "خاصة بالمجموعة", OVERRIDE: "استثناء لهذا الشهر" };
-const JOIN_FEE_POLICY_LABEL: Record<string, string> = { ASK_EVERY_TIME: "اسأل في كل مرة", FULL: "رسوم كاملة دائمًا", REMAINING: "حسب الحصص المتبقية دائمًا" };
+
 
 /**
  * GroupMonth detail — the screen that closes the rest of Phase 11's month-
@@ -119,9 +125,9 @@ export default function GroupMonthDetailPage() {
         <SectionCard title="الإعداد الشهري" action={canManage ? <Button size="sm" variant="outline" onClick={() => setEditConfigOpen(true)}>تعديل</Button> : undefined}>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="الرسوم الشهرية" value={formatMoney(groupMonth.baseFeeMinor, groupMonth.currencyCode)} />
-            <Stat label="سياسة الاستحقاق" value={DUE_POLICY_LABEL[groupMonth.duePolicy] ?? groupMonth.duePolicy} />
-            <Stat label="يوم الاستحقاق" value={groupMonth.dueDay ? String(groupMonth.dueDay) : "—"} />
-            <Stat label="رسوم الانضمام أثناء الشهر" value={JOIN_FEE_POLICY_LABEL[groupMonth.joinFeePolicy] ?? groupMonth.joinFeePolicy} />
+            <Stat label={DUE_POLICY_LABEL} value={DUE_POLICY_VALUE_LABEL[groupMonth.duePolicy] ?? groupMonth.duePolicy} />
+            <Stat label={DUE_DAY_LABEL} value={groupMonth.dueDay ? `يوم ${groupMonth.dueDay}` : "—"} />
+            <Stat label={JOIN_FEE_POLICY_LABEL} value={JOIN_FEE_POLICY_VALUE_LABEL[groupMonth.joinFeePolicy] ?? groupMonth.joinFeePolicy} />
           </div>
         </SectionCard>
 

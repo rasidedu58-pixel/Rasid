@@ -5,6 +5,19 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { GroupMonth, GroupMonthChangePreviewResponse } from "@academic-precision/contracts";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Field, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast } from "@academic-precision/ui";
 import { previewGroupMonthChange, applyGroupMonthChange } from "../../../../lib/api/scheduling";
+import {
+  DUE_DAY_EXPLAINER,
+  DUE_DAY_LABEL,
+  DUE_DAY_RANGE_HINT,
+  DUE_POLICY_LABEL,
+  DUE_POLICY_OPTIONS,
+  GROUP_MONTH_FIELD_LABEL,
+  JOIN_FEE_POLICY_LABEL,
+  JOIN_FEE_POLICY_OPTIONS,
+  MONTHLY_FEE_LABEL,
+  MONTH_CONFIG_SCOPE_NOTE,
+  formatGroupMonthFieldValue,
+} from "../../../../lib/group-config-labels";
 import { qk } from "../../../../lib/query-keys";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 
@@ -59,37 +72,53 @@ export function EditConfigDialog({ groupMonth, open, onOpenChange }: { groupMont
         </DialogHeader>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="الرسوم الشهرية (جنيه)" htmlFor="edit-fee">
+          <Field label={MONTHLY_FEE_LABEL} htmlFor="edit-fee">
             <Input id="edit-fee" type="number" min={0} value={feeAmount} onChange={(e) => { setFeeAmount(e.target.value); markDirty(); }} />
           </Field>
-          <Field label="سياسة الاستحقاق" htmlFor="edit-duePolicy">
+          <Field label={DUE_POLICY_LABEL} htmlFor="edit-duePolicy">
             <Select value={duePolicy} onValueChange={(v) => { setDuePolicy(v as typeof duePolicy); markDirty(); }}>
               <SelectTrigger id="edit-duePolicy"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="UNIFIED">موحّدة لكل المساحة</SelectItem>
-                <SelectItem value="PER_GROUP">خاصة بهذه المجموعة</SelectItem>
-                <SelectItem value="OVERRIDE">استثناء لهذا الشهر</SelectItem>
+                {DUE_POLICY_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
-          <Field label="يوم الاستحقاق" htmlFor="edit-dueDay" hint="اختياري">
+          <Field label={DUE_DAY_LABEL} htmlFor="edit-dueDay" hint={`${DUE_DAY_RANGE_HINT} — اختياري`}>
             <Input id="edit-dueDay" type="number" min={1} max={28} value={dueDay} onChange={(e) => { setDueDay(e.target.value); markDirty(); }} />
+            <p className="mt-1 text-xs text-text-tertiary">{DUE_DAY_EXPLAINER}</p>
           </Field>
-          <Field label="رسوم الانضمام أثناء الشهر" htmlFor="edit-joinFeePolicy">
+          <Field label={JOIN_FEE_POLICY_LABEL} htmlFor="edit-joinFeePolicy">
             <Select value={joinFeePolicy} onValueChange={(v) => { setJoinFeePolicy(v as typeof joinFeePolicy); markDirty(); }}>
               <SelectTrigger id="edit-joinFeePolicy"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="ASK_EVERY_TIME">اسأل في كل مرة</SelectItem>
-                <SelectItem value="FULL">الرسوم كاملة دائمًا</SelectItem>
-                <SelectItem value="REMAINING">حسب الحصص المتبقية دائمًا</SelectItem>
+                {JOIN_FEE_POLICY_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
         </div>
 
+        {/* The scope question the owner asked to make explicit: this month, or
+            the default from now on? Both — and saying so beats a silent write. */}
+        <p className="rounded-md border border-border bg-surface-sunken px-3 py-2.5 text-xs leading-relaxed text-text-secondary">
+          {MONTH_CONFIG_SCOPE_NOTE}
+        </p>
+
         {preview ? (
           <div className="rounded-md border border-border bg-surface-sunken p-3 text-sm text-text-secondary">
-            {preview.diff.length === 0 ? "لا يوجد تغيير فعلي." : preview.diff.map((d) => <p key={d.field}>{d.field}: {String(d.before)} ← {String(d.after)}</p>)}
+            {preview.diff.length === 0 ? (
+              "لا يوجد تغيير فعلي."
+            ) : (
+              preview.diff.map((d) => (
+                <p key={d.field}>
+                  {GROUP_MONTH_FIELD_LABEL[d.field] ?? d.field}: {formatGroupMonthFieldValue(d.field, d.before)} ←{" "}
+                  {formatGroupMonthFieldValue(d.field, d.after)}
+                </p>
+              ))
+            )}
           </div>
         ) : null}
 

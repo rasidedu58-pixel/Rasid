@@ -8,7 +8,14 @@ import { Badge, Button, Card, Checkbox, ErrorState, LoadingRegion, SectionCard, 
 import { PageHeader } from "../../../../components/shell/page-header";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
-import { fetchGroups, fetchMonths, previewCreateMonth, confirmCreateMonth } from "../../../../lib/api/scheduling";
+import {
+  fetchGroupMonthSchedule,
+  fetchGroupMonthsForMonth,
+  fetchGroups,
+  fetchMonths,
+  previewCreateMonth,
+  confirmCreateMonth,
+} from "../../../../lib/api/scheduling";
 import { GroupConfigForm, EMPTY_GROUP_CONFIG, type GroupConfigDraft } from "./group-config-form";
 
 type Mode = "CARRY_FORWARD" | "MANUAL";
@@ -52,6 +59,49 @@ export default function NewMonthPage() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [configs, setConfigs] = useState<Record<string, GroupConfigDraft>>({});
   const [preview, setPreview] = useState<CreateMonthPreviewResponse | null>(null);
+  // Groups whose draft was prefilled from their existing monthly settings —
+  // only used to tell the user so, never to change what gets sent.
+  const [inheritedGroupIds, setInheritedGroupIds] = useState<string[]>([]);
+
+  /**
+   * A Group deliberately stores NO fee / collection day / schedule of its own
+   * (Database Schema §5.3 prohibits those columns: a Group is a durable
+   * identity, every commercial + schedule fact belongs to a GroupMonth). So
+   * "the group's defaults" can only mean its most recent GroupMonth — which
+   * is exactly what the carry-forward path already copies server-side.
+   *
+   * Manual mode had no such inheritance: it started every group from
+   * `EMPTY_GROUP_CONFIG`, so a teacher re-typed the same fee, collection day
+   * and weekly schedule every single month. This prefills it from the CURRENT
+   * month's GroupMonth through the two endpoints that already exist (no new
+   * endpoint, no new column) and leaves every value editable — an override,
+   * not a lock.
+   */
+  const groupMonthsQuery = useQuery({
+    queryKey: currentMonth ? qk.months.groupMonths(workspaceId!, currentMonth.id) : ["group-months", "none"],
+    queryFn: () => fetchGroupMonthsForMonth(workspaceId!, currentMonth!.id),
+    enabled: !!workspaceId && !!currentMonth,
+  });
+
+  async function inheritedConfigFor(groupId: string): Promise<GroupConfigDraft | null> {
+    const groupMonth = groupMonthsQuery.data?.groupMonths.find((gm) => gm.groupId === groupId);
+    if (!groupMonth) return null;
+    const schedule = await queryClient.fetchQuery({
+      queryKey: qk.groups.schedule(workspaceId!, groupMonth.id),
+      queryFn: () => fetchGroupMonthSchedule(workspaceId!, groupMonth.id),
+    });
+    return {
+      baseFeeAmount: String(groupMonth.baseFeeMinor / 100),
+      duePolicy: groupMonth.duePolicy,
+      dueDay: groupMonth.dueDay ? String(groupMonth.dueDay) : "",
+      joinFeePolicy: groupMonth.joinFeePolicy,
+      scheduleRules: schedule.rules.map((r) => ({
+        weekday: r.weekday,
+        startTime: r.startTime.slice(0, 5),
+        durationMinutes: String(r.durationMinutes),
+      })),
+    };
+  }
 
   // A CURRENT month exists → default to carry-forward (the common "start
   // next month" path) and default the target to the month right after it.
@@ -62,10 +112,29 @@ export default function NewMonthPage() {
     }
   }, [currentMonth]);
 
-  function toggleGroup(groupId: string, checked: boolean) {
+  async function toggleGroup(groupId: string, checked: boolean) {
     setPreview(null);
     setSelectedGroupIds((prev) => (checked ? [...prev, groupId] : prev.filter((id) => id !== groupId)));
-    setConfigs((prev) => (checked ? { ...prev, [groupId]: prev[groupId] ?? EMPTY_GROUP_CONFIG } : prev));
+    if (!checked) return;
+    // Anything the user already typed for this group wins — re-ticking the
+    // box must never overwrite their own edits with the inherited values.
+    if (configs[groupId]) return;
+    setConfigs((prev) => ({ ...prev, [groupId]: prev[groupId] ?? EMPTY_GROUP_CONFIG }));
+    let inherited: GroupConfigDraft | null = null;
+    try {
+      inherited = await inheritedConfigFor(groupId);
+    } catch {
+      // Inheritance is a convenience, never a gate: on failure the teacher
+      // still gets the empty form rather than a blocked screen.
+      inherited = null;
+    }
+    if (!inherited) return;
+    setConfigs((prev) => {
+      const existing = prev[groupId];
+      if (existing && existing !== EMPTY_GROUP_CONFIG) return prev;
+      return { ...prev, [groupId]: inherited! };
+    });
+    setInheritedGroupIds((prev) => (prev.includes(groupId) ? prev : [...prev, groupId]));
   }
 
   const requestBody = useMemo<CreateMonthPreviewRequest | null>(() => {
@@ -158,7 +227,7 @@ export default function NewMonthPage() {
               <ModeOption
                 selected={mode === "MANUAL"}
                 title="اختيار المجموعات يدويًا"
-                description="حدّد المجموعات ورسومها وجدولها من جديد لهذا الشهر."
+                description="حدّد المجموعات التي تعمل هذا الشهر — تبدأ بإعداداتها الحالية وتعدّل ما تحتاج فقط."
                 onSelect={() => { setMode("MANUAL"); setPreview(null); }}
               />
             </div>
@@ -166,7 +235,7 @@ export default function NewMonthPage() {
         ) : null}
 
         {mode === "MANUAL" ? (
-          <SectionCard title="المجموعات" description="حدّد المجموعات النشطة هذا الشهر، واضبط رسوم وجدول كل منها.">
+          <SectionCard title="المجموعات" description="عند اختيار مجموعة تُنسخ إعداداتها الحالية تلقائيًا — عدّل ما تحتاج فقط لهذا الشهر.">
             {activeGroups.length === 0 ? (
               // Empty-state Card — replaces the inline text link so a
               // user who lands here from the guided setup (or any other
@@ -191,8 +260,11 @@ export default function NewMonthPage() {
                 {activeGroups.map((group) => (
                   <div key={group.id} className="rounded-lg border border-border p-4">
                     <label className="flex cursor-pointer items-center gap-3">
-                      <Checkbox checked={selectedGroupIds.includes(group.id)} onCheckedChange={(v) => toggleGroup(group.id, v === true)} />
+                      <Checkbox checked={selectedGroupIds.includes(group.id)} onCheckedChange={(v) => void toggleGroup(group.id, v === true)} />
                       <span className="font-medium text-text-primary">{group.name}</span>
+                      {selectedGroupIds.includes(group.id) && inheritedGroupIds.includes(group.id) ? (
+                        <Badge tone="neutral">منقول من الشهر الحالي</Badge>
+                      ) : null}
                     </label>
                     {selectedGroupIds.includes(group.id) ? (
                       <GroupConfigForm

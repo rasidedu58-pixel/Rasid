@@ -2,6 +2,16 @@
 
 import { Field, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button } from "@academic-precision/ui";
 import { X, Plus } from "lucide-react";
+import {
+  DUE_DAY_EXPLAINER,
+  DUE_DAY_LABEL,
+  DUE_DAY_RANGE_HINT,
+  DUE_POLICY_LABEL,
+  DUE_POLICY_OPTIONS,
+  JOIN_FEE_POLICY_LABEL,
+  JOIN_FEE_POLICY_OPTIONS,
+  MONTHLY_FEE_LABEL,
+} from "../../../../lib/group-config-labels";
 
 export interface ScheduleRuleDraft {
   weekday: number;
@@ -50,29 +60,30 @@ export function GroupConfigForm({ value, onChange }: { value: GroupConfigDraft; 
   return (
     <div className="flex flex-col gap-4 border-t border-border pt-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="الرسوم الشهرية (جنيه)" htmlFor="fee">
+        <Field label={MONTHLY_FEE_LABEL} htmlFor="fee">
           <Input id="fee" type="number" min={0} inputMode="decimal" value={value.baseFeeAmount} onChange={(e) => onChange({ ...value, baseFeeAmount: e.target.value })} placeholder="مثال: 300" />
         </Field>
-        <Field label="سياسة الاستحقاق" htmlFor="duePolicy">
+        <Field label={DUE_POLICY_LABEL} htmlFor="duePolicy">
           <Select value={value.duePolicy} onValueChange={(v) => onChange({ ...value, duePolicy: v as GroupConfigDraft["duePolicy"] })}>
             <SelectTrigger id="duePolicy"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="UNIFIED">موحّدة لكل المساحة</SelectItem>
-              <SelectItem value="PER_GROUP">خاصة بهذه المجموعة</SelectItem>
-              <SelectItem value="OVERRIDE">استثناء لهذا الشهر</SelectItem>
+              {DUE_POLICY_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>
-        <Field label="يوم الاستحقاق" htmlFor="dueDay" hint="من 1 إلى 28 — اختياري">
+        <Field label={DUE_DAY_LABEL} htmlFor="dueDay" hint={`${DUE_DAY_RANGE_HINT} — اختياري`}>
           <Input id="dueDay" type="number" min={1} max={28} value={value.dueDay} onChange={(e) => onChange({ ...value, dueDay: e.target.value })} />
+          <p className="mt-1 text-xs text-text-tertiary">{DUE_DAY_EXPLAINER}</p>
         </Field>
-        <Field label="رسوم الانضمام أثناء الشهر" htmlFor="joinFeePolicy" hint="عند انضمام طالب جديد بعد بداية الشهر">
+        <Field label={JOIN_FEE_POLICY_LABEL} htmlFor="joinFeePolicy" hint="سياسة التحصيل للطالب المنضم أثناء الشهر">
           <Select value={value.joinFeePolicy} onValueChange={(v) => onChange({ ...value, joinFeePolicy: v as GroupConfigDraft["joinFeePolicy"] })}>
             <SelectTrigger id="joinFeePolicy"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="ASK_EVERY_TIME">اسأل في كل مرة</SelectItem>
-              <SelectItem value="FULL">الرسوم كاملة دائمًا</SelectItem>
-              <SelectItem value="REMAINING">حسب الحصص المتبقية دائمًا</SelectItem>
+              {JOIN_FEE_POLICY_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>
