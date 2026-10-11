@@ -10,12 +10,21 @@ import { desiredGrantSchema, membershipPermissionSummarySchema } from "./team";
  * their ACTIVE membership atomically. Shared between apps/api and apps/web.
  */
 
-/** POST /invitations — owner creates a shareable invite. */
+/**
+ * POST /invitations — owner creates a shareable invite.
+ *
+ * An invitation no longer expires on a timer. It stays valid until it is
+ * accepted or the owner revokes it — the two events that actually mean
+ * something. The 7-day clock only ever produced dead links the owner had to
+ * recreate, and it was never a security control: the token is 32 random
+ * bytes, stored only as a SHA-256 digest, single-use, and revocable at any
+ * moment. `expiresInDays` is gone from the request for that reason; the
+ * column is kept nullable so a future policy can reintroduce a deadline
+ * without another schema change.
+ */
 export const createInvitationRequestSchema = z.object({
   /** Pre-authorized grants applied verbatim on acceptance (same shape the editor sends). */
   grants: z.array(desiredGrantSchema),
-  /** Link lifetime in days (1–30). Defaults server-side when omitted. */
-  expiresInDays: z.number().int().min(1).max(30).optional(),
   /** Optional owner-facing note ("for whom") — display only. */
   invitedLabel: z.string().trim().min(1).max(120).optional(),
 });
@@ -26,9 +35,47 @@ export const createInvitationResponseSchema = z.object({
   /** RAW token — returned once; the owner builds the link `/invite/<token>`. */
   token: z.string(),
   status: z.literal("PENDING"),
-  expiresAt: z.string(),
+  /** `null` = no deadline (the default now); an ISO string only for legacy rows. */
+  expiresAt: z.string().nullable(),
 });
 export type CreateInvitationResponse = z.infer<typeof createInvitationResponseSchema>;
+
+/**
+ * POST /team/members — the owner creates the member's SIGN-IN CREDENTIALS and
+ * their permissions in one step, then hands over the link + email + password.
+ *
+ * Why this exists: the invite-link-only flow required the invitee to go and
+ * register themselves, which for an assistant who is handed a phone is the
+ * step that never happens. The owner now decides the account.
+ *
+ * The password is sent once, to the auth provider, to create the account. It
+ * is never stored by Rasid in any form, never returned by any later read, and
+ * there is no table that can show it — the owner knows it because they chose
+ * it, not because the system can recall it.
+ */
+export const createTeamMemberRequestSchema = z.object({
+  fullName: z.string().trim().min(1, "اسم العضو مطلوب").max(120),
+  email: z.string().trim().toLowerCase().email("بريد إلكتروني غير صالح"),
+  /** Owner-chosen. Minimum mirrors the signup form so both paths agree. */
+  password: z.string().min(8, "كلمة المرور يجب أن تكون 8 أحرف على الأقل").max(72),
+  grants: z.array(desiredGrantSchema),
+});
+export type CreateTeamMemberRequest = z.infer<typeof createTeamMemberRequestSchema>;
+
+export const createTeamMemberResponseSchema = z.object({
+  invitationId: z.string().uuid(),
+  /** RAW invite token — returned once, for the link the owner shares. */
+  token: z.string(),
+  email: z.string(),
+  /**
+   * `CREATED` = a new account was created with the owner's password.
+   * `EXISTING` = that email already had an account, so NO new user was made
+   * and its password was left untouched — the owner must tell them to sign in
+   * with the password they already have.
+   */
+  account: z.enum(["CREATED", "EXISTING"]),
+});
+export type CreateTeamMemberResponse = z.infer<typeof createTeamMemberResponseSchema>;
 
 export const invitationStatusSchema = z.enum(["PENDING", "ACCEPTED", "REVOKED"]);
 export type InvitationStatus = z.infer<typeof invitationStatusSchema>;
@@ -40,10 +87,11 @@ export const invitationSummarySchema = z.object({
   invitedLabel: z.string().nullable(),
   roleLabel: z.string(),
   grants: z.array(membershipPermissionSummarySchema),
-  expiresAt: z.string(),
+  /** `null` = no deadline. Legacy rows may still carry one. */
+  expiresAt: z.string().nullable(),
   createdAt: z.string(),
   acceptedAt: z.string().nullable(),
-  /** True once `expiresAt` is in the past (PENDING-but-expired renders distinctly). */
+  /** Only ever true for a legacy row whose deadline already passed. */
   expired: z.boolean(),
 });
 export type InvitationSummary = z.infer<typeof invitationSummarySchema>;
@@ -71,7 +119,10 @@ export const invitationPreviewResponseSchema = z.object({
   /** The workspace the invite is for — used to make it the caller's current workspace on accept. */
   workspaceId: z.string().uuid(),
   workspaceName: z.string().nullable(),
-  expiresAt: z.string(),
+  /** `null` = no deadline. */
+  expiresAt: z.string().nullable(),
+  /** Owner-facing note from the invite ("for whom") — shown so the invitee sees it is meant for them. */
+  invitedLabel: z.string().nullable(),
   /** Permission keys the invitee will receive — rendered as a capability list. */
   permissions: z.array(permissionKeySchema),
 });

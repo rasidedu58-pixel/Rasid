@@ -167,9 +167,18 @@ export default function TeamPage() {
                     <Avatar className="h-10 w-10 shrink-0">
                       <AvatarFallback>{m.isOwner ? <Crown className="h-4 w-4 text-brand" aria-hidden /> : initialsFromName(m.fullName ?? "؟")}</AvatarFallback>
                     </Avatar>
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-sm font-medium text-text-primary">{m.fullName ?? "عضو"}</span>
-                      <span className="truncate text-xs text-text-secondary">{deriveRoleLabel(m)}{m.email ? ` · ${m.email}` : ""}</span>
+                    {/* The status was hidden below `sm` and the email was
+                        truncated against the chevron. Now the role/email wrap
+                        onto their own line and the status rides with them, so
+                        nothing is covered on a phone. */}
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="break-words text-sm font-medium text-text-primary sm:truncate">{m.fullName ?? "عضو"}</span>
+                      <span className="break-all text-xs text-text-secondary sm:truncate">
+                        {deriveRoleLabel(m)}{m.email ? ` · ${m.email}` : ""}
+                      </span>
+                      <span className="sm:hidden">
+                        <StatusDot tone={STATUS_TONE[m.status] ?? "neutral"} label={STATUS_LABEL[m.status] ?? m.status} />
+                      </span>
                     </div>
                     <div className="hidden shrink-0 sm:block">
                       <StatusDot tone={STATUS_TONE[m.status] ?? "neutral"} label={STATUS_LABEL[m.status] ?? m.status} />

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Clock, Link2, Trash2 } from "lucide-react";
+import { Link2, Trash2 } from "lucide-react";
 import {
   Badge,
   Button,
@@ -20,8 +20,12 @@ const arNum = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
 
 /**
  * Pending-invitations panel on the team page. Only PENDING invites are shown
- * (accepted/revoked live in the audit trail); an expired-but-still-PENDING
- * invite is rendered distinctly and can still be revoked to tidy up.
+ * (accepted/revoked live in the audit trail).
+ *
+ * An invitation has no deadline any more (migration 0076): it waits until it
+ * is accepted or the owner revokes it. Only a legacy row created before that
+ * can still read as expired, which is why `expired` is still handled rather
+ * than deleted.
  */
 export function InvitationsList({ workspaceId }: { workspaceId: string }) {
   const queryClient = useQueryClient();
@@ -87,32 +91,35 @@ export function InvitationsList({ workspaceId }: { workspaceId: string }) {
 function InvitationRow({ inv, onRevoke }: { inv: InvitationSummary; onRevoke: () => void }) {
   const capabilities = inv.grants.length;
   return (
-    <li className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-subtle/50">
-        <Link2 className="h-4 w-4 text-brand" aria-hidden />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium text-text-primary">{inv.invitedLabel ?? "رابط دعوة"}</span>
-        <span className="flex items-center gap-1.5 truncate text-xs text-text-secondary">
-          <Clock className="h-3 w-3" aria-hidden />
-          {inv.expired ? "انتهت الصلاحية" : `تنتهي ${formatDateTime(inv.expiresAt)}`}
-          {" · "}
-          {arNum(capabilities)} صلاحية
+    // Below `sm` the identity block and the action stack instead of fighting
+    // over one line: an invite label is an email plus a name, which left the
+    // revoke button squeezing it on a phone.
+    <li className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:gap-3">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-subtle/50">
+          <Link2 className="h-4 w-4 text-brand" aria-hidden />
         </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="break-words text-sm font-medium text-text-primary sm:truncate">{inv.invitedLabel ?? "رابط دعوة"}</span>
+          <span className="text-xs text-text-secondary">
+            {arNum(capabilities)} صلاحية · أُنشئت {formatDateTime(inv.createdAt)}
+          </span>
+          {inv.expired ? <span className="text-xs text-danger">دعوة قديمة انتهت صلاحيتها — ألغها وأنشئ رابطًا جديدًا.</span> : null}
+        </div>
       </div>
-      <div className="hidden shrink-0 sm:block">
+      <div className="flex items-center justify-between gap-2 sm:shrink-0 sm:justify-end">
         <StatusDot tone={inv.expired ? "danger" : "neutral"} label={inv.expired ? "منتهية" : "بانتظار القبول"} />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 text-danger hover:bg-danger-subtle hover:text-danger"
+          onClick={onRevoke}
+          aria-label="إلغاء الدعوة"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden />
+          إلغاء
+        </Button>
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="shrink-0 text-danger hover:bg-danger-subtle hover:text-danger"
-        onClick={onRevoke}
-        aria-label="إلغاء الدعوة"
-      >
-        <Trash2 className="h-4 w-4" aria-hidden />
-        إلغاء
-      </Button>
     </li>
   );
 }

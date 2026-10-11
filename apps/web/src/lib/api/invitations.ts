@@ -2,6 +2,8 @@ import type {
   AcceptInvitationResponse,
   CreateInvitationRequest,
   CreateInvitationResponse,
+  CreateTeamMemberRequest,
+  CreateTeamMemberResponse,
   InvitationPreviewResponse,
   ListInvitationsResponse,
   RevokeInvitationResponse,
@@ -11,6 +13,15 @@ import { apiRequest } from "./client";
 /** Owner-facing (workspace-scoped). */
 export function createInvitation(workspaceId: string, body: CreateInvitationRequest): Promise<CreateInvitationResponse> {
   return apiRequest<CreateInvitationResponse>("/invitations", { method: "POST", workspaceId, body });
+}
+
+/**
+ * Creates the member's sign-in account (owner-chosen email + password) AND
+ * their invitation. The password is in this request body only — it is never
+ * returned by any read, and nothing stores it.
+ */
+export function createTeamMember(workspaceId: string, body: CreateTeamMemberRequest): Promise<CreateTeamMemberResponse> {
+  return apiRequest<CreateTeamMemberResponse>("/team/members", { method: "POST", workspaceId, body });
 }
 
 export function listInvitations(workspaceId: string): Promise<ListInvitationsResponse> {

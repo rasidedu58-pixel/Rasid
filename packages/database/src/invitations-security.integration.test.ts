@@ -121,7 +121,7 @@ describe.skipIf(!hasLiveCreds)("Phase 2 Invitations Security (live Postgres)", (
   });
 
   /** Helper — create a PENDING invite for workspace A via the real repo path. */
-  async function seedInvite(opts?: { expiresAt?: Date; selectedGroup?: boolean }) {
+  async function seedInvite(opts?: { expiresAt?: Date | null; selectedGroup?: boolean }) {
     const raw = rawToken();
     const desiredGrants = opts?.selectedGroup
       ? [{ permissionKey: "groups.view", scopeType: "SELECTED_GROUPS" as const, groupIds: [groupAId] }]
@@ -134,7 +134,7 @@ describe.skipIf(!hasLiveCreds)("Phase 2 Invitations Security (live Postgres)", (
         desiredGrants,
         invitedLabel: null,
         invitedByUserId: ownerAId,
-        expiresAt: opts?.expiresAt ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        expiresAt: opts?.expiresAt === undefined ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : opts.expiresAt,
       }),
     );
     return { raw, invite };
@@ -258,6 +258,32 @@ describe.skipIf(!hasLiveCreds)("Phase 2 Invitations Security (live Postgres)", (
       expect(memberships).toHaveLength(0);
     } finally {
       await admin`DELETE FROM users WHERE id = ${expiredUser}`;
+    }
+  });
+
+  it("8b. an invitation with NO deadline (expires_at IS NULL) is accepted normally", async () => {
+    // Migration 0076: an invitation ends by being accepted or revoked, never
+    // on a clock. The single-use race guard still has to hold for it.
+    const openUser = randomUUID();
+    await admin`INSERT INTO users (id, full_name, status) VALUES (${openUser}, 'Open Invitee', 'ACTIVE')`;
+    try {
+      const { raw } = await seedInvite({ expiresAt: null });
+      const result = await withRuntimeContext({ userId: openUser }, (db) =>
+        acceptInvitationTx(db, { tokenHash: hash(raw), accepterUserId: openUser }),
+      );
+      expect(result.ok).toBe(true);
+      const memberships = await admin`SELECT status FROM memberships WHERE workspace_id = ${workspaceAId} AND user_id = ${openUser}`;
+      expect(memberships).toHaveLength(1);
+      expect(memberships[0]!.status).toBe("ACTIVE");
+
+      // ...and it cannot be accepted a second time.
+      const again = await withRuntimeContext({ userId: openUser }, (db) =>
+        acceptInvitationTx(db, { tokenHash: hash(raw), accepterUserId: openUser }),
+      );
+      expect(again.ok).toBe(false);
+    } finally {
+      await admin`DELETE FROM memberships WHERE workspace_id = ${workspaceAId} AND user_id = ${openUser}`;
+      await admin`DELETE FROM users WHERE id = ${openUser}`;
     }
   });
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Copy, Link2, MessageCircle, Search, ShieldAlert } from "lucide-react";
+import { Check, ChevronDown, Copy, Eye, EyeOff, Link2, MessageCircle, Search, ShieldAlert } from "lucide-react";
 import {
   PERMISSION_SCOPE_KIND,
   OWNER_ONLY_PERMISSION_KEYS,
@@ -24,7 +24,8 @@ import {
   toast,
 } from "@academic-precision/ui";
 import { qk } from "../../../lib/query-keys";
-import { createInvitation } from "../../../lib/api/invitations";
+import { createTeamMember } from "../../../lib/api/invitations";
+import { ApiRequestError, isValidationError } from "../../../lib/api/client";
 import { PERMISSION_CATEGORIES, RISKY_PERMISSIONS, ROLE_PRESETS } from "./permission-catalog-ui";
 
 interface Group {
@@ -42,15 +43,16 @@ const EDITABLE_CATEGORIES = PERMISSION_CATEGORIES.map((c) => ({
   permissions: c.permissions.filter((p) => !OWNER_ONLY_PERMISSION_KEYS.has(p.key)),
 })).filter((c) => c.permissions.length > 0);
 
-const EXPIRY_OPTIONS = [
-  { days: 1, label: "يوم واحد" },
-  { days: 3, label: "3 أيام" },
-  { days: 7, label: "7 أيام" },
-  { days: 14, label: "14 يومًا" },
-  { days: 30, label: "30 يومًا" },
-];
-
 const arNum = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
+
+/** What the owner hands over after creating the member. */
+interface Handover {
+  link: string;
+  email: string;
+  password: string;
+  /** EXISTING = the email already had an account, so its password was NOT changed. */
+  account: "CREATED" | "EXISTING";
+}
 
 export function InviteSheet({
   open,
@@ -65,20 +67,26 @@ export function InviteSheet({
 }) {
   const queryClient = useQueryClient();
 
-  const [label, setLabel] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [enabled, setEnabled] = useState<Set<PermissionKey>>(new Set());
   const [scope, setScope] = useState<"ALL_GROUPS" | "SELECTED_GROUPS">("ALL_GROUPS");
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [openCats, setOpenCats] = useState<Set<string>>(() => new Set(EDITABLE_CATEGORIES.map((c) => c.key)));
   const [groupQuery, setGroupQuery] = useState("");
-  const [expiresInDays, setExpiresInDays] = useState(7);
-  const [createdLink, setCreatedLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [handover, setHandover] = useState<Handover | null>(null);
+  const [copied, setCopied] = useState<"link" | "all" | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
   const grantsUseGroupScope = [...enabled].some(isGroupScoped);
   const scopeNeedsGroups = scope === "SELECTED_GROUPS";
   const filteredGroups = groups.filter((g) => g.name.includes(groupQuery.trim()));
-  const canSubmit = enabled.size > 0 && !(grantsUseGroupScope && scopeNeedsGroups && selectedGroups.size === 0);
+  const credentialsReady = fullName.trim().length > 0 && /.+@.+\..+/.test(email.trim()) && password.length >= 8;
+  const canSubmit =
+    credentialsReady && enabled.size > 0 && !(grantsUseGroupScope && scopeNeedsGroups && selectedGroups.size === 0);
 
   const create = useMutation({
     mutationFn: () => {
@@ -90,18 +98,32 @@ export function InviteSheet({
         }
         return { permission, scope: "ALL_GROUPS" };
       });
-      return createInvitation(workspaceId, {
+      return createTeamMember(workspaceId, {
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        password,
         grants,
-        expiresInDays,
-        invitedLabel: label.trim() || undefined,
       });
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: qk.team.invitations(workspaceId) });
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      setCreatedLink(`${origin}/invite/${res.token}`);
+      setFormError(null);
+      setFieldErrors({});
+      // The password is shown back from the OWNER'S OWN input, never from the
+      // server — no response carries it, and nothing stored it.
+      setHandover({ link: `${origin}/invite/${res.token}`, email: res.email, password, account: res.account });
     },
-    onError: () => toast.error("تعذّر إنشاء رابط الدعوة"),
+    onError: (e: unknown) => {
+      if (e instanceof ApiRequestError && isValidationError(e)) {
+        const errors = e.fieldErrors ?? {};
+        setFieldErrors(errors);
+        setFormError(errors._root?.[0] ?? null);
+        if (!errors._root) toast.error("راجع الحقول");
+        return;
+      }
+      toast.error("تعذّر إنشاء العضو");
+    },
   });
 
   function toggle(key: PermissionKey, on: boolean) {
@@ -120,13 +142,17 @@ export function InviteSheet({
   }
 
   function resetAll() {
-    setLabel("");
+    setFullName("");
+    setEmail("");
+    setPassword("");
+    setShowPassword(false);
     setEnabled(new Set());
     setScope("ALL_GROUPS");
     setSelectedGroups(new Set());
-    setExpiresInDays(7);
-    setCreatedLink(null);
-    setCopied(false);
+    setHandover(null);
+    setCopied(null);
+    setFormError(null);
+    setFieldErrors({});
     create.reset();
   }
 
@@ -135,56 +161,107 @@ export function InviteSheet({
     onOpenChange(v);
   }
 
-  async function copyLink() {
-    if (!createdLink) return;
+  async function copy(what: "link" | "all") {
+    if (!handover) return;
+    const text = what === "link" ? handover.link : handoverMessage(handover);
     try {
-      await navigator.clipboard.writeText(createdLink);
-      setCopied(true);
-      toast.success("تم نسخ الرابط");
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      toast.success(what === "link" ? "تم نسخ الرابط" : "تم نسخ بيانات الدخول");
+      setTimeout(() => setCopied(null), 2000);
     } catch {
-      toast.error("تعذّر النسخ — انسخ الرابط يدويًا");
+      toast.error("تعذّر النسخ — انسخ يدويًا");
     }
   }
-
-  const expiryLabel = useMemo(
-    () => EXPIRY_OPTIONS.find((o) => o.days === expiresInDays)?.label ?? `${arNum(expiresInDays)} يومًا`,
-    [expiresInDays],
-  );
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent side="end" className="flex w-full max-w-md flex-col">
         <SheetHeader>
-          <SheetTitle>{createdLink ? "الرابط جاهز" : "دعوة عضو جديد"}</SheetTitle>
+          <SheetTitle>{handover ? "بيانات العضو جاهزة" : "إضافة عضو للفريق"}</SheetTitle>
           <p className="mt-0.5 text-sm text-text-secondary">
-            {createdLink
-              ? "شارك هذا الرابط مع الشخص الذي تريد دعوته. لن نعرضه مجددًا."
-              : "حدّد ما يستطيع الوصول إليه، ثم أنشئ رابطًا يشاركه للانضمام."}
+            {handover
+              ? "سلّم هذه البيانات للعضو. كلمة المرور لن تظهر مرة أخرى بعد إغلاق هذه النافذة."
+              : "أنشئ بيانات دخوله وحدّد صلاحياته، ثم سلّمه الرابط والبريد وكلمة المرور."}
           </p>
         </SheetHeader>
 
-        {createdLink ? (
-          <LinkReady
-            link={createdLink}
+        {handover ? (
+          <HandoverPanel
+            handover={handover}
             copied={copied}
-            onCopy={copyLink}
-            expiryLabel={expiryLabel}
-            onNewLink={resetAll}
+            onCopy={copy}
+            onAnother={resetAll}
             onDone={() => handleOpenChange(false)}
           />
         ) : (
           <div className="mt-5 flex flex-1 flex-col gap-6 overflow-y-auto pb-4">
-            {/* Optional label */}
-            <Field label="لمن هذه الدعوة؟ (اختياري)" htmlFor="invite-label">
-              <Input
-                id="invite-label"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="مثال: أ. محمد — مساعد متابعة"
-                maxLength={120}
-              />
-            </Field>
+            {/* Sign-in credentials — the owner decides them, so the member
+                never has to go and register themselves. */}
+            <div className="flex flex-col gap-4">
+              <div>
+                <p className="text-sm font-semibold text-text-primary">بيانات الدخول</p>
+                <p className="mt-0.5 text-xs text-text-secondary">
+                  أنت من يحدّدها، وتسلّمها للعضو. لا يحفظ راصد كلمة المرور ولا يمكنه عرضها لاحقًا.
+                </p>
+              </div>
+              <Field label="اسم العضو" htmlFor="member-name" required error={fieldErrors.fullName?.[0]}>
+                <Input
+                  id="member-name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="مثال: أ. محمد سعيد"
+                  maxLength={120}
+                  invalid={!!fieldErrors.fullName}
+                />
+              </Field>
+              <Field label="البريد الإلكتروني" htmlFor="member-email" required error={fieldErrors.email?.[0]}>
+                <Input
+                  id="member-email"
+                  type="email"
+                  dir="ltr"
+                  autoComplete="off"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="assistant@example.com"
+                  invalid={!!fieldErrors.email}
+                />
+              </Field>
+              <Field
+                label="كلمة المرور"
+                htmlFor="member-password"
+                required
+                hint="8 أحرف على الأقل — سلّمها للعضو بنفسك"
+                error={fieldErrors.password?.[0]}
+              >
+                <div className="flex gap-2">
+                  <Input
+                    id="member-password"
+                    type={showPassword ? "text" : "password"}
+                    dir="ltr"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    invalid={!!fieldErrors.password}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+                  </Button>
+                </div>
+              </Field>
+            </div>
+
+            {formError ? (
+              <p className="rounded-lg border border-danger/30 bg-danger-subtle/20 px-3 py-2.5 text-sm leading-relaxed text-danger">
+                {formError}
+              </p>
+            ) : null}
 
             {/* Presets */}
             <div>
@@ -344,38 +421,17 @@ export function InviteSheet({
               })}
             </div>
 
-            {/* Expiry */}
-            <div>
-              <p className="mb-2 text-sm font-semibold text-text-primary">مدة صلاحية الرابط</p>
-              <div className="flex flex-wrap gap-2">
-                {EXPIRY_OPTIONS.map((o) => (
-                  <button
-                    key={o.days}
-                    type="button"
-                    onClick={() => setExpiresInDays(o.days)}
-                    className={cn(
-                      "focus-ring rounded-lg border px-3 py-1.5 text-sm transition-colors",
-                      expiresInDays === o.days
-                        ? "border-brand bg-brand-subtle/50 font-medium text-brand-subtle-foreground"
-                        : "border-border text-text-secondary hover:bg-surface-sunken",
-                    )}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         )}
 
-        {!createdLink ? (
-          <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-            <Button variant="ghost" onClick={() => handleOpenChange(false)}>
+        {!handover ? (
+          <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end">
+            <Button variant="ghost" className="w-full justify-center sm:w-auto" onClick={() => handleOpenChange(false)}>
               إلغاء
             </Button>
-            <Button onClick={() => create.mutate()} loading={create.isPending} disabled={!canSubmit}>
+            <Button className="w-full justify-center sm:w-auto" onClick={() => create.mutate()} loading={create.isPending} disabled={!canSubmit}>
               <Link2 className="h-4 w-4" aria-hidden />
-              إنشاء رابط الدعوة
+              إنشاء العضو
             </Button>
           </div>
         ) : null}
@@ -384,65 +440,95 @@ export function InviteSheet({
   );
 }
 
-function LinkReady({
-  link,
+/** The one message the owner sends: link + email + password, ready to paste. */
+function handoverMessage(h: Handover): string {
+  return [
+    "دعوة للانضمام إلى فريق راصد:",
+    h.link,
+    `البريد: ${h.email}`,
+    h.account === "CREATED" ? `كلمة المرور: ${h.password}` : "استخدم كلمة المرور الخاصة بحسابك الحالي.",
+  ].join("\n");
+}
+
+/**
+ * What the owner hands over. Everything here is laid out to survive a 360px
+ * screen: the link is a wrapping, selectable block rather than a one-line
+ * input that scrolls sideways, and every action is full-width below `sm`.
+ */
+function HandoverPanel({
+  handover,
   copied,
   onCopy,
-  expiryLabel,
-  onNewLink,
+  onAnother,
   onDone,
 }: {
-  link: string;
-  copied: boolean;
-  onCopy: () => void;
-  expiryLabel: string;
-  onNewLink: () => void;
+  handover: Handover;
+  copied: "link" | "all" | null;
+  onCopy: (what: "link" | "all") => void;
+  onAnother: () => void;
   onDone: () => void;
 }) {
+  const whatsappHref = `https://wa.me/?text=${encodeURIComponent(handoverMessage(handover))}`;
   return (
-    <div className="mt-5 flex flex-1 flex-col gap-4">
-      <div className="rounded-xl border border-border bg-surface p-4">
-        <label className="text-xs font-semibold text-text-secondary" htmlFor="invite-link">
-          رابط الدعوة
-        </label>
-        <div className="mt-2 flex gap-2">
-          <input
-            id="invite-link"
-            readOnly
-            value={link}
-            dir="ltr"
-            onFocus={(e) => e.currentTarget.select()}
-            className="focus-ring h-10 flex-1 rounded-lg border border-border bg-surface-sunken px-3 text-sm text-text-primary"
-          />
-          <Button onClick={onCopy} className="shrink-0">
-            {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
-            {copied ? "تم النسخ" : "نسخ"}
+    <div className="mt-5 flex flex-1 flex-col gap-4 overflow-y-auto">
+      {handover.account === "EXISTING" ? (
+        <p className="rounded-lg border border-warning/30 bg-warning-subtle/30 px-3 py-2.5 text-xs leading-relaxed text-text-secondary">
+          هذا البريد له حساب بالفعل، فلم يُنشأ حساب جديد ولم تتغيّر كلمة مروره. أرسل له الرابط فقط — سيدخل بكلمة المرور التي يعرفها.
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold text-text-secondary">رابط الدعوة</span>
+          {/* `break-all` + wrapping block: a 60-character token in a
+              single-line input is unreadable and overflows on a phone. */}
+          <p dir="ltr" className="select-all break-all rounded-lg bg-surface-sunken px-3 py-2 text-start text-xs leading-relaxed text-text-primary">
+            {handover.link}
+          </p>
+          <Button variant="outline" className="mt-1 w-full justify-center" onClick={() => onCopy("link")}>
+            {copied === "link" ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+            {copied === "link" ? "تم نسخ الرابط" : "نسخ الرابط"}
           </Button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 border-t border-border pt-3 sm:grid-cols-2">
+          <div className="min-w-0">
+            <span className="text-xs text-text-tertiary">البريد الإلكتروني</span>
+            <p dir="ltr" className="select-all break-all text-start text-sm text-text-primary">{handover.email}</p>
+          </div>
+          <div className="min-w-0">
+            <span className="text-xs text-text-tertiary">كلمة المرور</span>
+            <p dir="ltr" className="select-all break-all text-start text-sm text-text-primary">
+              {handover.account === "CREATED" ? handover.password : "— (حسابه الحالي)"}
+            </p>
+          </div>
         </div>
       </div>
 
-      <button
-        type="button"
-        disabled
-        title="ستتوفر المشاركة عبر واتساب قريبًا"
-        className="flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-text-tertiary opacity-60"
+      <Button variant="outline" className="w-full justify-center" onClick={() => onCopy("all")}>
+        {copied === "all" ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+        {copied === "all" ? "تم نسخ البيانات" : "نسخ الرابط والبيانات معًا"}
+      </Button>
+
+      <a
+        href={whatsappHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="focus-ring flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-surface-sunken"
       >
         <MessageCircle className="h-4 w-4" aria-hidden />
         مشاركة عبر واتساب
-        <Badge tone="neutral" className="text-[10px]">
-          قريبًا
-        </Badge>
-      </button>
+      </a>
 
-      <div className="rounded-lg border border-border bg-surface-sunken px-3 py-2.5 text-xs text-text-secondary">
-        الرابط صالح لمرة واحدة فقط وينتهي بعد {expiryLabel}. العضوية لا تُفعّل إلا بعد قبول الدعوة، ويمكنك إلغاؤها في أي وقت من قائمة الدعوات.
+      <div className="rounded-lg border border-border bg-surface-sunken px-3 py-2.5 text-xs leading-relaxed text-text-secondary">
+        الرابط يعمل مرة واحدة ولا ينتهي بمرور الوقت — يظل صالحًا حتى يقبله العضو أو تلغيه أنت من قائمة الدعوات. بعد القبول تصبح عضويته مستقلة عن الرابط تمامًا، ويدخل بعدها من صفحة تسجيل الدخول العادية.
       </div>
 
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-4">
-        <Button variant="ghost" onClick={onNewLink}>
-          إنشاء رابط آخر
+      <div className="mt-auto flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <Button variant="ghost" className="w-full justify-center sm:w-auto" onClick={onAnother}>
+          إضافة عضو آخر
         </Button>
-        <Button onClick={onDone}>تم</Button>
+        <Button className="w-full justify-center sm:w-auto" onClick={onDone}>تم</Button>
       </div>
     </div>
   );

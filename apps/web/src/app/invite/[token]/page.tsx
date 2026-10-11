@@ -35,13 +35,16 @@ export default function InviteAcceptPage() {
   if (sessionStatus === "unauthenticated") {
     const returnTo = encodeURIComponent(`/invite/${encodeURIComponent(token)}`);
     return (
-      <AuthCard title="لقد دُعيت للانضمام" description="سجّل الدخول أو أنشئ حسابًا لقبول الدعوة والانضمام إلى الفريق.">
+      <AuthCard
+        title="لقد دُعيت للانضمام"
+        description="سجّل الدخول بالبريد وكلمة المرور اللذين استلمتهما من صاحب مساحة العمل لقبول الدعوة."
+      >
         <div className="flex flex-col gap-3">
           <Button size="lg" className="w-full" onClick={() => router.push(`/login?returnTo=${returnTo}`)}>
             تسجيل الدخول
           </Button>
           <Button size="lg" variant="outline" className="w-full" onClick={() => router.push(`/signup?returnTo=${returnTo}`)}>
-            إنشاء حساب جديد
+            ليس لديّ حساب — إنشاء حساب
           </Button>
         </div>
       </AuthCard>
@@ -114,7 +117,7 @@ function AuthenticatedAccept({ token }: { token: string }) {
             <XCircle className="h-6 w-6 text-danger" aria-hidden />
           </div>
           <p className="text-sm text-text-secondary">
-            هذه الدعوة انتهت صلاحيتها أو تم استخدامها أو إلغاؤها. اطلب رابط دعوة جديدًا من صاحب مساحة العمل.
+            هذه الدعوة تم استخدامها بالفعل أو ألغاها صاحب مساحة العمل. اطلب رابط دعوة جديدًا منه.
           </p>
           <Button variant="outline" className="w-full" onClick={() => router.replace("/dashboard")}>
             الذهاب إلى لوحة التحكم
@@ -134,8 +137,11 @@ function AuthenticatedAccept({ token }: { token: string }) {
             <UserCheck className="h-5 w-5 text-brand" aria-hidden />
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-text-primary">{workspaceName}</p>
-            <p className="text-xs text-text-secondary">ستنضم كعضو بصلاحيات محددة.</p>
+            <p className="break-words text-sm font-semibold text-text-primary">{workspaceName}</p>
+            {preview.data.invitedLabel ? (
+              <p className="break-words text-xs text-text-secondary">هذه الدعوة لـ: {preview.data.invitedLabel}</p>
+            ) : null}
+            <p className="text-xs text-text-secondary">ستنضم كعضو بصلاحيات محددة يحددها صاحب المساحة.</p>
           </div>
         </div>
 

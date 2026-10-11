@@ -9,7 +9,7 @@
  * atomic `UPDATE ... WHERE status = 'PENDING'` row lock, and fails closed for
  * expired / revoked / already-accepted invitations.
  */
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { workspaceInvitations, type InvitationDesiredGrant } from "../schema/workspace-invitations";
 export type { InvitationDesiredGrant } from "../schema/workspace-invitations";
 import { workspaces } from "../schema/workspaces";
@@ -29,7 +29,8 @@ export interface CreateInvitationInput {
   desiredGrants: InvitationDesiredGrant[];
   invitedLabel: string | null;
   invitedByUserId: string;
-  expiresAt: Date;
+  /** `null` = never expires (the default since 0076). */
+  expiresAt: Date | null;
 }
 
 /** Inserts a PENDING invitation. Caller wraps in workspace-scoped context. */
@@ -109,7 +110,8 @@ export interface InvitationPreview {
   roleLabel: string;
   workspaceId: string;
   workspaceName: string | null;
-  expiresAt: string;
+  expiresAt: string | null;
+  invitedLabel: string | null;
   desiredGrants: InvitationDesiredGrant[];
 }
 
@@ -130,14 +132,17 @@ export async function previewInvitationTx(db: Db, tokenHash: string): Promise<In
     .limit(1)
     .then((rows) => rows[0]);
 
-  const valid = invite.status === "PENDING" && invite.expiresAt.getTime() > Date.now();
+  // No deadline (`expires_at IS NULL`) is the normal case now; a legacy row
+  // with a timestamp still honours it.
+  const valid = invite.status === "PENDING" && (invite.expiresAt === null || invite.expiresAt.getTime() > Date.now());
   return {
     status: invite.status as InvitationPreview["status"],
     valid,
     roleLabel: invite.roleLabel,
     workspaceId: invite.workspaceId,
     workspaceName: workspace?.name ?? null,
-    expiresAt: invite.expiresAt.toISOString(),
+    expiresAt: invite.expiresAt ? invite.expiresAt.toISOString() : null,
+    invitedLabel: invite.invitedLabel,
     desiredGrants: invite.desiredGrants,
   };
 }
@@ -170,7 +175,7 @@ export async function acceptInvitationTx(
 ): Promise<AcceptInvitationResult> {
   const invite = await findInvitationByTokenHashTx(db, params.tokenHash);
   if (!invite) return { ok: false, reason: "INVALID" };
-  if (invite.status !== "PENDING" || invite.expiresAt.getTime() <= Date.now()) {
+  if (invite.status !== "PENDING" || (invite.expiresAt !== null && invite.expiresAt.getTime() <= Date.now())) {
     return { ok: false, reason: "INVALID" };
   }
 
@@ -201,7 +206,8 @@ export async function acceptInvitationTx(
       and(
         eq(workspaceInvitations.id, invite.id),
         eq(workspaceInvitations.status, "PENDING"),
-        gt(workspaceInvitations.expiresAt, sql`now()`),
+        // Unchanged guard, now expiry-optional: NULL means no deadline.
+        or(isNull(workspaceInvitations.expiresAt), gt(workspaceInvitations.expiresAt, sql`now()`)),
       ),
     )
     .returning();

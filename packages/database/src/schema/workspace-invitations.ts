@@ -53,7 +53,12 @@ export const workspaceInvitations = pgTable(
     acceptedByUserId: uuid("accepted_by_user_id").references(() => users.id, { onDelete: "restrict" }),
     /** The membership created on acceptance (null until accepted). */
     acceptedMembershipId: uuid("accepted_membership_id"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * `NULL` = no deadline (0076). An invitation now ends only by being
+     * accepted or revoked; the column stays so a future policy can set one
+     * without another schema change.
+     */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),

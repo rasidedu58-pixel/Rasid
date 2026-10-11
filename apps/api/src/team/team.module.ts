@@ -7,12 +7,14 @@ import { PermissionGuard } from "./api/guards/permission.guard";
 import { PermissionResolverService } from "./application/permission-resolver.service";
 import { TeamService } from "./application/team.service";
 import { InvitationsService } from "./application/invitations.service";
+import { AUTH_ADMIN_PORT } from "./application/ports/auth-admin.port";
 import { GROUP_OWNERSHIP_PORT } from "./application/ports/group-ownership.port";
 import { TEAM_REPOSITORY } from "./application/ports/team-repository.port";
 import { INVITATION_REPOSITORY } from "./application/ports/invitation-repository.port";
 import { DrizzleTeamRepository } from "./infrastructure/drizzle-team.repository";
 import { DrizzleInvitationRepository } from "./infrastructure/drizzle-invitation.repository";
 import { DrizzleGroupOwnershipAdapter } from "./infrastructure/group-ownership.adapter";
+import { GoTrueAuthAdminAdapter } from "./infrastructure/gotrue-auth-admin.adapter";
 import { EntitlementGuard } from "../billing/api/guards/entitlement.guard";
 import { ENTITLEMENT_REPOSITORY } from "../billing/application/ports/entitlement-repository.port";
 import { DrizzleEntitlementRepository } from "../billing/infrastructure/drizzle-entitlement.repository";
@@ -43,6 +45,7 @@ import { DrizzleEntitlementRepository } from "../billing/infrastructure/drizzle-
     { provide: TEAM_REPOSITORY, useClass: DrizzleTeamRepository },
     { provide: INVITATION_REPOSITORY, useClass: DrizzleInvitationRepository },
     { provide: GROUP_OWNERSHIP_PORT, useClass: DrizzleGroupOwnershipAdapter },
+    { provide: AUTH_ADMIN_PORT, useClass: GoTrueAuthAdminAdapter },
     { provide: ENTITLEMENT_REPOSITORY, useClass: DrizzleEntitlementRepository },
   ],
 })

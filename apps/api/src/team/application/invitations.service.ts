@@ -4,8 +4,11 @@ import {
   PERMISSION_SCOPE_KIND,
   OWNER_ONLY_PERMISSION_KEYS,
   createInvitationRequestSchema,
+  createTeamMemberRequestSchema,
   type AcceptInvitationResponse,
   type CreateInvitationResponse,
+  type CreateTeamMemberResponse,
+  type DesiredGrant,
   type InvitationPreviewResponse,
   type InvitationSummary,
   type ListInvitationsResponse,
@@ -23,13 +26,13 @@ import {
 } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../api/guards/permission.guard";
+import { AUTH_ADMIN_PORT, type AuthAdminPort } from "./ports/auth-admin.port";
 import { GROUP_OWNERSHIP_PORT, type GroupOwnershipPort } from "./ports/group-ownership.port";
 import { INVITATION_REPOSITORY, type InvitationRepositoryPort } from "./ports/invitation-repository.port";
 import { TEAM_REPOSITORY, type TeamRepositoryPort } from "./ports/team-repository.port";
 
 /** Every invited member is a non-owner; the display role is derived from grants. */
 const MEMBER_ROLE_LABEL = "MEMBER";
-const DEFAULT_EXPIRES_IN_DAYS = 7;
 
 /**
  * Team & Permissions Phase 2 — invitation-link service. Owner-facing
@@ -44,6 +47,7 @@ export class InvitationsService {
     @Inject(INVITATION_REPOSITORY) private readonly repository: InvitationRepositoryPort,
     @Inject(GROUP_OWNERSHIP_PORT) private readonly groupOwnership: GroupOwnershipPort,
     @Inject(TEAM_REPOSITORY) private readonly teamRepository: TeamRepositoryPort,
+    @Inject(AUTH_ADMIN_PORT) private readonly authAdmin: AuthAdminPort,
   ) {}
 
   async createInvitation(
@@ -57,11 +61,101 @@ export class InvitationsService {
       throw new ValidationApiException(this.toFieldErrors(parsed.error));
     }
 
-    // Same coherence + workspace-ownership validation as updateMembershipPermissions:
-    // the target is a non-owner MEMBER, so team.manage is rejected, and every
-    // SELECTED_GROUPS id must belong to this workspace.
+    const desiredGrants = await this.toValidatedGrants(workspaceContext, parsed.data.grants);
+    const invitation = await this.insertInvitation({
+      authUser,
+      workspaceContext,
+      desiredGrants,
+      invitedLabel: parsed.data.invitedLabel ?? null,
+      action: "invitation.created",
+      correlationId,
+    });
+
+    return { id: invitation.id, token: invitation.token, status: "PENDING", expiresAt: null };
+  }
+
+  /**
+   * Creates the member's SIGN-IN ACCOUNT and their invitation in one owner
+   * action: the owner decides the email, the password and the permissions,
+   * then hands over the link.
+   *
+   * Password handling, spelled out because it is the sensitive part: the
+   * password goes from this request straight to the auth provider's admin
+   * API and is referenced nowhere else. Rasid keeps no copy — no column, no
+   * log, no response — and no endpoint can read it back. The owner knows it
+   * because they chose it. That is the entire mechanism, and it is why there
+   * is no vault here and nothing to leak later.
+   *
+   * An email that ALREADY has an account is a normal outcome, not an error:
+   * no second user is created, and the existing account's password is never
+   * overwritten — otherwise any workspace owner could seize an account just
+   * by knowing its address. The invitation is still created and the response
+   * says `account: "EXISTING"`, so the owner tells that person to sign in
+   * with the password they already have. Identity stays with the person;
+   * only the membership is being offered.
+   */
+  async createTeamMember(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    body: unknown,
+    correlationId: string | null,
+  ): Promise<CreateTeamMemberResponse> {
+    const parsed = createTeamMemberRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationApiException(this.toFieldErrors(parsed.error));
+    }
+    const { fullName, email, password, grants } = parsed.data;
+
+    if (!this.authAdmin.isConfigured()) {
+      // A deployment with no admin credential cannot create accounts. Say so
+      // plainly rather than half-failing — the link-only invite still works.
+      throw new ValidationApiException({
+        _root: [
+          "إنشاء حساب للعضو غير مفعّل على هذا الخادم. استخدم رابط الدعوة ليُنشئ العضو حسابه بنفسه، أو اضبط SUPABASE_SERVICE_ROLE_KEY.",
+        ],
+      });
+    }
+
+    // Validate the permissions BEFORE touching the auth provider, so a
+    // rejected grant can never leave an orphan account behind.
+    const desiredGrants = await this.toValidatedGrants(workspaceContext, grants);
+
+    const created = await this.authAdmin.createUser({ email, password, fullName });
+    let account: CreateTeamMemberResponse["account"];
+    if (created.ok) {
+      account = "CREATED";
+    } else if (created.reason === "EMAIL_TAKEN") {
+      account = "EXISTING";
+    } else if (created.reason === "WEAK_PASSWORD") {
+      throw new ValidationApiException({ password: ["كلمة المرور مرفوضة من نظام الدخول — اختر كلمة أقوى."] });
+    } else {
+      throw new ValidationApiException({ _root: ["تعذّر الوصول إلى نظام الدخول لإنشاء الحساب. حاول مرة أخرى."] });
+    }
+
+    const invitation = await this.insertInvitation({
+      authUser,
+      workspaceContext,
+      desiredGrants,
+      invitedLabel: `${fullName} · ${email}`,
+      action: "team_member.created",
+      correlationId,
+    });
+
+    return { invitationId: invitation.id, token: invitation.token, email, account };
+  }
+
+  /**
+   * Same coherence + workspace-ownership validation the permission editor
+   * runs: the target is a non-owner MEMBER, so `team.manage` is rejected, and
+   * every SELECTED_GROUPS id must belong to this workspace. Shared by both
+   * create paths so neither can drift into trusting the client.
+   */
+  private async toValidatedGrants(
+    workspaceContext: WorkspaceContext,
+    grants: DesiredGrant[],
+  ): Promise<InvitationDesiredGrant[]> {
     const requestedGroupIds = [
-      ...new Set(parsed.data.grants.flatMap((g) => (g.scope === "SELECTED_GROUPS" ? (g.groupIds ?? []) : []))),
+      ...new Set(grants.flatMap((g) => (g.scope === "SELECTED_GROUPS" ? (g.groupIds ?? []) : []))),
     ];
     const validGroupIds = await this.groupOwnership.findGroupIdsInWorkspace(
       requestedGroupIds,
@@ -69,7 +163,7 @@ export class InvitationsService {
     );
 
     const desiredGrants: InvitationDesiredGrant[] = [];
-    for (const grant of parsed.data.grants) {
+    for (const grant of grants) {
       this.assertCoherentGrant(grant.permission, grant.scope);
       if (grant.scope === "SELECTED_GROUPS") {
         for (const groupId of grant.groupIds ?? []) {
@@ -80,34 +174,44 @@ export class InvitationsService {
       }
       desiredGrants.push({ permissionKey: grant.permission, scopeType: grant.scope, groupIds: grant.groupIds });
     }
+    return desiredGrants;
+  }
 
+  /** Mints the token, stores only its hash, and audits — with NO expiry (see migration 0076). */
+  private async insertInvitation(params: {
+    authUser: VerifiedSupabaseToken;
+    workspaceContext: WorkspaceContext;
+    desiredGrants: InvitationDesiredGrant[];
+    invitedLabel: string | null;
+    action: string;
+    correlationId: string | null;
+  }): Promise<{ id: string; token: string }> {
     const rawToken = this.generateRawToken();
-    const tokenHash = this.hashToken(rawToken);
-    const expiresAt = new Date(Date.now() + (parsed.data.expiresInDays ?? DEFAULT_EXPIRES_IN_DAYS) * 24 * 60 * 60 * 1000);
-
     const invitation = await this.repository.createInvitation({
-      workspaceId: workspaceContext.workspaceId,
-      tokenHash,
+      workspaceId: params.workspaceContext.workspaceId,
+      tokenHash: this.hashToken(rawToken),
       roleLabel: MEMBER_ROLE_LABEL,
-      desiredGrants,
-      invitedLabel: parsed.data.invitedLabel ?? null,
-      invitedByUserId: authUser.id,
-      expiresAt,
+      desiredGrants: params.desiredGrants,
+      invitedLabel: params.invitedLabel,
+      invitedByUserId: params.authUser.id,
+      // An invitation ends by being accepted or revoked — never on a clock.
+      expiresAt: null,
     });
 
     await this.teamRepository.insertAuditEvent({
-      workspaceId: workspaceContext.workspaceId,
-      actorUserId: authUser.id,
-      actorMembershipId: workspaceContext.membership.id,
-      action: "invitation.created",
+      workspaceId: params.workspaceContext.workspaceId,
+      actorUserId: params.authUser.id,
+      actorMembershipId: params.workspaceContext.membership.id,
+      action: params.action,
       entityType: "invitation",
       entityId: invitation.id,
-      // Never log the raw token or its hash; record only non-secret metadata.
-      afterJson: { roleLabel: MEMBER_ROLE_LABEL, expiresAt: expiresAt.toISOString(), grantsCount: desiredGrants.length },
-      correlationId,
+      // Never the raw token, its hash, or any password — only non-secret
+      // metadata. `invitedLabel` is the owner's own note.
+      afterJson: { roleLabel: MEMBER_ROLE_LABEL, grantsCount: params.desiredGrants.length, invitedLabel: params.invitedLabel },
+      correlationId: params.correlationId,
     });
 
-    return { id: invitation.id, token: rawToken, status: "PENDING", expiresAt: expiresAt.toISOString() };
+    return { id: invitation.id, token: rawToken };
   }
 
   async listInvitations(workspaceContext: WorkspaceContext): Promise<ListInvitationsResponse> {
@@ -158,6 +262,7 @@ export class InvitationsService {
       workspaceId: preview.workspaceId,
       workspaceName: preview.workspaceName,
       expiresAt: preview.expiresAt,
+      invitedLabel: preview.invitedLabel,
       permissions: preview.desiredGrants.map((g) => g.permissionKey as PermissionKey),
     };
   }
@@ -185,10 +290,11 @@ export class InvitationsService {
         scope: g.scopeType,
         groupIds: g.scopeType === "SELECTED_GROUPS" ? g.groupIds : undefined,
       })),
-      expiresAt: row.expiresAt.toISOString(),
+      expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),
       acceptedAt: row.acceptedAt ? row.acceptedAt.toISOString() : null,
-      expired: row.status === "PENDING" && row.expiresAt.getTime() <= Date.now(),
+      // Only a legacy row can still be expired; new invitations have no deadline.
+      expired: row.status === "PENDING" && row.expiresAt !== null && row.expiresAt.getTime() <= Date.now(),
     };
   }
 

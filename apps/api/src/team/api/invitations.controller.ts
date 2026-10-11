@@ -4,6 +4,7 @@ import type { FastifyRequest } from "fastify";
 import type {
   AcceptInvitationResponse,
   CreateInvitationResponse,
+  CreateTeamMemberResponse,
   InvitationPreviewResponse,
   ListInvitationsResponse,
   RevokeInvitationResponse,
@@ -50,6 +51,27 @@ export class InvitationsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<CreateInvitationResponse> {
     return this.invitationsService.createInvitation(user, workspaceContext, body, extractCorrelationId(request));
+  }
+
+  /**
+   * Creates the member's sign-in account (owner-chosen email + password) AND
+   * their invitation in one call. Same owner-only gate as every other team
+   * mutation; the password is forwarded to the auth provider and never
+   * stored, logged or returned.
+   */
+  @Post("team/members")
+  @RequirePermission("team.manage")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("TEAM_MANAGEMENT")
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: "Create a team member's credentials + invitation (owner-only)" })
+  createTeamMember(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<CreateTeamMemberResponse> {
+    return this.invitationsService.createTeamMember(user, workspaceContext, body, extractCorrelationId(request));
   }
 
   @Get("invitations")
