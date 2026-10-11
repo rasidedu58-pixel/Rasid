@@ -55,26 +55,58 @@ export class IdentityService {
       // so this sets the name exactly once — later edits go through the profile.
       fullName: authUser.fullName || authUser.email?.split("@")[0]?.trim() || DEFAULT_FULL_NAME,
     });
-    // Backfill the teacher profile from signup metadata for a BRAND-NEW account
-    // (phone/governorate/subject are now required at signup). Only when the
-    // profile is still empty — never overwrites a later edit — and only with
-    // values that validate/normalize (untrusted metadata). Legacy/invite
-    // accounts without metadata fall through to the onboarding step unchanged.
-    if (!provisioned.user.phone && authUser.governorate && authUser.subject) {
+    const user = await this.backfillProfileFromSignupMetadata(provisioned.user, authUser);
+    return user === provisioned.user ? provisioned : { ...provisioned, user };
+  }
+
+  /**
+   * Fills EMPTY teacher-profile fields from the signup metadata the verified
+   * token carries (`phone` / `governorate` / `subject` / `subject_other`).
+   *
+   * Two rules, both deliberate:
+   *
+   * 1. FIELD BY FIELD, never all-or-nothing. This used to require a valid
+   *    phone AND governorate AND subject before writing anything, so one
+   *    unparseable phone threw away a perfectly good governorate and subject
+   *    — and because the write only ever happened on the single request that
+   *    provisioned the account, they were lost for good. That is the reported
+   *    bug: the teacher picked a governorate and a subject at signup and
+   *    settings showed «اختر المحافظة».
+   *
+   * 2. ONLY empty fields. A value the teacher has already saved is never
+   *    overwritten from metadata, no matter how often this runs.
+   *
+   * It is also now reachable after provisioning (see `getMe`), so an account
+   * whose profile never got filled — provisioned before signup collected
+   * these fields, or by a request whose token had no metadata — heals itself
+   * on the next load instead of staying empty forever.
+   */
+  private async backfillProfileFromSignupMetadata(
+    user: UserRow,
+    authUser: VerifiedSupabaseToken,
+  ): Promise<UserRow> {
+    const patch: { phone?: string; governorate?: string; subject?: string; subjectOther?: string | null } = {};
+
+    if (!user.phone) {
       const phone = normalizeEgyptianPhone(authUser.phone ?? "");
+      if (phone) patch.phone = phone;
+    }
+    if (!user.governorate && authUser.governorate) {
       const gov = governorateSchema.safeParse(authUser.governorate);
+      if (gov.success) patch.governorate = gov.data;
+    }
+    if (!user.subject && authUser.subject) {
       const subj = subjectSchema.safeParse(authUser.subject);
-      if (phone && gov.success && subj.success) {
-        const updated = await this.repository.updateProfile(provisioned.user.id, {
-          phone,
-          governorate: gov.data,
-          subject: subj.data,
-          subjectOther: subj.data === "OTHER" ? authUser.subjectOther ?? null : null,
-        });
-        if (updated) return { ...provisioned, user: updated };
+      if (subj.success) {
+        patch.subject = subj.data;
+        // `subject_other` only means anything alongside subject = OTHER, and
+        // is only ever set here as part of writing that subject.
+        patch.subjectOther = subj.data === "OTHER" ? (authUser.subjectOther ?? null) : null;
       }
     }
-    return provisioned;
+
+    if (Object.keys(patch).length === 0) return user;
+    return (await this.repository.updateProfile(user.id, patch)) ?? user;
   }
 
   async getMe(authUser: VerifiedSupabaseToken): Promise<MeResponse> {
@@ -88,8 +120,18 @@ export class IdentityService {
     // only after SupabaseAuthGuard has verified the token).
     const loaded = await this.repository.loadUserWithMemberships(authUser.id);
     if (loaded) {
-      const role = await this.repository.getPlatformRole(loaded.user.id);
-      return this.toMeResponse(loaded.user, loaded.memberships, role);
+      // Still the Phase-15C fast path: no provisioning read, and no write at
+      // all for a complete profile (the overwhelmingly common case — the
+      // helper returns the same row untouched when there is nothing to fill).
+      // The one case it does write is an account whose profile fields are
+      // still empty while the token carries them, which previously had no
+      // second chance: the backfill only ever ran on the request that
+      // provisioned the row, and this fast path returns before it.
+      const user = isTeacherProfileComplete(loaded.user)
+        ? loaded.user
+        : await this.backfillProfileFromSignupMetadata(loaded.user, authUser);
+      const role = await this.repository.getPlatformRole(user.id);
+      return this.toMeResponse(user, loaded.memberships, role);
     }
 
     const provisioned = await this.ensureProvisioned(authUser);

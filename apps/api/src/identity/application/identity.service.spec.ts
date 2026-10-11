@@ -82,6 +82,62 @@ describe("IdentityService", () => {
       expect(me.profile.governorate).toBeNull();
     });
 
+    it("keeps the governorate and subject even when the signup phone cannot be normalized", async () => {
+      // The reported bug. The backfill used to require phone AND governorate
+      // AND subject to all validate before writing ANYTHING, so one bad phone
+      // silently discarded a perfectly good governorate and subject — and the
+      // teacher saw «اختر المحافظة» in settings for data they had entered.
+      const me = await service.getMe({
+        id: "u-badphone",
+        email: "bad-phone@example.com",
+        fullName: "ليلى",
+        phone: "0000",
+        governorate: "GIZA",
+        subject: "PHYSICS",
+      });
+      expect(me.profile.phone).toBeNull(); // genuinely unusable — not invented
+      expect(me.profile.governorate).toBe("GIZA");
+      expect(me.profile.subject).toBe("PHYSICS");
+    });
+
+    it("heals an account whose profile was never filled, on a later /me — not only at provisioning", async () => {
+      // Provision with NO metadata (an account created before signup collected
+      // these fields, or by a request whose token carried none).
+      const bare = { id: "u-legacy", email: "legacy@example.com", fullName: "قديم" };
+      const first = await service.getMe(bare);
+      expect(first.profile.governorate).toBeNull();
+
+      // A later load with the metadata present now fills it in. Before, the
+      // Phase-15C fast path returned before the backfill could ever run again,
+      // so the profile stayed empty forever.
+      const second = await service.getMe({ ...bare, phone: "01099887766", governorate: "ASWAN", subject: "ARABIC" });
+      expect(second.profile.phone).toBe("+201099887766");
+      expect(second.profile.governorate).toBe("ASWAN");
+      expect(second.profile.subject).toBe("ARABIC");
+      expect(second.profile.profileCompleted).toBe(true);
+    });
+
+    it("a complete profile costs no extra write on /me (the fast path stays fast)", async () => {
+      const meta = { id: "u-complete", email: "c@example.com", fullName: "تمام", phone: "01012345678", governorate: "CAIRO", subject: "MATH" };
+      await service.getMe(meta);
+      const before = repository.updateProfileCalls;
+      await service.getMe(meta);
+      await service.getMe(meta);
+      expect(repository.updateProfileCalls).toBe(before);
+    });
+
+    it("the teacher can change the governorate and subject and the change sticks", async () => {
+      const meta = { id: "u-edit", email: "edit@example.com", fullName: "محرر", phone: "01012345678", governorate: "CAIRO", subject: "MATH" };
+      await service.getMe(meta);
+      const saved = await service.updateProfile(meta, { governorate: "LUXOR", subject: "CHEMISTRY" });
+      expect(saved.governorate).toBe("LUXOR");
+      expect(saved.subject).toBe("CHEMISTRY");
+      // And a later /me reads back the edit, never the signup metadata.
+      const me = await service.getMe(meta);
+      expect(me.profile.governorate).toBe("LUXOR");
+      expect(me.profile.subject).toBe("CHEMISTRY");
+    });
+
     it("never overwrites an existing profile from metadata on a later request", async () => {
       const meta = { id: "u-existing", email: "ex@example.com", fullName: "y", phone: "01012345678", governorate: "CAIRO", subject: "MATH" };
       await service.getMe(meta); // provisions + backfills CAIRO

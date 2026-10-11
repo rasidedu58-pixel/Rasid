@@ -270,10 +270,14 @@ export class InMemoryIdentityRepository implements IdentityRepositoryPort {
     this.seedTrialSubscription(workspace.id);
   }
 
+  /** Counts profile writes, so a test can assert the /me fast path stays write-free. */
+  updateProfileCalls = 0;
+
   async updateProfile(
     userId: string,
     patch: { fullName?: string; phone?: string; governorate?: string; subject?: string; subjectOther?: string | null },
   ): Promise<ProvisionedIdentity["user"] | undefined> {
+    this.updateProfileCalls += 1;
     const user = this.usersById.get(userId);
     if (!user) return undefined;
     const updated = {
