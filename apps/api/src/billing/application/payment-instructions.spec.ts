@@ -53,3 +53,46 @@ describe("payment instructions builder", () => {
     expect(formatEgpMajor(18010)).toBe("180.10 جنيه"); // trailing zero kept to 2 dp
   });
 });
+
+/**
+ * Channel availability is a SERVER fact. The screen used to offer InstaPay
+ * and Vodafone Cash unconditionally and only admit «قناة الدفع غير متاحة»
+ * after the request was created — the user had already committed to a
+ * channel that cannot receive money. These pin the shape the list endpoint
+ * now returns so the UI can disable a channel before the choice.
+ */
+describe("transfer-channel availability", () => {
+  const input = {
+    method: "INSTAPAY" as const,
+    planCode: "PROFESSIONAL",
+    billingCycle: "MONTHLY" as const,
+    amountMinor: 30000,
+    currencyCode: "EGP",
+    humanCode: "RSD-0001",
+  };
+
+  it("an unconfigured channel yields a null handle — never a fabricated one", () => {
+    const ins = buildPaymentInstructions({}, input);
+    expect(ins.payToHandle).toBeNull();
+    expect(ins.whatsapp.available).toBe(false);
+    expect(ins.whatsapp.deeplink).toBeNull();
+  });
+
+  it("each method reads its OWN configured handle, independently", () => {
+    const config = { instapayHandle: "rasid@instapay", vodafoneCashNumber: "01000000000" };
+    expect(buildPaymentInstructions(config, input).payToHandle).toBe("rasid@instapay");
+    expect(buildPaymentInstructions(config, { ...input, method: "VODAFONE_CASH" }).payToHandle).toBe("01000000000");
+  });
+
+  it("one configured channel does not make the other look available", () => {
+    const onlyInstapay = { instapayHandle: "rasid@instapay" };
+    expect(buildPaymentInstructions(onlyInstapay, input).payToHandle).toBe("rasid@instapay");
+    expect(buildPaymentInstructions(onlyInstapay, { ...input, method: "VODAFONE_CASH" }).payToHandle).toBeNull();
+  });
+
+  it("the proof deeplink carries the reference code the reviewer matches on", () => {
+    const ins = buildPaymentInstructions({ instapayHandle: "x@y", billingWhatsappNumber: "01000000000" }, input);
+    expect(ins.whatsapp.available).toBe(true);
+    expect(decodeURIComponent(ins.whatsapp.deeplink!)).toContain("RSD-0001");
+  });
+});

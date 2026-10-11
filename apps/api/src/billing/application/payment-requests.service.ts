@@ -32,6 +32,7 @@ import { ForbiddenApiException, ResourceNotFoundException } from "../../common/e
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { buildPaymentInstructions, type BillingChannelConfig } from "./payment-instructions";
+import { BILLING_PAYMENT_METHODS, type PaymentChannel } from "@academic-precision/contracts";
 
 const OWNER_ROLE_LABEL = "OWNER";
 
@@ -92,7 +93,31 @@ export class PaymentRequestsService {
       { userId: user.id, workspaceId: workspaceContext.workspaceId },
       (db) => listPaymentRequestsForWorkspace(db, workspaceContext.workspaceId),
     );
-    return { paymentRequests: rows.map((r) => this.toDto(r)) };
+    const config = this.channelConfig();
+    const channels: PaymentChannel[] = BILLING_PAYMENT_METHODS.map((method) => {
+      const payToHandle = (method === "INSTAPAY" ? config.instapayHandle : config.vodafoneCashNumber) ?? null;
+      return { method, available: !!payToHandle, payToHandle };
+    });
+
+    // Rebuild the instructions for the newest PENDING request from the SAME
+    // pure builder the create path uses, so a reload shows the identical
+    // amount / handle / reference instead of an empty card.
+    const nowMs = Date.now();
+    const pending = rows.find(
+      (r) => effectivePaymentRequestStatus({ status: r.status, expiresAtMs: r.expiresAt ? r.expiresAt.getTime() : null, nowMs }) === "PENDING",
+    );
+    const pendingInstructions = pending
+      ? buildPaymentInstructions(config, {
+          method: pending.paymentMethod as BillingPaymentMethod,
+          planCode: pending.targetPlanCode,
+          billingCycle: pending.billingCycle as BillingCycle,
+          amountMinor: pending.amountMinor,
+          currencyCode: pending.currencyCode,
+          humanCode: pending.humanCode,
+        })
+      : null;
+
+    return { paymentRequests: rows.map((r) => this.toDto(r)), channels, pendingInstructions };
   }
 
   async getBillingHistory(

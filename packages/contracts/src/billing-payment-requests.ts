@@ -76,8 +76,40 @@ export const createPaymentRequestResponseSchema = z.object({
 });
 export type CreatePaymentRequestResponse = z.infer<typeof createPaymentRequestResponseSchema>;
 
+/**
+ * Whether a transfer channel is usable RIGHT NOW on this deployment.
+ *
+ * The screen used to offer InstaPay and Vodafone Cash unconditionally and
+ * only admit "قناة الدفع غير متاحة" AFTER the request was created — the user
+ * had already committed to a channel that cannot receive money. Availability
+ * is a server fact (the handle is configured or it is not), so the server
+ * states it before the choice instead of after.
+ */
+export const paymentChannelSchema = z.object({
+  method: billingPaymentMethodSchema,
+  /** True only when a handle/number to transfer to is actually configured. */
+  available: z.boolean(),
+  /** The handle to transfer to — null when unavailable. */
+  payToHandle: z.string().nullable(),
+});
+export type PaymentChannel = z.infer<typeof paymentChannelSchema>;
+
 export const listPaymentRequestsResponseSchema = z.object({
   paymentRequests: z.array(paymentRequestSchema),
+  /**
+   * The transfer channels this deployment can actually accept, so the UI can
+   * disable an unconfigured one with a reason instead of failing after the
+   * fact. Optional for rolling-deploy safety (an old API omits it; the client
+   * then falls back to showing every method, i.e. today's behaviour).
+   */
+  channels: z.array(paymentChannelSchema).optional(),
+  /**
+   * Instructions for the newest PENDING request, so the amount, the handle
+   * and the reference code survive a page reload — they used to live only in
+   * the create response's local state and vanished on refresh, leaving the
+   * user with a pending request and no idea where to transfer.
+   */
+  pendingInstructions: paymentInstructionsSchema.nullable().optional(),
 });
 export type ListPaymentRequestsResponse = z.infer<typeof listPaymentRequestsResponseSchema>;
 

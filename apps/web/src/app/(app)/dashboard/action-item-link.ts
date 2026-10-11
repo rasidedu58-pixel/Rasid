@@ -9,6 +9,15 @@ export function actionItemHref(entityType: string, entityId: string): string {
       return "/attention?tab=followups";
     case "financial_obligation":
       return "/finance";
+    // Billing notifications (PAYMENT_CONFIRMED / PAYMENT_REJECTED /
+    // TRIAL_ENDING / SUBSCRIPTION_ENDING / PAYMENT_REQUEST_*) carry these two
+    // entity types. They used to fall through to the dashboard, which is the
+    // one place that tells the user nothing about the thing they clicked.
+    case "payment_request":
+    case "subscription":
+      return "/settings?tab=billing";
+    case "student":
+      return `/students/${entityId}`;
     default:
       return "/dashboard";
   }

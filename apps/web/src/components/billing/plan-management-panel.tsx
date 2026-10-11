@@ -213,7 +213,7 @@ function UpgradeCard({ workspaceId, ps, higher, onChanged }: { workspaceId: stri
         </div>
       ) : null}
 
-      {created ? <PaymentInstructionsCard created={created} /> : null}
+      {created ? <PaymentInstructionsCard instructions={created.instructions} request={created.paymentRequest} /> : null}
     </Card>
   );
 }

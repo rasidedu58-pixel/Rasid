@@ -155,7 +155,7 @@ function AcceptedOfferPayment({ workspaceId, offer }: { workspaceId: string; off
         </label>
         <Button onClick={() => mutation.mutate()} loading={mutation.isPending}>إنشاء طلب الدفع</Button>
       </div>
-      {created ? <PaymentInstructionsCard created={created} /> : null}
+      {created ? <PaymentInstructionsCard instructions={created.instructions} request={created.paymentRequest} /> : null}
     </div>
   );
 }

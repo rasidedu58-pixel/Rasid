@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ALL_NOTIFICATION_TYPES } from "./billing-notifications";
 
 /**
  * Reports / Notifications / Action Center contract types — Phase 9, API
@@ -145,7 +146,19 @@ export type GetExportResponse = z.infer<typeof getExportResponseSchema>;
 // Notifications — GET /notifications, POST /notifications/{id}/read, POST /notifications/read-all
 // ---------------------------------------------------------------------------
 
-export const notificationTypeSchema = z.enum(["SUBSCRIPTION_EXPIRING", "FOLLOWUP_DUE", "MISSING_RECORDS"]);
+/**
+ * Every type the system can actually store — kept in lockstep with the
+ * `notifications_type_check` constraint via `ALL_NOTIFICATION_TYPES`.
+ *
+ * This had drifted badly: the enum still listed only the three Phase-9 types
+ * while the billing engine was emitting PAYMENT_CONFIRMED, PAYMENT_REJECTED,
+ * TRIAL_ENDING and a dozen more. Any consumer that parsed this response
+ * against the contract rejected a real notification, and the typed
+ * `NotificationDto["type"]` lied to the UI about what it could receive.
+ * Deriving it from one list means a new type cannot be added to the database
+ * without appearing here.
+ */
+export const notificationTypeSchema = z.enum(ALL_NOTIFICATION_TYPES as unknown as [string, ...string[]]);
 export type NotificationTypeDto = z.infer<typeof notificationTypeSchema>;
 
 export const notificationSchema = z.object({
