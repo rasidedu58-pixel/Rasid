@@ -72,7 +72,20 @@ export function formatMoneyMinor(minor: number): string {
 
 const ENROLLMENT_STATUS: Record<string, string> = { ACTIVE: "نشط", WITHDRAWN: "منسحب", COMPLETED: "مكتمل", PENDING: "قيد الانتظار" };
 const OBLIGATION_STATUS: Record<string, string> = { PAID: "مدفوع", PARTIAL: "جزئي", UNPAID: "غير مدفوع", WAIVED: "معفى", OVERDUE: "متأخر" };
-export const statusLabel = (v: string): string => ENROLLMENT_STATUS[v] ?? OBLIGATION_STATUS[v] ?? v;
+const STUDENT_STATUS: Record<string, string> = { ACTIVE: "نشط", ARCHIVED: "مؤرشف" };
+export const statusLabel = (v: string): string => ENROLLMENT_STATUS[v] ?? OBLIGATION_STATUS[v] ?? STUDENT_STATUS[v] ?? v;
+
+/** `18 / 20`, or «غياب» for an ABSENT_FROM_EXAM record — never a zero score. */
+export function formatExamScore(score: number | null, maxScore: number): string {
+  if (score == null) return "غياب";
+  const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, ""));
+  return `${fmt(score)} / ${fmt(maxScore)}`;
+}
+
+/** `d/M/yyyy` in the Gregorian Arabic locale — compact enough for a table cell. */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("ar-EG", { day: "numeric", month: "numeric", year: "numeric" });
+}
 
 // --- Builders ---------------------------------------------------------------
 export function buildMonthlyDocument(dto: MonthlyTeacherReportResponse, meta: ReportDocumentMeta): ReportDocument {
@@ -152,13 +165,46 @@ export function buildGroupDocument(dto: GroupReportResponse, meta: ReportDocumen
 
 export function buildStudentDocument(dto: StudentReportResponse, meta: ReportDocumentMeta): ReportDocument {
   const s = dto.sessions;
+  const scored = dto.examScores.filter((e) => e.status === "SCORED");
+  // The LATEST mark belongs on the summary card: "2 exams recorded" was the
+  // one figure a parent cannot use.
+  const latestScored = scored[0];
   const summary: Array<{ label: string; value: string }> = [
+    // Identity first — the code/status were only in the subtitle before, so
+    // a printed page could not be matched back to a student record.
+    { label: "كود الطالب", value: dto.student.studentCode },
+    { label: "حالة الطالب", value: statusLabel(dto.student.status) },
     { label: "الحصص", value: String(s.total) },
     { label: "حضور", value: `${s.attendance.present} حاضر · ${s.attendance.absent} غائب · ${s.attendance.late} متأخر` },
-    { label: "واجبات", value: `${s.homework.done} تام · ${s.homework.partial} جزئي · ${s.homework.notDone} غير مُنجز` },
-    { label: "اختبارات", value: `${s.exam.scored} مُقيَّم · ${s.exam.absent} غائب` },
+    // Every homework state, including the two that were dropped: a student
+    // with one PARTIAL used to read as "0 تام" with nothing to explain it.
+    {
+      label: "واجبات",
+      value: `${s.homework.done} تام · ${s.homework.partial} جزئي · ${s.homework.notDone} غير مُنجز · ${s.homework.noHomework} لا واجب · ${s.homework.missing} غير مسجّل`,
+    },
+    {
+      label: latestScored ? "آخر درجة امتحان" : "اختبارات",
+      value: latestScored
+        ? `${formatExamScore(latestScored.score, latestScored.maxScore)}${scored.length > 1 ? ` (من ${scored.length} امتحانات)` : ""}`
+        : `${s.exam.scored} مُقيَّم · ${s.exam.absent} غائب`,
+    },
   ];
   const sections: ReportSection[] = [];
+  if (dto.examScores.length > 0) {
+    sections.push({
+      title: "درجات الامتحانات",
+      columns: [
+        { key: "dateLabel", label: "التاريخ", type: "text", width: 16 },
+        { key: "examName", label: "الامتحان", type: "text", width: 34 },
+        { key: "scoreLabel", label: "الدرجة", type: "text", width: 16 },
+      ],
+      rows: dto.examScores.map((e) => ({
+        dateLabel: shortDate(e.sessionDate),
+        examName: e.examName ?? "امتحان",
+        scoreLabel: formatExamScore(e.score, e.maxScore),
+      })),
+    });
+  }
   if (dto.obligationsByMonth.length > 0) {
     sections.push({
       title: "الالتزامات المالية",

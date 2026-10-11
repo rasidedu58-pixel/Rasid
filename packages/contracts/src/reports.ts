@@ -19,6 +19,28 @@ const homeworkSummarySchema = z.object({ done: z.number().int(), partial: z.numb
 const examSummarySchema = z.object({ scored: z.number().int(), absent: z.number().int(), missing: z.number().int() });
 const monthRefSchema = z.object({ id: z.string().uuid(), year: z.number().int(), month: z.number().int() });
 
+/**
+ * One exam a student actually sat (or was recorded absent from) — the SCORE,
+ * not a count. `examSummarySchema` above only ever said HOW MANY exams were
+ * recorded, so the student page and the PDF could show "1 exam" while the
+ * mark itself (`session_records.exam_score` against `session_exams.max_score`)
+ * stayed invisible outside the session screen that entered it. No new table
+ * and no new write path: this reads two columns that exist since Phase 5.
+ *
+ * `score` is null exactly when `status` is ABSENT_FROM_EXAM — the schema's
+ * own `(exam_status = 'SCORED') = (exam_score IS NOT NULL)` check — never a
+ * stand-in zero.
+ */
+const examScoreSchema = z.object({
+  sessionId: z.string().uuid(),
+  sessionDate: z.string(),
+  examName: z.string().nullable(),
+  status: z.enum(["SCORED", "ABSENT_FROM_EXAM"]),
+  score: z.number().nullable(),
+  maxScore: z.number(),
+});
+export type StudentExamScore = z.infer<typeof examScoreSchema>;
+
 // ---------------------------------------------------------------------------
 // Student Report — GET /reports/student/{id}
 // ---------------------------------------------------------------------------
@@ -27,6 +49,8 @@ export const studentReportResponseSchema = z.object({
   student: z.object({ id: z.string().uuid(), name: z.string(), studentCode: z.string(), status: z.string() }),
   currentMonth: monthRefSchema.nullable(),
   sessions: z.object({ total: z.number().int(), attendance: attendanceSummarySchema, homework: homeworkSummarySchema, exam: examSummarySchema }),
+  /** Newest first. Empty when nothing was recorded for this student this month. */
+  examScores: z.array(examScoreSchema),
   activeAttentionCase: z.object({ id: z.string().uuid(), status: z.string(), priority: z.string(), openedAt: z.string() }).nullable(),
   obligationsByMonth: z.array(
     z.object({

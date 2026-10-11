@@ -10,6 +10,7 @@ import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
 import { fetchStudentDetail } from "../../../../lib/api/students";
 import { fetchStudentReport } from "../../../../lib/api/reports";
+import { examMetric, homeworkAssignedTotal, homeworkBreakdownLabel } from "../../../../lib/student-summary";
 import { OverviewTab } from "./overview-tab";
 import { GuardiansTab } from "./guardians-tab";
 import { FinanceTab } from "./finance-tab";
@@ -51,8 +52,8 @@ export default function StudentProfilePage() {
   const att = report.sessions.attendance;
   const hw = report.sessions.homework;
   const attTotal = att.present + att.absent + att.late + att.missing;
-  const hwTotal = hw.done + hw.partial + hw.notDone + hw.missing;
-  const examTotal = report.sessions.exam.scored + report.sessions.exam.absent + report.sessions.exam.missing;
+  const hwTotal = homeworkAssignedTotal(hw);
+  const exam = examMetric(report.examScores, report.sessions.exam);
   const totalDue = report.obligationsByMonth.reduce((s, o) => s + o.netDueMinor, 0);
   const totalPaid = report.obligationsByMonth.reduce((s, o) => s + o.amountPaidMinor, 0);
   const outstanding = Math.max(0, totalDue - totalPaid);
@@ -75,8 +76,11 @@ export default function StudentProfilePage() {
       <div className="mb-6 flex flex-col gap-3">
         <MetricStrip>
           <MetricCell label="الحضور" value={attTotal > 0 ? `${att.present}/${attTotal}` : "—"} sub="حاضر هذا الشهر" />
-          <MetricCell label="الواجب" value={hwTotal > 0 ? `${hw.done}/${hwTotal}` : "—"} sub="منجز" />
-          <MetricCell label="الامتحان" value={examTotal > 0 ? `${report.sessions.exam.scored}/${examTotal}` : "—"} sub="مرصود" />
+          {/* «منجز» alone made one PARTIAL homework read as "0 منجز" with
+              nothing to explain it — the sub-line now carries every state. */}
+          <MetricCell label="الواجب" value={hwTotal > 0 ? `${hw.done}/${hwTotal}` : "—"} sub={hwTotal > 0 ? homeworkBreakdownLabel(hw) : "لا واجبات"} />
+          {/* The mark, not a count of exams. */}
+          <MetricCell label="الامتحان" value={exam.value} sub={exam.sub} />
           <MetricCell
             label="المتبقّي"
             value={report.obligationsByMonth.length > 0 ? formatMoney(outstanding) : "—"}

@@ -17,6 +17,7 @@ function emptyStudentReport(studentId: string): StudentReportResult {
     student: { id: studentId, name: "طالب تجريبي", studentCode: "AP-0001", status: "ACTIVE" },
     currentMonth: { id: "month-1", year: 2026, month: 8 },
     sessions: { total: 0, attendance: { present: 0, absent: 0, late: 0, missing: 0 }, homework: { done: 0, partial: 0, notDone: 0, noHomework: 0, missing: 0 }, exam: { scored: 0, absent: 0, missing: 0 } },
+    examScores: [],
     activeAttentionCase: null,
     obligationsByMonth: [],
   };

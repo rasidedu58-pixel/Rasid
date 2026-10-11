@@ -25,6 +25,7 @@ import { groupMonths, groups } from "../schema/groups";
 import { operatingMonths } from "../schema/months";
 import { sessions } from "../schema/sessions";
 import { sessionRecords } from "../schema/session-records";
+import { sessionExams } from "../schema/session-exams";
 import { financialObligations } from "../schema/finance";
 import { attentionCases } from "../schema/attention";
 import { scheduledFollowups } from "../schema/followup";
@@ -92,6 +93,15 @@ export interface StudentReportResult {
     homework: { done: number; partial: number; notDone: number; noHomework: number; missing: number };
     exam: { scored: number; absent: number; missing: number };
   };
+  /** Newest exam first — the actual marks, not just the counts above. */
+  examScores: Array<{
+    sessionId: string;
+    sessionDate: Date;
+    examName: string | null;
+    status: "SCORED" | "ABSENT_FROM_EXAM";
+    score: number | null;
+    maxScore: number;
+  }>;
   activeAttentionCase: { id: string; status: string; priority: string; openedAt: Date } | null;
   obligationsByMonth: Array<{
     monthId: string;
@@ -178,6 +188,7 @@ export async function getStudentReport(db: Db, workspaceId: string, studentId: s
     : [];
 
   const sessionsAgg = { total: 0, attendance: { present: 0, absent: 0, late: 0, missing: 0 }, homework: { done: 0, partial: 0, notDone: 0, noHomework: 0, missing: 0 }, exam: { scored: 0, absent: 0, missing: 0 } };
+  const examScores: StudentReportResult["examScores"] = [];
 
   if (currentMonthEnrollmentIds.length > 0) {
     const records = await db
@@ -219,6 +230,47 @@ export async function getStudentReport(db: Db, workspaceId: string, studentId: s
       else if (r.examStatus === "ABSENT_FROM_EXAM") sessionsAgg.exam.absent += 1;
       else if (r.examStatus !== "NO_EXAM") sessionsAgg.exam.missing += 1;
     }
+
+    // The marks themselves. One extra query, and only when the student has
+    // a recorded exam at all — a NO_EXAM-only month issues nothing. Joined
+    // to `session_exams` for `max_score`/name (a score without its maximum
+    // is meaningless) and to `sessions` for the date it was sat. `numeric`
+    // columns arrive as strings from the driver (the schema's own note), so
+    // they are converted here at the repository boundary, exactly like
+    // `session-mode.repository.ts` does.
+    const examRecordEnrollmentIds = records.filter((r) => r.examStatus !== "NO_EXAM").map((r) => r.enrollmentId);
+    if (examRecordEnrollmentIds.length > 0) {
+      const examRows = await db
+        .select({
+          sessionId: sessionRecords.sessionId,
+          scheduledAt: sessions.scheduledAt,
+          examName: sessionExams.name,
+          examStatus: sessionRecords.examStatus,
+          examScore: sessionRecords.examScore,
+          maxScore: sessionExams.maxScore,
+        })
+        .from(sessionRecords)
+        .innerJoin(sessions, eq(sessions.id, sessionRecords.sessionId))
+        .innerJoin(sessionExams, eq(sessionExams.sessionId, sessionRecords.sessionId))
+        .where(
+          and(
+            eq(sessionRecords.workspaceId, workspaceId),
+            inArray(sessionRecords.enrollmentId, currentMonthEnrollmentIds),
+            inArray(sessionRecords.examStatus, ["SCORED", "ABSENT_FROM_EXAM"]),
+          ),
+        );
+      for (const row of examRows) {
+        examScores.push({
+          sessionId: row.sessionId,
+          sessionDate: row.scheduledAt,
+          examName: row.examName,
+          status: row.examStatus === "SCORED" ? "SCORED" : "ABSENT_FROM_EXAM",
+          score: row.examScore == null ? null : Number(row.examScore),
+          maxScore: Number(row.maxScore),
+        });
+      }
+      examScores.sort((a, b) => b.sessionDate.getTime() - a.sessionDate.getTime());
+    }
   }
 
   // At most one non-CLOSED case can exist per (workspace, student) — the
@@ -234,6 +286,7 @@ export async function getStudentReport(db: Db, workspaceId: string, studentId: s
     student: { id: student.id, name: student.name, studentCode: student.studentCode, status: student.status },
     currentMonth: currentMonth ? { id: currentMonth.id, year: currentMonth.year, month: currentMonth.month } : null,
     sessions: sessionsAgg,
+    examScores,
     activeAttentionCase: activeCase ? { id: activeCase.id, status: activeCase.status, priority: activeCase.priority, openedAt: activeCase.openedAt } : null,
     obligationsByMonth,
   };

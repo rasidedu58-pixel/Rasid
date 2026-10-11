@@ -37,24 +37,31 @@ type Primitives = { Document: ComponentType<Record<string, unknown>>; Page: Comp
 const c = (hex: string) => `#${hex}`;
 
 const S = {
-  page: { paddingTop: 40, paddingBottom: 56, paddingHorizontal: 36, fontFamily: REPORT_PDF_FONT, fontSize: 10, color: c(REPORT_BRAND.text), direction: "rtl" as const },
-  headerBand: { backgroundColor: c(REPORT_BRAND.navy), color: c(REPORT_BRAND.white), paddingVertical: 12, paddingHorizontal: 14, borderRadius: 6, marginBottom: 14 },
+  // Phase 2 density pass. The page was mostly white space: 40/56pt page
+  // padding, 31%-wide summary cards (3 per row, so a 4-item summary left a
+  // two-thirds-empty orphan row) and 14pt gaps around every section title.
+  // Nothing here changes WHAT is printed or the RTL/Arabic setup — only how
+  // much paper one page uses.
+  page: { paddingTop: 28, paddingBottom: 44, paddingHorizontal: 30, fontFamily: REPORT_PDF_FONT, fontSize: 10, color: c(REPORT_BRAND.text), direction: "rtl" as const },
+  headerBand: { backgroundColor: c(REPORT_BRAND.navy), color: c(REPORT_BRAND.white), paddingVertical: 10, paddingHorizontal: 12, borderRadius: 6, marginBottom: 10 },
   brand: { fontSize: 18, fontWeight: 700, color: c(REPORT_BRAND.white), textAlign: "right" as const },
   subtitle: { fontSize: 12, color: "#CBD5E1", marginTop: 2, textAlign: "right" as const },
   metaRow: { flexDirection: "row-reverse" as const, flexWrap: "wrap" as const, gap: 12, marginTop: 6 },
   metaItem: { fontSize: 9, color: "#94A3B8", textAlign: "right" as const },
-  sectionTitle: { fontSize: 13, fontWeight: 700, color: c(REPORT_BRAND.navy), marginTop: 14, marginBottom: 6, textAlign: "right" as const },
-  summaryWrap: { flexDirection: "row-reverse" as const, flexWrap: "wrap" as const, gap: 8, marginBottom: 6 },
-  summaryCard: { width: "31%", backgroundColor: c(REPORT_BRAND.tealSoft), borderRadius: 6, padding: 8 },
+  sectionTitle: { fontSize: 12, fontWeight: 700, color: c(REPORT_BRAND.navy), marginTop: 10, marginBottom: 4, textAlign: "right" as const },
+  summaryWrap: { flexDirection: "row-reverse" as const, flexWrap: "wrap" as const, gap: 6, marginBottom: 2 },
+  // 3 per row at 32.5% + 6pt gaps: two long values (the homework breakdown,
+  // the attendance breakdown) need the width, and 4-up truncated them.
+  summaryCard: { width: "32.3%", backgroundColor: c(REPORT_BRAND.tealSoft), borderRadius: 6, padding: 6 },
   summaryLabel: { fontSize: 8, color: c(REPORT_BRAND.neutral), textAlign: "right" as const },
-  summaryValue: { fontSize: 12, fontWeight: 700, color: c(REPORT_BRAND.navy), textAlign: "right" as const, marginTop: 2 },
+  summaryValue: { fontSize: 10, fontWeight: 700, color: c(REPORT_BRAND.navy), textAlign: "right" as const, marginTop: 1, lineHeight: 1.35 },
   theadRow: { flexDirection: "row-reverse" as const, backgroundColor: c(REPORT_BRAND.teal) },
-  th: { color: c(REPORT_BRAND.white), fontWeight: 700, fontSize: 9, paddingVertical: 5, paddingHorizontal: 6, textAlign: "right" as const },
+  th: { color: c(REPORT_BRAND.white), fontWeight: 700, fontSize: 9, paddingVertical: 4, paddingHorizontal: 5, textAlign: "right" as const },
   tr: { flexDirection: "row-reverse" as const, borderBottomWidth: 0.5, borderBottomColor: c(REPORT_BRAND.border) },
   trAlt: { backgroundColor: c(REPORT_BRAND.rowAlt) },
-  td: { fontSize: 9, paddingVertical: 4, paddingHorizontal: 6, textAlign: "right" as const, color: c(REPORT_BRAND.text) },
+  td: { fontSize: 9, paddingVertical: 3, paddingHorizontal: 5, textAlign: "right" as const, color: c(REPORT_BRAND.text) },
   note: { fontSize: 11, color: c(REPORT_BRAND.neutral), textAlign: "center" as const, marginTop: 24 },
-  footer: { position: "absolute" as const, bottom: 24, left: 36, right: 36, flexDirection: "row-reverse" as const, justifyContent: "space-between" as const, borderTopWidth: 0.5, borderTopColor: c(REPORT_BRAND.border), paddingTop: 6 },
+  footer: { position: "absolute" as const, bottom: 18, left: 30, right: 30, flexDirection: "row-reverse" as const, justifyContent: "space-between" as const, borderTopWidth: 0.5, borderTopColor: c(REPORT_BRAND.border), paddingTop: 6 },
   footerText: { fontSize: 8, color: c(REPORT_BRAND.neutral) },
 };
 

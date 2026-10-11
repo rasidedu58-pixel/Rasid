@@ -73,11 +73,67 @@ describe("report PDF renderer", () => {
       student: { id: "s1", name: "أحمد المصري", studentCode: "AP-0001", status: "ACTIVE" },
       currentMonth: { id: "m1", year: 2026, month: 8 },
       sessions: { total: 8, attendance: { present: 6, absent: 1, late: 1, missing: 0 }, homework: { done: 5, partial: 1, notDone: 2, noHomework: 0, missing: 0 }, exam: { scored: 2, absent: 0, missing: 0 } },
+      examScores: [
+        { sessionId: "sess-2", sessionDate: "2026-08-12T15:00:00Z", examName: "اختبار الوحدة الثانية", status: "SCORED", score: 18, maxScore: 20 },
+        { sessionId: "sess-1", sessionDate: "2026-08-05T15:00:00Z", examName: null, status: "SCORED", score: 15.5, maxScore: 20 },
+      ],
       activeAttentionCase: null,
       obligationsByMonth: [{ monthId: "m1", year: 2026, month: 8, groupId: "g1", groupName: "مجموعة الرياضيات", netDueMinor: 50000, amountPaidMinor: 30000, remainingMinor: 20000, status: "PARTIAL" }],
     };
     const buf = await renderReportPdf(buildStudentDocument(student, META));
     expect(buf.subarray(0, 5).toString("latin1")).toBe("%PDF-");
     expect(buf.length).toBeGreaterThan(3000);
+  });
+
+  it("the student document carries the exam MARKS and every homework state — not just counts", () => {
+    const student: StudentReportResponse = {
+      student: { id: "s1", name: "أحمد المصري", studentCode: "00042", status: "ACTIVE" },
+      currentMonth: { id: "m1", year: 2026, month: 8 },
+      sessions: { total: 8, attendance: { present: 6, absent: 1, late: 1, missing: 0 }, homework: { done: 0, partial: 1, notDone: 0, noHomework: 2, missing: 1 }, exam: { scored: 2, absent: 1, missing: 0 } },
+      examScores: [
+        { sessionId: "sess-2", sessionDate: "2026-08-12T15:00:00Z", examName: "اختبار الوحدة الثانية", status: "SCORED", score: 18, maxScore: 20 },
+        { sessionId: "sess-1", sessionDate: "2026-08-05T15:00:00Z", examName: null, status: "SCORED", score: 15.5, maxScore: 20 },
+        { sessionId: "sess-0", sessionDate: "2026-08-01T15:00:00Z", examName: "اختبار قصير", status: "ABSENT_FROM_EXAM", score: null, maxScore: 10 },
+      ],
+      activeAttentionCase: null,
+      obligationsByMonth: [],
+    };
+
+    const doc = buildStudentDocument(student, META);
+    const summaryValues = doc.summary.map((x) => x.value).join(" | ");
+
+    // The latest mark is on a summary card, as the mark — "2 مُقيَّم" was the
+    // figure nobody could use.
+    expect(summaryValues).toContain("18 / 20");
+    expect(doc.summary.some((x) => x.label === "آخر درجة امتحان")).toBe(true);
+    // Identity is printed, so a page can be matched back to a student.
+    expect(summaryValues).toContain("00042");
+    // Every homework state, including the two that were dropped before.
+    expect(summaryValues).toContain("1 جزئي");
+    expect(summaryValues).toContain("2 لا واجب");
+    expect(summaryValues).toContain("1 غير مسجّل");
+
+    // And a real exam table — one row per exam, absence never a zero score.
+    const exams = doc.sections.find((x) => x.title === "درجات الامتحانات");
+    expect(exams).toBeDefined();
+    expect(exams!.rows).toHaveLength(3);
+    expect(exams!.rows[0]!.scoreLabel).toBe("18 / 20");
+    expect(exams!.rows[1]!.scoreLabel).toBe("15.5 / 20");
+    expect(exams!.rows[1]!.examName).toBe("امتحان");
+    expect(exams!.rows[2]!.scoreLabel).toBe("غياب");
+  });
+
+  it("omits the exam section entirely when nothing was recorded (never an empty table)", () => {
+    const student: StudentReportResponse = {
+      student: { id: "s1", name: "طالب", studentCode: "00001", status: "ACTIVE" },
+      currentMonth: { id: "m1", year: 2026, month: 8 },
+      sessions: { total: 2, attendance: { present: 2, absent: 0, late: 0, missing: 0 }, homework: { done: 2, partial: 0, notDone: 0, noHomework: 0, missing: 0 }, exam: { scored: 0, absent: 0, missing: 0 } },
+      examScores: [],
+      activeAttentionCase: null,
+      obligationsByMonth: [],
+    };
+    const doc = buildStudentDocument(student, META);
+    expect(doc.sections.some((x) => x.title === "درجات الامتحانات")).toBe(false);
+    expect(doc.summary.some((x) => x.label === "آخر درجة امتحان")).toBe(false);
   });
 });

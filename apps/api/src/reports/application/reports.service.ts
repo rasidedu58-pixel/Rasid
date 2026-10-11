@@ -266,6 +266,7 @@ export class ReportsService {
       student: r.student,
       currentMonth: r.currentMonth,
       sessions: r.sessions,
+      examScores: r.examScores.map((e) => ({ ...e, sessionDate: e.sessionDate.toISOString() })),
       activeAttentionCase: r.activeAttentionCase ? { ...r.activeAttentionCase, openedAt: r.activeAttentionCase.openedAt.toISOString() } : null,
       // Finance redaction: no finance.overview → no money rows at all.
       obligationsByMonth: canFinance ? r.obligationsByMonth : [],
