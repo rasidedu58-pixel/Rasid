@@ -18,6 +18,10 @@ export function actionItemHref(entityType: string, entityId: string): string {
       return "/settings?tab=billing";
     case "student":
       return `/students/${entityId}`;
+    // TEAM_INVITE_ACCEPTED — the owner wants the team page, where the new
+    // member (and their permissions) now is.
+    case "workspace_membership":
+      return "/team";
     default:
       return "/dashboard";
   }

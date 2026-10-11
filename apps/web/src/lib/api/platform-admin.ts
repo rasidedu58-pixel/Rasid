@@ -10,6 +10,8 @@ import type {
   PlatformOperationalSnapshot,
   PlatformStatusResponse,
   PlatformWorkspaceSubscriptionResponse,
+  ListNotificationsResponse,
+  MarkNotificationReadResponse,
   ListPlatformPaymentRequestsResponse,
   ResolvePaymentRequestResponse,
   RejectPaymentRequest,
@@ -76,6 +78,17 @@ export function fetchPlatformWorkspaceSubscription(workspaceId: string): Promise
 /** Platform status + derived active issues (platform.health.view). */
 export function fetchPlatformStatus(): Promise<PlatformStatusResponse> {
   return apiRequest<PlatformStatusResponse>("/platform-admin/platform-status");
+}
+
+// --- Platform staff notifications -------------------------------------------
+
+/** platform.billing.view — the CALLER's own platform-facing notifications. */
+export function fetchPlatformNotifications(): Promise<ListNotificationsResponse> {
+  return apiRequest<ListNotificationsResponse>("/platform-admin/notifications");
+}
+
+export function markPlatformNotificationRead(id: string): Promise<MarkNotificationReadResponse> {
+  return apiRequest<MarkNotificationReadResponse>(`/platform-admin/notifications/${id}/read`, { method: "POST", body: {} });
 }
 
 // --- Billing Phase 3: payment requests (Billing Center) ----------------------

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { attentionResolutionRoute, ALL_NOTIFICATION_TYPES, notificationTypeSchema } from "@academic-precision/contracts";
 import { actionItemHref } from "../app/(app)/dashboard/action-item-link";
+import { platformNotificationHref } from "../lib/platform-notification-link";
 
 /**
  * Two routing contracts the user actually feels:
@@ -13,6 +14,10 @@ describe("notification action links", () => {
     // /dashboard, which says nothing about the payment they just clicked.
     expect(actionItemHref("payment_request", "p1")).toBe("/settings?tab=billing");
     expect(actionItemHref("subscription", "s1")).toBe("/settings?tab=billing");
+  });
+
+  it("sends a team-invite-accepted notification to the team page", () => {
+    expect(actionItemHref("workspace_membership", "m1")).toBe("/team");
   });
 
   it("keeps the existing destinations intact", () => {
@@ -36,6 +41,27 @@ describe("notification action links", () => {
     expect(notificationTypeSchema.safeParse("PAYMENT_CONFIRMED").success).toBe(true);
     expect(notificationTypeSchema.safeParse("FOLLOWUP_DUE").success).toBe(true);
     expect(notificationTypeSchema.safeParse("NOT_A_REAL_TYPE").success).toBe(false);
+  });
+});
+
+describe("platform-staff notification links", () => {
+  it("sends a new payment request to the staff review queue, not to the customer's billing page", () => {
+    // The same entity type means two different things to the two audiences —
+    // which is why staff have their own mapping.
+    expect(platformNotificationHref("payment_request")).toBe("/platform-admin/payment-requests");
+    expect(actionItemHref("payment_request", "p1")).toBe("/settings?tab=billing");
+  });
+
+  it("sends custom-plan notifications to the custom-plans screen", () => {
+    expect(platformNotificationHref("custom_plan_request")).toBe("/platform-admin/custom-plans");
+    expect(platformNotificationHref("custom_plan_offer")).toBe("/platform-admin/custom-plans");
+  });
+
+  it("never falls back to a dashboard", () => {
+    for (const entityType of ["payment_request", "custom_plan_request", "something_else", null]) {
+      expect(platformNotificationHref(entityType)).not.toBe("/dashboard");
+      expect(platformNotificationHref(entityType)).not.toBe("/platform-admin");
+    }
   });
 });
 

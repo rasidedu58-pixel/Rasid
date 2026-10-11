@@ -8,8 +8,8 @@
  * only) and is the ONLY write path that ever creates a notification — see
  * `worker/notifications-scan.ts`.
  */
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import type { NotificationTypeValue } from "@academic-precision/contracts";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { PLATFORM_BILLING_NOTIFICATION_TYPES, type NotificationTypeValue } from "@academic-precision/contracts";
 import { notifications } from "../schema/notifications";
 import type { Db } from "./identity.repository";
 
@@ -86,6 +86,57 @@ export async function markAllNotificationsRead(db: Db, params: { workspaceId: st
     .where(and(eq(notifications.workspaceId, params.workspaceId), eq(notifications.userId, params.userId), isNull(notifications.readAt)))
     .returning({ id: notifications.id });
   return result.length;
+}
+
+// ---------------------------------------------------------------------------
+// Platform-staff read path (migration 0077)
+// ---------------------------------------------------------------------------
+
+/**
+ * Platform staff read their own platform-facing notifications.
+ *
+ * Runs on `app_platform_admin`, whose policy
+ * (`notifications_platform_admin_select`) permits ONLY the platform-facing
+ * types — a customer's own notifications are unreachable from this connection
+ * no matter what this query asks for. The `type` filter here is therefore
+ * belt-and-braces, and the `user_id` predicate is what makes the list personal.
+ */
+const PLATFORM_TYPES = [...PLATFORM_BILLING_NOTIFICATION_TYPES];
+
+export async function loadPlatformNotificationsPage(
+  adminDb: Db,
+  params: { userId: string; limit?: number },
+): Promise<NotificationsPage> {
+  const scope = and(eq(notifications.userId, params.userId), inArray(notifications.type, PLATFORM_TYPES));
+  const [rows, countRow] = await Promise.all([
+    adminDb.select().from(notifications).where(scope).orderBy(desc(notifications.createdAt)).limit(params.limit ?? 50),
+    adminDb
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notifications)
+      .where(and(scope, isNull(notifications.readAt)))
+      .then((r) => r[0]),
+  ]);
+  return { rows, unreadCount: countRow?.count ?? 0 };
+}
+
+/** Column-restricted (`read_at` only, matching the 0077 grant) and scoped to the caller's own row — a foreign/unknown id updates 0 rows, never a distinguishable 403/404. */
+export async function markPlatformNotificationRead(
+  adminDb: Db,
+  params: { userId: string; id: string },
+): Promise<boolean> {
+  const result = await adminDb
+    .update(notifications)
+    .set({ readAt: new Date() })
+    .where(
+      and(
+        eq(notifications.id, params.id),
+        eq(notifications.userId, params.userId),
+        inArray(notifications.type, PLATFORM_TYPES),
+        isNull(notifications.readAt),
+      ),
+    )
+    .returning({ id: notifications.id });
+  return result.length > 0;
 }
 
 // ---------------------------------------------------------------------------

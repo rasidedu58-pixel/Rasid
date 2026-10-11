@@ -85,6 +85,13 @@ export const STANDARD_PLANS: Record<StandardPlanCode, StandardPlan> = {
   BUSINESS_PLUS: { code: "BUSINESS_PLUS", nameAr: "أعمال بلس", badgeAr: null, maxActiveStudents: 3000, maxTeamMembers: 15, monthlyPriceMinor: 90000 },
 };
 
+/** Arabic display name for any plan code — `CUSTOM` has no catalog row, an unknown code falls back to itself rather than to an empty string. */
+export function planDisplayName(planCode: string | null | undefined): string {
+  if (!planCode) return "بدون باقة";
+  if (planCode === "CUSTOM") return "باقة مخصّصة";
+  return STANDARD_PLANS[planCode as StandardPlanCode]?.nameAr ?? planCode;
+}
+
 /** Ordered list (STARTER → BUSINESS_PLUS) for rendering. */
 export const STANDARD_PLAN_LIST: readonly StandardPlan[] = STANDARD_PLAN_CODES.map((code) => STANDARD_PLANS[code]);
 

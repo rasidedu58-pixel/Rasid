@@ -3,6 +3,7 @@ import {
   ALL_NOTIFICATION_TYPES,
   BILLING_NOTIFICATION_TYPES,
   LEGACY_NOTIFICATION_TYPES,
+  TEAM_NOTIFICATION_TYPES,
   billingNotificationAudience,
   reminderMilestoneDedupKey,
   lifecycleTerminalDedupKey,
@@ -16,12 +17,16 @@ import {
   subscriptionExpiredContent,
   paymentRejectedContent,
   capacityContent,
+  newPaymentProofPendingContent,
+  teamInviteAcceptedContent,
+  teamInviteAcceptedDedupKey,
+  paymentProofPendingDedupKey,
 } from "./billing-notifications";
 
 describe("billing notification types + audience", () => {
   it("keeps the legacy types so historical rows stay valid, and adds the billing set", () => {
     expect(LEGACY_NOTIFICATION_TYPES).toContain("SUBSCRIPTION_EXPIRING");
-    expect(ALL_NOTIFICATION_TYPES).toEqual([...LEGACY_NOTIFICATION_TYPES, ...BILLING_NOTIFICATION_TYPES]);
+    expect(ALL_NOTIFICATION_TYPES).toEqual([...LEGACY_NOTIFICATION_TYPES, ...BILLING_NOTIFICATION_TYPES, ...TEAM_NOTIFICATION_TYPES]);
     // No accidental duplicates in the CHECK source list.
     expect(new Set(ALL_NOTIFICATION_TYPES).size).toBe(ALL_NOTIFICATION_TYPES.length);
   });
@@ -79,5 +84,46 @@ describe("copy — Arabic, MONTHLY-only (no annual wording)", () => {
   it("capacity 100% copy prompts a plan change; 90/95 is a soft warning", () => {
     expect(capacityContent("STUDENTS", 100).body).toContain("الحد الأقصى");
     expect(capacityContent("TEAM", 90).body).toContain("90%");
+  });
+});
+
+describe("the two notifications this phase made real", () => {
+  it("names the member and the workspace, and never renders an empty subject", () => {
+    expect(teamInviteAcceptedContent("محمد أحمد", "أكاديمية النور")).toEqual({
+      title: "تم انضمام عضو جديد للفريق",
+      body: "محمد أحمد انضم إلى مساحة العمل «أكاديمية النور».",
+    });
+    expect(teamInviteAcceptedContent(null, "أكاديمية النور").body).toContain("عضو جديد");
+    expect(teamInviteAcceptedContent("   ", "أكاديمية النور").body).toContain("عضو جديد");
+  });
+
+  it("tells staff who asked, which plan and how much — without opening the row", () => {
+    const content = newPaymentProofPendingContent({
+      humanCode: "RS-ABC123",
+      workspaceName: "أكاديمية النور",
+      requesterName: "أ. سارة",
+      planName: "احترافي",
+      amountMinor: 30000,
+    });
+    expect(content.title).toBe("طلب دفع جديد يحتاج مراجعة");
+    expect(content.body).toBe("أ. سارة (أكاديمية النور) — احترافي — 300 ج.م (كود RS-ABC123).");
+  });
+
+  it("falls back to the workspace name when the requester has none", () => {
+    const content = newPaymentProofPendingContent({
+      humanCode: "RS-X",
+      workspaceName: "أكاديمية النور",
+      requesterName: null,
+      planName: "نمو",
+      amountMinor: 18000,
+    });
+    expect(content.body).toContain("أكاديمية النور");
+  });
+
+  it("dedupes a join by the membership that proves it, and a review alert by the request", () => {
+    // Both are the id of the row whose creation is the event — created once,
+    // so a retried/replayed event converges on one notification.
+    expect(teamInviteAcceptedDedupKey("mem-1")).toBe("mem-1");
+    expect(paymentProofPendingDedupKey("pr-1")).toBe("pr-1");
   });
 });

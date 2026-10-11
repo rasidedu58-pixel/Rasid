@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import { rejectPaymentRequestSchema, type LaunchReadinessResponse, type ListBillingAttentionResponse, type ListPlatformBillingHistoryResponse, type ListPlatformPaymentRequestsResponse, type ResolvePaymentRequestResponse } from "@academic-precision/contracts";
+import { rejectPaymentRequestSchema, type ListNotificationsResponse, type MarkNotificationReadResponse, type LaunchReadinessResponse, type ListBillingAttentionResponse, type ListPlatformBillingHistoryResponse, type ListPlatformPaymentRequestsResponse, type ResolvePaymentRequestResponse } from "@academic-precision/contracts";
 import { loadRateLimitConfig } from "../../common/rate-limit/rate-limit.config";
 import { CurrentUser } from "../../identity/api/decorators/current-user.decorator";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
@@ -63,6 +63,21 @@ export class PlatformBillingController {
   ): Promise<ListPlatformBillingHistoryResponse> {
     const parsedLimit = limit ? Number(limit) : undefined;
     return this.service.getHistory({ workspaceId, category, cursor, limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined });
+  }
+
+  @Get("notifications")
+  @RequirePlatformPermission("platform.billing.view")
+  @ApiOperation({ summary: "The calling staff member's own platform-facing notifications (new payment proofs / custom requests)" })
+  notifications(@CurrentUser() user: VerifiedSupabaseToken): Promise<ListNotificationsResponse> {
+    return this.service.listNotifications(user.id);
+  }
+
+  @Post("notifications/:id/read")
+  @RequirePlatformPermission("platform.billing.view")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Mark one of the caller's own platform notifications read" })
+  markNotificationRead(@Param("id") id: string, @CurrentUser() user: VerifiedSupabaseToken): Promise<MarkNotificationReadResponse> {
+    return this.service.markNotificationRead(user.id, id);
   }
 
   @Post("payment-requests/:id/confirm")

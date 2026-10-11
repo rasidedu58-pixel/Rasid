@@ -7,6 +7,8 @@ import {
   loadBillingReadinessDbChecks,
   loadPlatformBillingAttention,
   loadPlatformBillingHistory,
+  loadPlatformNotificationsPage,
+  markPlatformNotificationRead,
   rejectPaymentRequestTransaction,
   type PlatformPaymentRequestListRow,
 } from "@academic-precision/database";
@@ -19,7 +21,10 @@ import {
   type LaunchReadinessResponse,
   type ListBillingAttentionResponse,
   type ListPlatformBillingHistoryResponse,
+  type ListNotificationsResponse,
   type ListPlatformPaymentRequestsResponse,
+  type MarkNotificationReadResponse,
+  type NotificationTypeDto,
   type PlatformPaymentRequestDto,
   type ResolvePaymentRequestResponse,
 } from "@academic-precision/contracts";
@@ -85,6 +90,36 @@ export class PlatformBillingService {
   async reject(paymentRequestId: string, rejectedByUserId: string, reason: string): Promise<ResolvePaymentRequestResponse> {
     await rejectPaymentRequestTransaction(getPlatformAdminDb(), { paymentRequestId, rejectedByUserId, reason });
     return { paymentRequest: await this.requireDto(paymentRequestId) };
+  }
+
+  /**
+   * The staff member's own platform-facing notifications — today that is
+   * "طلب دفع جديد يحتاج مراجعة" (emitted by the worker from the
+   * `PaymentRequestCreated` outbox event). Scoped to the caller: a staff
+   * member never sees another staff member's inbox, and the 0077 RLS policy
+   * makes a customer's own notifications unreachable on this connection.
+   */
+  async listNotifications(userId: string): Promise<ListNotificationsResponse> {
+    const page = await loadPlatformNotificationsPage(getPlatformAdminDb(), { userId, limit: 50 });
+    return {
+      notifications: page.rows.map((row) => ({
+        id: row.id,
+        type: row.type as NotificationTypeDto,
+        title: row.title,
+        body: row.body,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        readAt: row.readAt ? row.readAt.toISOString() : null,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      unreadCount: page.unreadCount,
+    };
+  }
+
+  async markNotificationRead(userId: string, id: string): Promise<MarkNotificationReadResponse> {
+    const marked = await markPlatformNotificationRead(getPlatformAdminDb(), { userId, id });
+    if (!marked) throw new ResourceNotFoundException();
+    return { id, readAt: new Date().toISOString() };
   }
 
   private async requireDto(id: string): Promise<PlatformPaymentRequestDto> {

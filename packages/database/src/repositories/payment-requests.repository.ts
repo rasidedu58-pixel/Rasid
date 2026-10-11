@@ -286,7 +286,14 @@ export async function createPaymentRequestTransaction(
           eventType: "PaymentRequestCreated",
           aggregateType: "PaymentRequest",
           aggregateId: row.id,
-          payload: { paymentRequestId: row.id, planCode: quote.targetPlanCode, amountMinor: quote.amountMinor, actionType: quote.actionType },
+          payload: {
+            paymentRequestId: row.id,
+            planCode: quote.targetPlanCode,
+            amountMinor: quote.amountMinor,
+            actionType: quote.actionType,
+            humanCode: row.humanCode,
+            requestedByName: await requesterDisplayName(tx, input.requestedByUserId),
+          },
         });
         await tx.insert(auditEvents).values({
           workspaceId: input.workspaceId,
@@ -491,7 +498,20 @@ async function insertServerPricedRequestOnTx(tx: Db, input: ServerPricedRequestI
         })
         .returning();
       if (!row) throw new Error("Failed to insert payment_requests row.");
-      await tx.insert(outboxEvents).values({ workspaceId: input.workspaceId, eventType: "PaymentRequestCreated", aggregateType: "PaymentRequest", aggregateId: row.id, payload: { paymentRequestId: row.id, planCode: input.targetPlanCode, amountMinor: input.amountMinor, actionType: input.actionType } });
+      await tx.insert(outboxEvents).values({
+        workspaceId: input.workspaceId,
+        eventType: "PaymentRequestCreated",
+        aggregateType: "PaymentRequest",
+        aggregateId: row.id,
+        payload: {
+          paymentRequestId: row.id,
+          planCode: input.targetPlanCode,
+          amountMinor: input.amountMinor,
+          actionType: input.actionType,
+          humanCode: row.humanCode,
+          requestedByName: await requesterDisplayName(tx, input.requestedByUserId),
+        },
+      });
       await tx.insert(auditEvents).values({ workspaceId: input.workspaceId, actorUserId: input.requestedByUserId, actorMembershipId: null, action: "billing.custom_payment_request.created", entityType: "payment_request", entityId: row.id, afterJson: { humanCode: row.humanCode, actionType: input.actionType, planCode: input.targetPlanCode, amountMinor: input.amountMinor, method: input.paymentMethod } });
       return row;
     } catch (err) {
@@ -1320,6 +1340,19 @@ export async function reverseSubscriptionPaymentTransaction(
     });
     return reversal;
   });
+}
+
+/**
+ * The requester's display name, read inside the creating transaction.
+ *
+ * It travels in the `PaymentRequestCreated` payload because the worker — which
+ * turns that event into the platform-staff notification — is deliberately not
+ * granted SELECT on `users`. Reading it here costs one indexed lookup and is
+ * always permitted: the requester IS the ambient user (`users_self_read`).
+ */
+async function requesterDisplayName(tx: Db, userId: string): Promise<string | null> {
+  const [row] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, userId)).limit(1);
+  return row?.fullName?.trim() || null;
 }
 
 /** Direct notification insert (dedup via the unique index → ON CONFLICT DO NOTHING). */

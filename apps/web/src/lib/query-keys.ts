@@ -82,6 +82,7 @@ export const qk = {
     workspaceSubscription: (id: string) => ["platform-admin", "workspaces", "subscription", id] as const,
     subscriptions: (params?: Record<string, unknown>) => ["platform-admin", "subscriptions", params] as const,
     needsAttention: () => ["platform-admin", "needs-attention"] as const,
+    notifications: () => ["platform-admin", "notifications"] as const,
     activity: () => ["platform-admin", "activity"] as const,
     health: () => ["platform-admin", "health"] as const,
     contactLogs: (workspaceId: string) => ["platform-admin", "workspaces", "contact-logs", workspaceId] as const,

@@ -39,6 +39,7 @@ export * from "./worker/outbox-dispatcher";
 export * from "./worker/subscription-expiry";
 export * from "./worker/notifications-scan";
 export * from "./worker/billing-lifecycle-scan";
+export * from "./worker/notification-events";
 export * from "./billing/entitlement-matrix";
 export * from "./billing/paddle-webhook-verify";
 export * from "./billing/paddle-event-mapper";

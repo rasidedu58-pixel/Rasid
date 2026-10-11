@@ -13,6 +13,13 @@ describe("WORKER_CONSUMED_EVENT_TYPES", () => {
     expect(WORKER_CONSUMED_EVENT_TYPES).toContain("SessionCompleted");
   });
 
+  it("consumes the two notification-producing events", () => {
+    // Both now have a real handler in the dispatcher; without being listed here
+    // the worker would never poll them and the notification would never appear.
+    expect(WORKER_CONSUMED_EVENT_TYPES).toContain("TeamInvitationAccepted");
+    expect(WORKER_CONSUMED_EVENT_TYPES).toContain("PaymentRequestCreated");
+  });
+
   it("does NOT include unconsumed producer-only events like MonthCreated", () => {
     expect(WORKER_CONSUMED_EVENT_TYPES).not.toContain("MonthCreated");
   });

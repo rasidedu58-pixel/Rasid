@@ -62,6 +62,7 @@ import { outboxEvents } from "../schema/outbox";
 import { withWorkerRuntimeContext } from "../connection";
 import type { Db } from "../repositories/identity.repository";
 import { runEvaluateAttentionRulesForSessionTransaction } from "../repositories/attention.repository";
+import { emitPaymentRequestCreatedNotification, emitTeamInviteAcceptedNotification } from "./notification-events";
 
 const LEASE_MS = 2 * 60 * 1000; // 2 minutes — generous for a single-session evaluation.
 const MAX_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes cap.
@@ -79,7 +80,7 @@ export type OutboxEventRow = typeof outboxEvents.$inferSelect;
  * by design and must NEVER be counted as a worker backlog. One list so the two
  * consumers can never drift apart.
  */
-export const WORKER_CONSUMED_EVENT_TYPES = ["SessionCompleted"] as const;
+export const WORKER_CONSUMED_EVENT_TYPES = ["SessionCompleted", "TeamInvitationAccepted", "PaymentRequestCreated"] as const;
 
 function backoffMs(attemptCount: number): number {
   return Math.min(attemptCount * BASE_BACKOFF_MS, MAX_BACKOFF_MS);
@@ -174,6 +175,12 @@ async function processClaimedEvent(workerDb: Db, event: OutboxEventRow): Promise
           sessionId: payload.sessionId,
         });
       }
+    } else if (event.eventType === "TeamInvitationAccepted") {
+      // Both handlers are idempotent by unique index, so a reclaimed lease
+      // re-running them is a no-op rather than a duplicate notification.
+      await emitTeamInviteAcceptedNotification(tx, { workspaceId: event.workspaceId as string, payload: event.payload });
+    } else if (event.eventType === "PaymentRequestCreated") {
+      await emitPaymentRequestCreatedNotification(tx, { workspaceId: event.workspaceId as string, payload: event.payload });
     }
     await tx.update(outboxEvents).set({ status: "PROCESSED", processedAt: sql`now()` }).where(eq(outboxEvents.id, event.id));
   });

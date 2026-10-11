@@ -45,6 +45,15 @@ export const CUSTOMER_BILLING_NOTIFICATION_TYPES = [
 /** Platform-admin-facing billing notification types (Phase 6). */
 export const PLATFORM_BILLING_NOTIFICATION_TYPES = ["CUSTOM_REQUEST_CREATED", "NEW_PAYMENT_PROOF_PENDING"] as const;
 
+/**
+ * Team lifecycle notification types. `TEAM_INVITE_ACCEPTED` is the only one so
+ * far: the owner shares an invitation link and otherwise learns that it was
+ * used by noticing a new row on the team page. Migration 0077 widens the
+ * `notifications_type_check` for it.
+ */
+export const TEAM_NOTIFICATION_TYPES = ["TEAM_INVITE_ACCEPTED"] as const;
+export type TeamNotificationType = (typeof TEAM_NOTIFICATION_TYPES)[number];
+
 export const BILLING_NOTIFICATION_TYPES = [
   ...CUSTOMER_BILLING_NOTIFICATION_TYPES,
   ...PLATFORM_BILLING_NOTIFICATION_TYPES,
@@ -52,7 +61,7 @@ export const BILLING_NOTIFICATION_TYPES = [
 export type BillingNotificationType = (typeof BILLING_NOTIFICATION_TYPES)[number];
 
 /** The full set of values the `notifications_type_check` CHECK must permit (legacy + billing) — the source of truth for migration 0070. */
-export const ALL_NOTIFICATION_TYPES = [...LEGACY_NOTIFICATION_TYPES, ...BILLING_NOTIFICATION_TYPES] as const;
+export const ALL_NOTIFICATION_TYPES = [...LEGACY_NOTIFICATION_TYPES, ...BILLING_NOTIFICATION_TYPES, ...TEAM_NOTIFICATION_TYPES] as const;
 export type NotificationTypeValue = (typeof ALL_NOTIFICATION_TYPES)[number];
 
 const PLATFORM_SET: ReadonlySet<string> = new Set(PLATFORM_BILLING_NOTIFICATION_TYPES);
@@ -95,6 +104,20 @@ export function customOfferDedupKey(offerId: string): string {
 /** A custom-offer-expiring warning is deduped by offer id + milestone. */
 export function customOfferExpiringDedupKey(offerId: string, days: number): string {
   return `${offerId}:${days}d`;
+}
+/**
+ * A team-invite-accepted notification is deduped by the MEMBERSHIP id — the row
+ * that proves the person actually joined. The membership is created once, in
+ * the same transaction as the invitation's PENDING → ACCEPTED flip, so a
+ * retried/reclaimed outbox event can never produce a second notification and a
+ * failed or revoked invitation produces none at all.
+ */
+export function teamInviteAcceptedDedupKey(membershipId: string): string {
+  return membershipId;
+}
+/** A new-payment-proof notification to platform staff is deduped by the request id — one per request per staff member. */
+export function paymentProofPendingDedupKey(paymentRequestId: string): string {
+  return paymentRequestId;
 }
 /** Re-export the catalog capacity dedup key so the emit side imports one module. */
 export { capacityThresholdDedupKey };
@@ -169,8 +192,32 @@ export function customOfferAppliedContent(): NotificationContent {
 export function customRequestCreatedContent(workspaceName: string): NotificationContent {
   return { title: "طلب باقة مخصّصة جديد", body: `طلبت مساحة العمل «${workspaceName}» باقة مخصّصة وتنتظر المراجعة.` };
 }
-export function newPaymentProofPendingContent(humanCode: string, workspaceName: string): NotificationContent {
-  return { title: "دفعة بانتظار التحقق", body: `طلب دفع ${humanCode} من «${workspaceName}» بانتظار التحقق.` };
+/**
+ * Platform staff: a brand-new payment request needs review. Names WHO asked,
+ * WHICH plan and HOW MUCH, because a staff member triaging a queue should not
+ * have to open the row to learn what it is.
+ */
+export function newPaymentProofPendingContent(input: {
+  humanCode: string;
+  workspaceName: string;
+  requesterName: string | null;
+  planName: string;
+  amountMinor: number;
+}): NotificationContent {
+  // The workspace is always named: staff triage BY workspace, and a bare
+  // person's name does not say which customer the request belongs to.
+  const name = input.requesterName?.trim();
+  const who = name && name !== input.workspaceName ? `${name} (${input.workspaceName})` : input.workspaceName;
+  return {
+    title: "طلب دفع جديد يحتاج مراجعة",
+    body: `${who} — ${input.planName} — ${formatEgpMinor(input.amountMinor)} (كود ${input.humanCode}).`,
+  };
+}
+
+/** The workspace owner (or whoever created the invitation): someone used it and is now a member. */
+export function teamInviteAcceptedContent(memberName: string | null, workspaceName: string): NotificationContent {
+  const who = memberName && memberName.trim().length > 0 ? memberName.trim() : "عضو جديد";
+  return { title: "تم انضمام عضو جديد للفريق", body: `${who} انضم إلى مساحة العمل «${workspaceName}».` };
 }
 
 // The in-app notification READ surface (list/mark-read DTOs) already lives in

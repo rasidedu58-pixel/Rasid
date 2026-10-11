@@ -10,10 +10,31 @@ import { qk } from "../../../lib/query-keys";
 import { fetchNotifications, markAllNotificationsRead, markNotificationRead } from "../../../lib/api/reports";
 import { actionItemHref } from "../dashboard/action-item-link";
 
+/**
+ * Arabic label per notification type. This used to carry THREE of the twenty-one
+ * types the database accepts, so every billing notification rendered its raw
+ * SCREAMING_SNAKE type name to the user.
+ */
 const TYPE_LABEL: Record<string, string> = {
   SUBSCRIPTION_EXPIRING: "اقتراب انتهاء الاشتراك",
   FOLLOWUP_DUE: "متابعة مستحقة",
   MISSING_RECORDS: "سجلات ناقصة",
+  TRIAL_ENDING: "اقتراب انتهاء التجربة",
+  TRIAL_EXPIRED: "انتهت التجربة",
+  SUBSCRIPTION_ENDING: "اقتراب انتهاء الاشتراك",
+  SUBSCRIPTION_EXPIRED: "انتهى الاشتراك",
+  PAYMENT_REQUEST_CREATED: "طلب دفع",
+  PAYMENT_REQUEST_EXPIRING: "طلب دفع يوشك على الانتهاء",
+  PAYMENT_REQUEST_EXPIRED: "انتهت صلاحية طلب الدفع",
+  PAYMENT_CONFIRMED: "تم تأكيد الدفع",
+  PAYMENT_REJECTED: "تم رفض الدفع",
+  CAPACITY_STUDENTS: "حد الطلاب في الباقة",
+  CAPACITY_TEAM: "حد أعضاء الفريق",
+  CUSTOM_OFFER_READY: "عرض باقة مخصّصة",
+  CUSTOM_OFFER_EXPIRING: "عرض مخصّص يوشك على الانتهاء",
+  CUSTOM_OFFER_ACCEPTED_PAYMENT_PENDING: "بانتظار دفع الباقة المخصّصة",
+  CUSTOM_OFFER_APPLIED: "تم تفعيل الباقة المخصّصة",
+  TEAM_INVITE_ACCEPTED: "عضو جديد في الفريق",
 };
 
 export default function NotificationsPage() {

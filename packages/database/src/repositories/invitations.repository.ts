@@ -14,6 +14,8 @@ import { workspaceInvitations, type InvitationDesiredGrant } from "../schema/wor
 export type { InvitationDesiredGrant } from "../schema/workspace-invitations";
 import { workspaces } from "../schema/workspaces";
 import { memberships } from "../schema/permissions";
+import { outboxEvents } from "../schema/outbox";
+import { users } from "../schema/identity";
 import { replaceMembershipGrants, insertAuditEvent, type DesiredGrantInput } from "./permissions.repository";
 import type { Db } from "./identity.repository";
 import { assertTeamCapacityForActivation } from "../billing/capacity";
@@ -259,6 +261,29 @@ export async function acceptInvitationTx(
     entityType: "membership",
     entityId: membership.id,
     afterJson: { roleLabel: invite.roleLabel, invitationId: invite.id },
+  });
+
+  // Tell the owner, through the outbox the worker already drains. It is written
+  // in the SAME transaction as the membership, which is what makes the
+  // notification honest: a rolled-back accept (capacity refusal, a lost
+  // single-use race, ALREADY_MEMBER) returns above and leaves no event, so a
+  // failed or revoked invitation never announces a member who did not join.
+  // The recipient and the display name travel in the payload because the
+  // worker role can read neither `users` nor `workspace_invitations`.
+  const [accepter] = await db.select({ fullName: users.fullName }).from(users).where(eq(users.id, params.accepterUserId)).limit(1);
+  await db.insert(outboxEvents).values({
+    workspaceId: invite.workspaceId,
+    eventType: "TeamInvitationAccepted",
+    aggregateType: "WorkspaceInvitation",
+    aggregateId: invite.id,
+    payload: {
+      invitationId: invite.id,
+      membershipId: membership.id,
+      // Whoever authorized the invitation is who wants to know it was used.
+      recipientUserId: invite.invitedByUserId,
+      memberName: accepter?.fullName?.trim() || invite.invitedLabel || null,
+      roleLabel: invite.roleLabel,
+    },
   });
 
   return { ok: true, workspaceId: invite.workspaceId, membershipId: membership.id, roleLabel: invite.roleLabel };

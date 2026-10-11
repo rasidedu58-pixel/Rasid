@@ -3,15 +3,19 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Building2, CreditCard, ListChecks, Activity, UserCog, Receipt, Sparkles, Wallet, UserPlus, Menu } from "lucide-react";
+import { LayoutDashboard, Users, Building2, CreditCard, ListChecks, Activity, UserCog, Receipt, Sparkles, Wallet, UserPlus, Bell, Menu } from "lucide-react";
 import { Button, Sheet, SheetContent, SheetHeader, SheetTitle, cn } from "@academic-precision/ui";
 import { hasPlatformPermission, type PlatformPermission } from "@academic-precision/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { useWorkspace } from "../../lib/workspace-provider";
+import { fetchPlatformNotifications } from "../../lib/api/platform-admin";
+import { qk } from "../../lib/query-keys";
 import { RasidWordmark } from "../brand/rasid-wordmark";
 import { ThemeToggle } from "../theme-toggle";
 
 const NAV_ITEMS: { href: string; label: string; icon: typeof LayoutDashboard; permission: PlatformPermission }[] = [
   { href: "/platform-admin", label: "لوحة التحكم", icon: LayoutDashboard, permission: "platform.customers.view" },
+  { href: "/platform-admin/notifications", label: "الإشعارات", icon: Bell, permission: "platform.billing.view" },
   { href: "/platform-admin/leads", label: "العملاء المحتملون", icon: UserPlus, permission: "platform.leads.view" },
   { href: "/platform-admin/follow-ups", label: "قائمة المتابعة", icon: ListChecks, permission: "platform.support.view" },
   { href: "/platform-admin/issues", label: "حالة المنصة والمشكلات", icon: Activity, permission: "platform.health.view" },
@@ -28,10 +32,12 @@ function NavLinks({
   items,
   pathname,
   onNavigate,
+  unreadCount,
 }: {
   items: typeof NAV_ITEMS;
   pathname: string | null;
   onNavigate?: () => void;
+  unreadCount?: number;
 }) {
   return (
     <>
@@ -48,7 +54,14 @@ function NavLinks({
             )}
           >
             <item.icon className="h-4 w-4 shrink-0" aria-hidden />
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {/* A notification nobody sees is not a notification — the unread
+                count is the only thing that makes staff open the inbox. */}
+            {item.href === "/platform-admin/notifications" && unreadCount ? (
+              <span className="rounded-full bg-danger px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white">
+                {unreadCount > 99 ? "+99" : unreadCount}
+              </span>
+            ) : null}
           </Link>
         );
       })}
@@ -71,6 +84,14 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
   // route, so a hidden item is still refused if reached by URL.
   const navItems = NAV_ITEMS.filter((item) => hasPlatformPermission(platformRole, item.permission));
   const [navOpen, setNavOpen] = useState(false);
+  const canSeeNotifications = hasPlatformPermission(platformRole, "platform.billing.view");
+  const notifications = useQuery({
+    queryKey: qk.platformAdmin.notifications(),
+    queryFn: fetchPlatformNotifications,
+    enabled: canSeeNotifications,
+    retry: false,
+  });
+  const unreadCount = notifications.data?.unreadCount ?? 0;
 
   return (
     <div className="flex min-h-screen">
@@ -82,7 +103,7 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
           </div>
           <ThemeToggle className="shrink-0 text-shell-text-muted hover:bg-shell-hover hover:text-shell-text" />
         </div>
-        <NavLinks items={navItems} pathname={pathname} />
+        <NavLinks items={navItems} pathname={pathname} unreadCount={unreadCount} />
         <div className="mt-auto px-2 pt-4">
           <Link href="/dashboard" className="text-xs text-shell-text-muted transition-colors hover:text-shell-text">
             العودة لراصد
@@ -119,7 +140,7 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
             </SheetTitle>
           </SheetHeader>
           <nav className="flex flex-col gap-1">
-            <NavLinks items={navItems} pathname={pathname} onNavigate={() => setNavOpen(false)} />
+            <NavLinks items={navItems} pathname={pathname} onNavigate={() => setNavOpen(false)} unreadCount={unreadCount} />
             <Link href="/dashboard" onClick={() => setNavOpen(false)} className="mt-2 rounded-md px-3 py-2 text-xs text-shell-text-muted transition-colors hover:bg-shell-hover/60 hover:text-shell-text">
               العودة لراصد
             </Link>
