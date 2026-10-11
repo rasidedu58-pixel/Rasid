@@ -47,7 +47,7 @@ export function SegmentedStatus<T extends string>({
   "aria-label"?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface-sunken p-0.5">
+    <div role="radiogroup" aria-label={ariaLabel} className="flex w-full flex-wrap items-center gap-0.5 rounded-lg border border-border bg-surface-sunken p-0.5 sm:inline-flex sm:w-auto sm:flex-nowrap">
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -59,7 +59,7 @@ export function SegmentedStatus<T extends string>({
             disabled={disabled}
             onClick={() => onChange(opt.value)}
             className={cn(
-              "min-w-[52px] rounded-[6px] px-2.5 py-1.5 text-[13px] font-medium outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40",
+              "min-w-0 flex-1 basis-20 whitespace-nowrap rounded-[6px] px-2 py-1.5 text-[13px] font-medium outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 sm:flex-initial sm:basis-auto sm:min-w-[52px] sm:px-2.5",
               active ? cn("bg-surface shadow-xs", ACTIVE_TEXT[opt.tone]) : "text-text-tertiary hover:text-text-secondary",
             )}
           >
@@ -95,15 +95,26 @@ export function RosterList({ children }: { children: ReactNode }) {
   return <div className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">{children}</div>;
 }
 
-/** One dense roster row: a muted index, the student name, and the field control on the end (content-facing) side. Subtle hover; a faint tint while its own save is in flight. */
+/**
+ * One dense roster row: a muted index, the student name, and the field
+ * control. Shared by the attendance, homework and exam tabs, so the fix
+ * lands in one place for all three.
+ *
+ * It used to be a single line at every width with a non-shrinking control
+ * on the end — and homework's four-state control needs ~290px on its own,
+ * which left the name clipped to a few characters on a phone and squeezed
+ * at tablet width. Now it stacks below `sm` (name on its own line, control
+ * underneath, name shown in FULL and allowed to wrap) and returns to the
+ * original single line from `sm` up, where there is room for both.
+ */
 export function RosterRow({ index, name, saving, children }: { index: number; name: string; saving?: boolean; children: ReactNode }) {
   return (
-    <div className={cn("flex items-center justify-between gap-3 px-3 py-2.5 transition-colors sm:px-4", saving ? "bg-brand-subtle/30" : "hover:bg-surface-sunken/40")}>
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="w-5 shrink-0 text-end text-xs text-text-tertiary tabular-nums">{index}</span>
-        <span className="truncate text-sm font-medium text-text-primary">{name}</span>
+    <div className={cn("flex flex-col items-stretch gap-2 px-3 py-2.5 transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4", saving ? "bg-brand-subtle/30" : "hover:bg-surface-sunken/40")}>
+      <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
+        <span className="w-5 shrink-0 text-end text-xs leading-5 text-text-tertiary tabular-nums">{index}</span>
+        <span className="min-w-0 break-words text-sm font-medium leading-5 text-text-primary sm:truncate">{name}</span>
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="min-w-0 sm:shrink-0">{children}</div>
     </div>
   );
 }

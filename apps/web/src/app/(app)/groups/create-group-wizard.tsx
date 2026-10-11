@@ -212,7 +212,7 @@ export function CreateGroupWizard() {
         <Plus className="h-4 w-4" aria-hidden />
         مجموعة جديدة
       </Button>
-      <SheetContent side="end" className="flex w-full max-w-lg flex-col">
+      <SheetContent side="end" className="flex w-full max-w-lg flex-col p-4 sm:p-6">
         {stage === "form" ? (
           <>
             <SheetHeader>
@@ -220,7 +220,7 @@ export function CreateGroupWizard() {
               <StepDots step={step} />
             </SheetHeader>
 
-            <div className="mt-5 flex flex-1 flex-col gap-5 overflow-y-auto pb-4">
+            <div className="mt-4 flex flex-1 flex-col gap-4 overflow-y-auto pb-4 sm:mt-5 sm:gap-5">
               {step === 1 ? (
                 <Section title="بيانات المجموعة" subtitle="المعلومات الأساسية — يمكنك تعديلها لاحقًا.">
                   <Field label="اسم المجموعة" htmlFor="g-name" required>
@@ -240,8 +240,16 @@ export function CreateGroupWizard() {
                       const dur = durationOf(r);
                       return (
                         <div key={i} className="rounded-xl border border-border bg-surface p-3">
-                          <div className="flex items-end gap-2">
-                            <div className="flex-1">
+                          {rows.length > 1 ? (
+                            <div className="mb-1.5 flex items-center justify-between">
+                              <span className="text-xs font-medium text-text-secondary">الموعد {arNum(i + 1)}</span>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-danger" onClick={() => setRows((p) => p.filter((_, j) => j !== i))} aria-label="حذف الموعد">
+                                <Trash2 className="h-4 w-4" aria-hidden />
+                              </Button>
+                            </div>
+                          ) : null}
+                          <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_auto_auto]">
+                            <div className="col-span-2 sm:col-span-1">
                               <label className="mb-1 block text-xs text-text-secondary">اليوم</label>
                               <Select value={String(r.weekday)} onValueChange={(v) => setRows((p) => p.map((x, j) => (j === i ? { ...x, weekday: Number(v) } : x)))}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -252,25 +260,20 @@ export function CreateGroupWizard() {
                                 </SelectContent>
                               </Select>
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <label className="mb-1 block text-xs text-text-secondary">من</label>
-                              <input type="time" value={r.startTime} onChange={(e) => setRows((p) => p.map((x, j) => (j === i ? { ...x, startTime: e.target.value } : x)))} className="focus-ring h-9 rounded-md border border-border bg-surface px-2 text-sm tabular-nums text-text-primary" />
+                              <input type="time" value={r.startTime} onChange={(e) => setRows((p) => p.map((x, j) => (j === i ? { ...x, startTime: e.target.value } : x)))} className="focus-ring h-9 w-full rounded-md border border-border bg-surface px-2 text-sm tabular-nums text-text-primary sm:w-auto" />
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <label className="mb-1 block text-xs text-text-secondary">إلى</label>
-                              <input type="time" value={r.endTime} onChange={(e) => setRows((p) => p.map((x, j) => (j === i ? { ...x, endTime: e.target.value } : x)))} className="focus-ring h-9 rounded-md border border-border bg-surface px-2 text-sm tabular-nums text-text-primary" />
+                              <input type="time" value={r.endTime} onChange={(e) => setRows((p) => p.map((x, j) => (j === i ? { ...x, endTime: e.target.value } : x)))} className="focus-ring h-9 w-full rounded-md border border-border bg-surface px-2 text-sm tabular-nums text-text-primary sm:w-auto" />
                             </div>
-                            {rows.length > 1 ? (
-                              <Button variant="ghost" size="icon" className="text-danger" onClick={() => setRows((p) => p.filter((_, j) => j !== i))} aria-label="حذف الموعد">
-                                <Trash2 className="h-4 w-4" aria-hidden />
-                              </Button>
-                            ) : null}
                           </div>
                           {dur <= 0 ? <p className="mt-1.5 text-xs text-danger">وقت النهاية يجب أن يكون بعد البداية.</p> : <p className="mt-1.5 text-xs text-text-tertiary">المدة: {arNum(dur)} دقيقة</p>}
                         </div>
                       );
                     })}
-                    <Button variant="outline" size="sm" className="self-start" onClick={() => setRows((p) => [...p, { weekday: 5, startTime: "16:00", endTime: "18:00" }])}>
+                    <Button variant="outline" size="sm" className="w-full justify-center sm:w-auto sm:self-start" onClick={() => setRows((p) => [...p, { weekday: 5, startTime: "16:00", endTime: "18:00" }])}>
                       <Plus className="h-4 w-4" aria-hidden />
                       إضافة موعد
                     </Button>
@@ -304,15 +307,15 @@ export function CreateGroupWizard() {
             </div>
 
             <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
-              <Button variant="ghost" onClick={() => (step === 1 ? handleOpenChange(false) : setStep((s) => (s - 1) as 1 | 2))}>
+              <Button variant="ghost" className="shrink-0" onClick={() => (step === 1 ? handleOpenChange(false) : setStep((s) => (s - 1) as 1 | 2))}>
                 {step === 1 ? "إلغاء" : <><ArrowRight className="h-4 w-4" aria-hidden /> السابق</>}
               </Button>
               {step < 3 ? (
-                <Button onClick={() => setStep((s) => (s + 1) as 2 | 3)} disabled={step === 1 ? !step1Valid : !step2Valid}>
+                <Button className="shrink-0" onClick={() => setStep((s) => (s + 1) as 2 | 3)} disabled={step === 1 ? !step1Valid : !step2Valid}>
                   التالي <ArrowLeft className="h-4 w-4" aria-hidden />
                 </Button>
               ) : (
-                <Button onClick={() => submit.mutate()} loading={submit.isPending} disabled={!step3Valid}>
+                <Button className="shrink-0 whitespace-nowrap" onClick={() => submit.mutate()} loading={submit.isPending} disabled={!step3Valid}>
                   <CalendarPlus className="h-4 w-4" aria-hidden />
                   إنشاء وتجهيز الشهر
                 </Button>

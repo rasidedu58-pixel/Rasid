@@ -45,15 +45,15 @@ export function HomeworkTab({ sessionId, sessionVersion, students }: { sessionId
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
         <div className="min-w-0 flex-1">
           <RosterProgress recorded={recorded} total={students.length} />
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button size="sm" variant="outline" onClick={() => noHomeworkMutation.mutate()} loading={noHomeworkMutation.isPending}>
+        <div className="flex gap-2 sm:shrink-0">
+          <Button size="sm" variant="outline" className="flex-1 justify-center sm:flex-initial" onClick={() => noHomeworkMutation.mutate()} loading={noHomeworkMutation.isPending}>
             لا يوجد واجب
           </Button>
-          <Button size="sm" variant="outline" onClick={() => markAllDoneMutation.mutate()} loading={markAllDoneMutation.isPending}>
+          <Button size="sm" variant="outline" className="flex-1 justify-center sm:flex-initial" onClick={() => markAllDoneMutation.mutate()} loading={markAllDoneMutation.isPending}>
             الكل منجز
           </Button>
         </div>
