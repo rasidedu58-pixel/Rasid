@@ -82,6 +82,62 @@ export function attentionRuleLabel(ruleKey: string | null | undefined): string {
 }
 
 /**
+ * Where a reason is actually FIXED — the screen that holds the records the
+ * rule read, not a generic profile link.
+ *
+ * The case page could explain a problem precisely and then offer nowhere to
+ * act on it: the only links were the student page and a WhatsApp draft. A
+ * teacher told "3 absences out of the last 5 sessions" needs the sessions
+ * list, not a profile.
+ *
+ * `tab` matches the student profile's own tab values, so the destination
+ * opens on the right panel rather than the default one. Pure mapping — the
+ * caller builds the href, so this stays testable without a router.
+ */
+export type AttentionResolutionTarget =
+  | { kind: "SESSIONS" }
+  | { kind: "STUDENT_TAB"; tab: "overview" | "finance" | "enrollments" | "guardians" }
+  | { kind: "FOLLOW_UP" };
+
+export interface AttentionResolutionRoute {
+  target: AttentionResolutionTarget;
+  /** Imperative label for the button — what the teacher is about to go and do. */
+  label: string;
+}
+
+/**
+ * Attendance and homework are both recorded per SESSION, so both resolve in
+ * the sessions list. An exam score lives on the student's own record, and a
+ * money problem on their finance tab. Anything unrecognised deliberately
+ * falls back to contacting the guardian rather than guessing a screen.
+ */
+export function attentionResolutionRoute(ruleKey: string | null | undefined): AttentionResolutionRoute {
+  switch (ruleKey) {
+    case "absence.consecutive":
+    case "absence.frequency":
+    case "ATTENDANCE_ABSENCE_STREAK":
+      return { target: { kind: "SESSIONS" }, label: "فتح الحصص لمراجعة الحضور" };
+    case "homework.consecutive":
+    case "homework.frequency":
+    case "HOMEWORK_NOT_DONE_STREAK":
+      return { target: { kind: "SESSIONS" }, label: "فتح الحصص لمراجعة الواجب" };
+    case "exam.low":
+    case "LOW_EXAM_SCORE":
+      return { target: { kind: "STUDENT_TAB", tab: "overview" }, label: "عرض درجات الطالب" };
+    case "combined.medium":
+      return { target: { kind: "STUDENT_TAB", tab: "overview" }, label: "عرض ملف الطالب" };
+    default:
+      return { target: { kind: "FOLLOW_UP" }, label: "التواصل مع ولي الأمر" };
+  }
+}
+
+/** The finance route, used when a case is opened from the collection section. */
+export const ATTENTION_FINANCE_ROUTE: AttentionResolutionRoute = {
+  target: { kind: "STUDENT_TAB", tab: "finance" },
+  label: "فتح مالية الطالب",
+};
+
+/**
  * Small helpers used by both the API (dashboard card subtitle + case list
  * summary) and the web case detail page to build a HUMAN sentence from a
  * reason + its attached evidence. Every field is derived from real
@@ -330,3 +386,33 @@ export type FollowupActionResponse = z.infer<typeof followupActionResponseSchema
 
 export const attentionCaseTransitionRequestSchema = z.object({ version: z.number().int() });
 export type AttentionCaseTransitionRequest = z.infer<typeof attentionCaseTransitionRequestSchema>;
+
+/**
+ * «لم تُحل — جدولة متابعة» on a case.
+ *
+ * A scheduled follow-up could ONLY be created as a side effect of logging a
+ * guardian contact with outcome DEFERRED. So a teacher who had acted on the
+ * problem some other way — talked to the student, fixed the record, decided
+ * to wait a week — had no way to say "come back to me about this on
+ * Sunday" without inventing a contact that never happened. This is the
+ * missing half of the two-way choice: resolve, or schedule.
+ *
+ * The case moves to IN_FOLLOWUP (it is being worked, not closed) and the
+ * follow-up carries its own due date; the existing worker scan turns that
+ * date into a FOLLOWUP_DUE notification and the action centre surfaces it.
+ */
+export const scheduleFollowupRequestSchema = z.object({
+  version: z.number().int(),
+  /** When to resurface this case. Must be in the future. */
+  dueAt: z.string().datetime(),
+  // No free-text note: `scheduled_followups` has no column for one, and
+  // inventing a place to put it is a schema change this does not need. The
+  // case's own reasons already say what the follow-up is about.
+});
+export type ScheduleFollowupRequest = z.infer<typeof scheduleFollowupRequestSchema>;
+
+export const scheduleFollowupResponseSchema = z.object({
+  case: attentionCaseSchema,
+  followup: z.object({ id: z.string().uuid(), dueAt: z.string(), status: z.string() }),
+});
+export type ScheduleFollowupResponse = z.infer<typeof scheduleFollowupResponseSchema>;

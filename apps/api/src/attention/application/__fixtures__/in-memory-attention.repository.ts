@@ -420,6 +420,33 @@ export class InMemoryAttentionRepository implements AttentionRepositoryPort {
     return { contactLog, scheduledFollowup };
   }
 
+  /**
+   * Mirrors `scheduleCaseFollowup`'s one-PENDING-per-case rule: a second
+   * schedule MOVES the existing row rather than creating a duplicate.
+   */
+  async scheduleCaseFollowup(input: {
+    workspaceId: string;
+    attentionCaseId: string;
+    studentId: string;
+    dueAt: Date;
+  }): Promise<ScheduledFollowupRow> {
+    const existing = [...this.followupsById.values()].find(
+      (f) => f.workspaceId === input.workspaceId && f.attentionCaseId === input.attentionCaseId && f.status === "PENDING",
+    );
+    if (existing) {
+      const moved: ScheduledFollowupRow = { ...existing, dueAt: input.dueAt, updatedAt: this.now(), version: existing.version + 1 };
+      this.followupsById.set(moved.id, moved);
+      return moved;
+    }
+    return this.seedFollowup({
+      workspaceId: input.workspaceId,
+      attentionCaseId: input.attentionCaseId,
+      studentId: input.studentId,
+      dueAt: input.dueAt,
+      status: "PENDING",
+    });
+  }
+
   async findMostRecentContactLogForCase(attentionCaseId: string): Promise<ContactLogRow | undefined> {
     const rows = [...this.contactLogsById.values()]
       .filter((c) => c.attentionCaseId === attentionCaseId)

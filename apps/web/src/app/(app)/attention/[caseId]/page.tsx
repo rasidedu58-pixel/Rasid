@@ -4,14 +4,14 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, MessageCircle } from "lucide-react";
-import { attentionReasonSummary, attentionRuleLabel } from "@academic-precision/contracts";
+import { ArrowLeft, CalendarClock, ChevronDown, MessageCircle } from "lucide-react";
+import { attentionReasonSummary, attentionResolutionRoute, attentionRuleLabel } from "@academic-precision/contracts";
 import type { AttentionEvidenceDto, AttentionReasonDto } from "@academic-precision/contracts";
 import { Badge, Button, Card, ErrorState, LoadingRegion, SectionCard, StatusDot, cn, formatDate, formatRelativeToNow, toast } from "@academic-precision/ui";
 import { PageHeader } from "../../../../components/shell/page-header";
 import { useWorkspace } from "../../../../lib/workspace-provider";
 import { qk } from "../../../../lib/query-keys";
-import { fetchAttentionCase, startFollowup, markMonitoring, closeAttentionCase } from "../../../../lib/api/attention";
+import { fetchAttentionCase, startFollowup, markMonitoring, closeAttentionCase, scheduleCaseFollowup } from "../../../../lib/api/attention";
 import { fetchStudentDetail } from "../../../../lib/api/students";
 import { ContactGuardianDialog } from "../../../../components/attention/contact-guardian-dialog";
 // `ContactActivityList` is also untracked local WIP (part of the same
@@ -114,11 +114,43 @@ function ReasonEmpty() {
   );
 }
 
+/**
+ * The link to the screen that actually fixes this reason.
+ *
+ * The case page could state the problem precisely and then offer nowhere to
+ * act: the only links were the student profile and a WhatsApp draft. The
+ * route mapping lives in the contracts package (pure, tested) so the API and
+ * the UI cannot disagree about where an "absence.frequency" is resolved.
+ */
+function resolutionHref(ruleKey: string | null | undefined, studentId: string): string {
+  const { target } = attentionResolutionRoute(ruleKey);
+  switch (target.kind) {
+    case "SESSIONS":
+      return "/sessions";
+    case "STUDENT_TAB":
+      return `/students/${studentId}?tab=${target.tab}`;
+    case "FOLLOW_UP":
+    default:
+      return `/students/${studentId}?tab=guardians`;
+  }
+}
+
+/** Date-time input value for "tomorrow 09:00" — the default follow-up moment. */
+function defaultFollowupLocal(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export default function AttentionCaseDetailPage() {
   const { caseId } = useParams<{ caseId: string }>();
   const { workspaceId, canWrite } = useWorkspace();
   const queryClient = useQueryClient();
   const [contactOpen, setContactOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [dueAtLocal, setDueAtLocal] = useState(defaultFollowupLocal);
 
   const caseQuery = useQuery({
     queryKey: workspaceId ? qk.attention.case(workspaceId, caseId) : ["attention-case", "none"],
@@ -132,11 +164,36 @@ export default function AttentionCaseDetailPage() {
     enabled: !!workspaceId && !!caseQuery.data,
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: qk.attention.case(workspaceId!, caseId) });
+  /**
+   * Closing a case or scheduling a follow-up changes what the dashboard is
+   * supposed to show. Invalidating only this one case left the open-cases
+   * list, the follow-up queue and the dashboard's action sections serving
+   * the pre-action state for a full `staleTime` — a case the teacher had
+   * just resolved stayed in «يحتاج إجراء».
+   */
+  const invalidate = () => {
+    for (const queryKey of [
+      qk.attention.case(workspaceId!, caseId),
+      ["attention-cases", workspaceId!],
+      ["followups", workspaceId!],
+      qk.actionCenter.root(workspaceId!),
+    ]) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
+  };
   const transitionOptions = { onSuccess: () => { invalidate(); toast.success("تم تحديث الحالة"); }, onError: () => toast.error("تعذّر تنفيذ الإجراء") };
   const startMutation = useMutation({ mutationFn: (v: number) => startFollowup(workspaceId!, caseId, { version: v }), ...transitionOptions });
   const monitoringMutation = useMutation({ mutationFn: (v: number) => markMonitoring(workspaceId!, caseId, { version: v }), ...transitionOptions });
   const closeMutation = useMutation({ mutationFn: (v: number) => closeAttentionCase(workspaceId!, caseId, { version: v }), ...transitionOptions });
+  const scheduleMutation = useMutation({
+    mutationFn: (v: { version: number; dueAt: string }) => scheduleCaseFollowup(workspaceId!, caseId, { version: v.version, dueAt: v.dueAt }),
+    onSuccess: () => {
+      invalidate();
+      setScheduleOpen(false);
+      toast.success("تمت جدولة المتابعة");
+    },
+    onError: () => toast.error("تعذّرت جدولة المتابعة"),
+  });
 
   if (caseQuery.isLoading) return <LoadingRegion className="min-h-[60vh]" />;
   if (caseQuery.isError || !caseQuery.data) {
@@ -186,6 +243,14 @@ export default function AttentionCaseDetailPage() {
                     فُتحت منذ {formatDate(reason.firstDetectedAt)}
                   </p>
                   {reason.evidence.length === 0 ? <ReasonEmpty /> : <ReasonEvidence evidence={reason.evidence} />}
+                  {/* Where this specific reason gets fixed. */}
+                  <Link
+                    href={resolutionHref(reason.ruleKey, item.student.id)}
+                    className="focus-ring mt-2 inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-brand hover:underline"
+                  >
+                    {attentionResolutionRoute(reason.ruleKey).label}
+                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+                  </Link>
                 </Card>
               ))}
             </div>
@@ -236,12 +301,58 @@ export default function AttentionCaseDetailPage() {
                   نقل إلى الملاحظة
                 </Button>
               ) : null}
-              {item.status !== "CLOSED" ? (
-                <Button variant="outline" onClick={() => closeMutation.mutate(item.version)} loading={closeMutation.isPending}>
-                  إغلاق الحالة
-                </Button>
-              ) : null}
             </div>
+
+            {item.status !== "CLOSED" ? (
+              <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4">
+                <p className="text-sm font-medium text-text-primary">بعد ما تتصرّف، اختر واحدًا:</p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    className="w-full justify-center sm:w-auto"
+                    onClick={() => closeMutation.mutate(item.version)}
+                    loading={closeMutation.isPending}
+                  >
+                    تم الحل — إغلاق الحالة
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-center sm:w-auto"
+                    onClick={() => setScheduleOpen((v) => !v)}
+                  >
+                    <CalendarClock className="h-4 w-4" aria-hidden />
+                    لم تُحل — جدولة متابعة
+                  </Button>
+                </div>
+
+                {scheduleOpen ? (
+                  <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-sunken p-3 sm:flex-row sm:items-end">
+                    <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+                      <span className="text-text-secondary">موعد المتابعة</span>
+                      <input
+                        type="datetime-local"
+                        value={dueAtLocal}
+                        onChange={(e) => setDueAtLocal(e.target.value)}
+                        className="focus-ring h-9 w-full rounded-md border border-border bg-surface px-2 text-sm tabular-nums text-text-primary"
+                      />
+                    </label>
+                    <Button
+                      className="w-full justify-center sm:w-auto"
+                      loading={scheduleMutation.isPending}
+                      disabled={!dueAtLocal}
+                      onClick={() => scheduleMutation.mutate({ version: item.version, dueAt: new Date(dueAtLocal).toISOString() })}
+                    >
+                      تأكيد الموعد
+                    </Button>
+                  </div>
+                ) : null}
+
+                {item.nextFollowUp ? (
+                  <p className="text-xs text-text-tertiary">
+                    ستعود هذه الحالة إلى «يحتاج إجراء» في لوحة التحكم عند حلول موعد المتابعة.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </SectionCard>
         ) : null}
       </div>

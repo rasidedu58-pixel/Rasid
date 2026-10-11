@@ -11,6 +11,8 @@ import type {
   CompleteFollowupRequest,
   RescheduleFollowupRequest,
   FollowupActionResponse,
+  ScheduleFollowupRequest,
+  ScheduleFollowupResponse,
 } from "@academic-precision/contracts";
 import { apiRequest } from "./client";
 
@@ -32,6 +34,15 @@ export function markMonitoring(workspaceId: string, caseId: string, body: Attent
 
 export function closeAttentionCase(workspaceId: string, caseId: string, body: AttentionCaseTransitionRequest): Promise<AttentionCaseTransitionResponse> {
   return apiRequest<AttentionCaseTransitionResponse>(`/attention-cases/${caseId}/close`, { method: "POST", workspaceId, body });
+}
+
+/** «لم تُحل — جدولة متابعة» — creates (or moves) the case's PENDING follow-up. */
+export function scheduleCaseFollowup(
+  workspaceId: string,
+  caseId: string,
+  body: ScheduleFollowupRequest,
+): Promise<ScheduleFollowupResponse> {
+  return apiRequest<ScheduleFollowupResponse>(`/attention-cases/${caseId}/schedule-followup`, { method: "POST", workspaceId, body });
 }
 
 export function draftContact(workspaceId: string, caseId: string, body: ContactDraftRequest): Promise<ContactDraftResponse> {

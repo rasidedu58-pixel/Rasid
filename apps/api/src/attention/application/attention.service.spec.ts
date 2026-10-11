@@ -4,6 +4,7 @@ import {
   FollowupInvalidStateException,
   GuardianContactDisabledException,
   ResourceNotFoundException,
+  ValidationApiException,
   VersionConflictException,
 } from "../../common/exceptions/api.exception";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
@@ -393,6 +394,76 @@ describe("AttentionService", () => {
   // the fallback and (b) never widens visibility, plus that the N+1 per-case
   // Reasons fetch is gone.
   // ---------------------------------------------------------------------
+  describe("«لم تُحل — جدولة متابعة»", () => {
+    async function seedOpenCase() {
+      const student = repo.seedStudent({ workspaceId: WORKSPACE_A, name: "طالب المتابعة" });
+      const group = repo.seedGroup({ workspaceId: WORKSPACE_A, name: "مجموعة" });
+      const attentionCase = repo.seedCase({ workspaceId: WORKSPACE_A, studentId: student.id, priority: "MEDIUM" });
+      repo.seedReason({ workspaceId: WORKSPACE_A, attentionCaseId: attentionCase.id, groupId: group.id, ruleKey: "absence.frequency", severity: "MEDIUM" });
+      return { student, attentionCase };
+    }
+    const tomorrow = () => new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    it("creates a PENDING follow-up without inventing a guardian contact", async () => {
+      const { attentionCase } = await seedOpenCase();
+      const res = await service.scheduleCaseFollowup(owner, ownerContext, attentionCase.id, { version: attentionCase.version, dueAt: tomorrow() }, null);
+
+      expect(res.followup.status).toBe("PENDING");
+      // The ONLY previous way to get a follow-up was a contact log with
+      // outcome DEFERRED. Nothing fabricated one here.
+      expect(repo.contactLogsById.size).toBe(0);
+      // And it is queryable as a real scheduled follow-up.
+      const { items } = await service.listFollowups(owner, ownerContext, { status: "PENDING" });
+      expect(items.map((f) => f.id)).toContain(res.followup.id);
+    });
+
+    it("moves the case to IN_FOLLOWUP — it is being worked, not closed", async () => {
+      const { attentionCase } = await seedOpenCase();
+      const res = await service.scheduleCaseFollowup(owner, ownerContext, attentionCase.id, { version: attentionCase.version, dueAt: tomorrow() }, null);
+      expect(res.case.status).toBe("IN_FOLLOWUP");
+    });
+
+    it("scheduling twice MOVES the one follow-up instead of stacking reminders", async () => {
+      const { attentionCase } = await seedOpenCase();
+      const first = await service.scheduleCaseFollowup(owner, ownerContext, attentionCase.id, { version: attentionCase.version, dueAt: tomorrow() }, null);
+      const later = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+      const second = await service.scheduleCaseFollowup(owner, ownerContext, attentionCase.id, { version: first.case.version, dueAt: later }, null);
+
+      expect(second.followup.id).toBe(first.followup.id);
+      expect(new Date(second.followup.dueAt).toISOString()).toBe(later);
+      const { items } = await service.listFollowups(owner, ownerContext, { status: "PENDING" });
+      expect(items.filter((f) => f.id === first.followup.id)).toHaveLength(1);
+      expect(items).toHaveLength(1);
+    });
+
+    it("refuses a date in the past, and refuses a CLOSED case", async () => {
+      const { attentionCase } = await seedOpenCase();
+      await expect(
+        service.scheduleCaseFollowup(owner, ownerContext, attentionCase.id, { version: attentionCase.version, dueAt: new Date(Date.now() - 1000).toISOString() }, null),
+      ).rejects.toBeInstanceOf(ValidationApiException);
+
+      const closed = await service.closeCase(owner, ownerContext, attentionCase.id, { version: attentionCase.version }, null);
+      await expect(
+        service.scheduleCaseFollowup(owner, ownerContext, attentionCase.id, { version: closed.case.version, dueAt: tomorrow() }, null),
+      ).rejects.toBeInstanceOf(AttentionCaseInvalidStateException);
+    });
+
+    it("a closed case leaves the open list — it is history, not a pending job", async () => {
+      const { attentionCase } = await seedOpenCase();
+      const open = await service.listAttentionCases(owner, ownerContext, { status: "NEW" });
+      expect(open.items.map((c) => c.id)).toContain(attentionCase.id);
+
+      await service.closeCase(owner, ownerContext, attentionCase.id, { version: attentionCase.version }, null);
+
+      const stillOpen = await service.listAttentionCases(owner, ownerContext, { status: "NEW" });
+      expect(stillOpen.items.map((c) => c.id)).not.toContain(attentionCase.id);
+      // ...but the case itself, and its history, still exist.
+      const detail = await service.getAttentionCase(owner, ownerContext, attentionCase.id);
+      expect(detail.status).toBe("CLOSED");
+      expect(detail.reasons.length).toBeGreaterThan(0);
+    });
+  });
+
   describe("Phase 15C — guard-grant reuse (list)", () => {
     /** Simulate PermissionGuard: resolve the route's grant with the membership it already fetched, and stash it on the context. */
     async function withGuardGrant(context: WorkspaceContext, userId: string, permission: string): Promise<WorkspaceContext> {

@@ -71,6 +71,14 @@ export interface AttentionRepositoryPort {
     newDueAt: Date;
   }): Promise<ScheduledFollowupRow | undefined>;
 
+  /** Schedule (or move) the single PENDING follow-up for a case — no contact log required. */
+  scheduleCaseFollowup(input: {
+    workspaceId: string;
+    attentionCaseId: string;
+    studentId: string;
+    dueAt: Date;
+  }): Promise<ScheduledFollowupRow>;
+
   // Contact
   insertContactLogTransaction(
     input: InsertContactLogInput,

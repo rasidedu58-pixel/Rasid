@@ -12,6 +12,7 @@ import {
   findStudentById,
   insertAttentionAuditEvent,
   insertContactLogTransaction,
+  scheduleCaseFollowup,
   listAttentionCasesForWorkspace,
   listAttentionEvidenceForReasons,
   listAttentionReasonsForCase,
@@ -129,6 +130,15 @@ export class DrizzleAttentionRepository implements AttentionRepositoryPort {
     newDueAt: Date;
   }): Promise<ScheduledFollowupRow | undefined> {
     return withRuntimeContext(this.runtimeCtx(), (db) => rescheduleScheduledFollowupWithVersion(db, input));
+  }
+
+  scheduleCaseFollowup(input: {
+    workspaceId: string;
+    attentionCaseId: string;
+    studentId: string;
+    dueAt: Date;
+  }): Promise<ScheduledFollowupRow> {
+    return withRuntimeContext(this.runtimeCtx(input.workspaceId), (db) => scheduleCaseFollowup(db, input));
   }
 
   insertContactLogTransaction(

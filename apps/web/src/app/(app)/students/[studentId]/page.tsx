@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Badge, ErrorState, LoadingRegion, MetricCell, MetricStrip, Tabs, TabsContent, TabsList, TabsTrigger, formatMoney } from "@academic-precision/ui";
@@ -26,6 +26,14 @@ import { EnrollmentsTab } from "./enrollments-tab";
 export default function StudentProfilePage() {
   const { studentId } = useParams<{ studentId: string }>();
   const { workspaceId } = useWorkspace();
+  // An attention case links straight to the tab that holds the records its
+  // reason was computed from (finance for money, overview for grades), so the
+  // teacher lands on the problem rather than on a default panel.
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const initialTab = ["overview", "guardians", "enrollments", "finance"].includes(requestedTab ?? "")
+    ? (requestedTab as string)
+    : "overview";
 
   const detailQuery = useQuery({
     queryKey: workspaceId ? qk.students.detail(workspaceId, studentId) : ["student", "none"],
@@ -99,7 +107,7 @@ export default function StudentProfilePage() {
         ) : null}
       </div>
 
-      <Tabs defaultValue="overview" dir="rtl">
+      <Tabs defaultValue={initialTab} dir="rtl">
         <TabsList>
           <TabsTrigger value="overview">نظرة عامة</TabsTrigger>
           <TabsTrigger value="guardians">أولياء الأمور ({guardians.length})</TabsTrigger>

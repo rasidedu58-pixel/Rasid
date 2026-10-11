@@ -12,7 +12,9 @@ import type {
   ListAttentionCasesResponse,
   ListFollowupsResponse,
   RescheduleFollowupRequest,
+  ScheduleFollowupResponse,
 } from "@academic-precision/contracts";
+import { scheduleFollowupRequestSchema } from "@academic-precision/contracts";
 import {
   computeVisiblePriority,
   type AttentionCaseRow,
@@ -28,6 +30,7 @@ import {
   ValidationApiException,
   VersionConflictException,
 } from "../../common/exceptions/api.exception";
+import { toFieldErrors } from "../../common/validation/zod-field-errors";
 import type { VerifiedSupabaseToken } from "../../identity/infrastructure/jwt-token-verifier";
 import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { PermissionResolverService, type EffectiveGrant } from "../../team/application/permission-resolver.service";
@@ -174,6 +177,75 @@ export class AttentionService {
       throw new AttentionCaseInvalidStateException(undefined, { currentStatus: before.status });
     }
     return this.applyTransition(authUser, workspaceContext, before, body.version, "CLOSED", correlationId);
+  }
+
+  /**
+   * «لم تُحل — جدولة متابعة». The other half of the two-way choice the case
+   * page offers; `closeCase` is the first half.
+   *
+   * It does NOT fabricate a contact log. Until now the only way to get a
+   * scheduled follow-up was to record a guardian conversation with outcome
+   * DEFERRED, so a teacher who had acted some other way had to invent a
+   * conversation to set a reminder. The case moves to IN_FOLLOWUP (being
+   * worked, not closed) and one PENDING follow-up carries the date — pressing
+   * the button twice moves that row rather than stacking reminders.
+   */
+  async scheduleCaseFollowup(
+    authUser: VerifiedSupabaseToken,
+    workspaceContext: WorkspaceContext,
+    id: string,
+    body: unknown,
+    correlationId: string | null,
+  ): Promise<ScheduleFollowupResponse> {
+    const parsed = scheduleFollowupRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationApiException(toFieldErrors(parsed.error));
+    }
+    const dueAt = new Date(parsed.data.dueAt);
+    if (dueAt.getTime() <= Date.now()) {
+      throw new ValidationApiException({ dueAt: ["اختر موعدًا في المستقبل."] });
+    }
+
+    const { attentionCase: before } = await this.loadCaseInScope(authUser, workspaceContext, id, "followup.write");
+    if (before.status === "CLOSED") {
+      // A closed case is history. Re-opening is the rule engine's job (a new
+      // detection), never a side effect of setting a reminder.
+      throw new AttentionCaseInvalidStateException(undefined, { currentStatus: before.status });
+    }
+
+    const followup = await this.repository.scheduleCaseFollowup({
+      workspaceId: workspaceContext.workspaceId,
+      attentionCaseId: before.id,
+      studentId: before.studentId,
+      dueAt,
+    });
+
+    // NEW → IN_FOLLOWUP so the case reads as "being worked". Already-working
+    // statuses are left alone: scheduling a reminder is not a state change.
+    let transitioned: AttentionCaseTransitionResponse;
+    if (before.status === "NEW") {
+      transitioned = await this.applyTransition(authUser, workspaceContext, before, parsed.data.version, "IN_FOLLOWUP", correlationId);
+    } else {
+      const reasons = await this.repository.listAttentionReasonsForCase(before.id);
+      const restrictToGroupIds = await this.resolveGroupScopeFilter(workspaceContext.workspaceId, authUser.id, "followup.read");
+      transitioned = { case: await this.buildCaseDetailDto(before, this.filterReasonsToScope(reasons, restrictToGroupIds)) };
+    }
+
+    await this.repository.insertAuditEvent({
+      workspaceId: workspaceContext.workspaceId,
+      actorUserId: authUser.id,
+      actorMembershipId: workspaceContext.membership.id,
+      action: "attention_case.followup_scheduled",
+      entityType: "attention_case",
+      entityId: before.id,
+      afterJson: { followupId: followup.id, dueAt: followup.dueAt.toISOString() },
+      correlationId,
+    });
+
+    return {
+      case: transitioned.case,
+      followup: { id: followup.id, dueAt: followup.dueAt.toISOString(), status: followup.status },
+    };
   }
 
   private async applyTransition(

@@ -19,6 +19,7 @@ import {
   type ContactDraftResponse,
   type ListAttentionCasesResponse,
 } from "@academic-precision/contracts";
+import type { ScheduleFollowupResponse } from "@academic-precision/contracts";
 import { ValidationApiException } from "../../common/exceptions/api.exception";
 import { toFieldErrors } from "../../common/validation/zod-field-errors";
 import { AttentionService } from "../application/attention.service";
@@ -115,6 +116,22 @@ export class AttentionCasesController {
     const parsed = attentionCaseTransitionRequestSchema.safeParse(body);
     if (!parsed.success) throw new ValidationApiException(toFieldErrors(parsed.error));
     return this.attentionService.closeCase(user, workspaceContext, id, parsed.data, extractHeader(request, REQUEST_ID_HEADER));
+  }
+
+  @Post(":id/schedule-followup")
+  @RequirePermission("followup.write")
+  @UseGuards(EntitlementGuard)
+  @RequireEntitlement("CORE_OPERATIONS")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Schedule a follow-up on a case (POST /api/v1/attention-cases/:id/schedule-followup)" })
+  scheduleCaseFollowup(
+    @CurrentUser() user: VerifiedSupabaseToken,
+    @CurrentWorkspaceContext() workspaceContext: WorkspaceContext,
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<ScheduleFollowupResponse> {
+    return this.attentionService.scheduleCaseFollowup(user, workspaceContext, id, body, extractHeader(request, REQUEST_ID_HEADER));
   }
 
   @Post(":id/contact-draft")

@@ -187,6 +187,65 @@ export function findScheduledFollowupById(db: Db, id: string): Promise<Scheduled
   return db.select().from(scheduledFollowups).where(eq(scheduledFollowups.id, id)).limit(1).then((r) => r[0]);
 }
 
+export interface ScheduleCaseFollowupInput {
+  workspaceId: string;
+  attentionCaseId: string;
+  studentId: string;
+  dueAt: Date;
+}
+
+/**
+ * Creates a PENDING follow-up directly against a case — no contact log.
+ *
+ * `source_contact_log_id` stays NULL, which is exactly what it means: this
+ * follow-up did not come from a logged conversation. Everything downstream
+ * (the due scan, the queue, complete/reschedule) already treats that column
+ * as optional, so nothing else changes.
+ *
+ * One PENDING follow-up per case: re-scheduling moves the existing row's due
+ * date instead of stacking duplicates, so the teacher cannot accumulate five
+ * reminders for one problem by pressing the button five times.
+ */
+export async function scheduleCaseFollowup(db: Db, input: ScheduleCaseFollowupInput): Promise<ScheduledFollowupRow> {
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(scheduledFollowups)
+      .where(
+        and(
+          eq(scheduledFollowups.workspaceId, input.workspaceId),
+          eq(scheduledFollowups.attentionCaseId, input.attentionCaseId),
+          eq(scheduledFollowups.status, "PENDING"),
+        ),
+      )
+      .limit(1)
+      .for("update");
+
+    if (existing) {
+      const [moved] = await tx
+        .update(scheduledFollowups)
+        .set({ dueAt: input.dueAt, updatedAt: new Date(), version: existing.version + 1 })
+        .where(eq(scheduledFollowups.id, existing.id))
+        .returning();
+      if (!moved) throw new Error("Failed to move the existing scheduled_followups row.");
+      return moved;
+    }
+
+    const [inserted] = await tx
+      .insert(scheduledFollowups)
+      .values({
+        workspaceId: input.workspaceId,
+        attentionCaseId: input.attentionCaseId,
+        studentId: input.studentId,
+        dueAt: input.dueAt,
+        status: "PENDING",
+      })
+      .returning();
+    if (!inserted) throw new Error("Failed to insert scheduled_followups row.");
+    return inserted;
+  });
+}
+
 export interface ListScheduledFollowupsFilter {
   workspaceId: string;
   status?: string;
