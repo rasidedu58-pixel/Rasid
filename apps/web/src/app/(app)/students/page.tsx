@@ -26,7 +26,13 @@ const MODE_PLACEHOLDER: Record<SearchMode, string> = {
   auto: "ابحث بالاسم أو الكود أو رقم ولي الأمر...",
   name: "ابحث باسم الطالب...",
   code: "ابحث بكود الطالب...",
-  guardianPhone: "ابحث برقم هاتف ولي الأمر...",
+  guardianPhone: "رقم ولي الأمر — كامل أو جزء منه...",
+};
+// In «تلقائي» a short numeric query is a STUDENT CODE (1–5 digits, by
+// design and pinned by the API tests), so a partial phone number needs the
+// explicit filter — which now matches any part of the stored number.
+const MODE_HINT: Partial<Record<SearchMode, string>> = {
+  guardianPhone: "يكفي جزء من الرقم — آخر أرقامه أو أوّلها — وتُقبل الصيغ ‎+20‎ و‎0‎ والأرقام العربية.",
 };
 
 export default function StudentsPage() {
@@ -57,6 +63,8 @@ export default function StudentsPage() {
         <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder={MODE_PLACEHOLDER[searchBy]} aria-label="البحث عن طالب" />
         <SegmentedControl aria-label="البحث حسب" options={SEARCH_MODES} value={searchBy} onChange={setSearchBy} />
       </FilterBar>
+
+      {MODE_HINT[searchBy] ? <p className="-mt-2 mb-3 text-xs text-text-tertiary">{MODE_HINT[searchBy]}</p> : null}
 
       {hasActiveFilters ? (
         <ActiveFilters

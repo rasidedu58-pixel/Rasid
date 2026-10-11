@@ -316,7 +316,11 @@ export class InMemoryStudentsRepository implements StudentsRepositoryPort {
     } else if (filter.guardianNormalizedPhone) {
       const guardianIds = new Set(
         [...this.guardiansById.values()]
-          .filter((g) => g.normalizedPhone === filter.guardianNormalizedPhone)
+          // Mirrors the real repository's substring match on
+          // `guardians.normalized_phone` (see its Phase 2 note) — the filter
+          // value arriving here is already the SEARCH form, so a partial or
+          // internationally-spelled number resolves in tests too.
+          .filter((g) => g.normalizedPhone.includes(filter.guardianNormalizedPhone!))
           .map((g) => g.id),
       );
       const studentIds = new Set(

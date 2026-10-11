@@ -378,7 +378,15 @@ function NewStudentTab({ group, groupMonth }: { group: { id: string; name: strin
   const [ackDuplicates, setAckDuplicates] = useState(false);
   const [createdStudentId, setCreatedStudentId] = useState<string | null>(null); // recovery: created but enroll failed
 
-  const canSubmit = name.trim().length > 0;
+  // Same guardian rule as the Students screen: a guardian must be NAMED
+  // (the API rejects a nameless one now), and a guardian row needs a phone
+  // because `guardians.normalized_phone` is NOT NULL. Here the guardian
+  // stays optional overall — this sheet's job is enrolling into a group, and
+  // it never had a mandatory guardian — but a HALF-filled one is refused
+  // instead of being silently dropped on submit.
+  const guardianStarted = guardianName.trim().length > 0 || guardianPhone.trim().length > 0;
+  const guardianIncomplete = guardianStarted && (!guardianName.trim() || !guardianPhone.trim());
+  const canSubmit = name.trim().length > 0 && !guardianIncomplete;
   const acted = candidates && candidates.length > 0;
 
   function resetForm() {
@@ -432,9 +440,10 @@ function NewStudentTab({ group, groupMonth }: { group: { id: string; name: strin
 
       const created = await createStudent(workspaceId!, {
         name: name.trim(),
-        guardians: guardianPhone.trim()
-          ? [{ name: guardianName.trim() || undefined, phone: guardianPhone.trim(), relationship: "guardian", isPrimary: true }]
-          : undefined,
+        guardians:
+          guardianName.trim() && guardianPhone.trim()
+            ? [{ name: guardianName.trim(), phone: guardianPhone.trim(), relationship: "guardian", isPrimary: true }]
+            : undefined,
       });
       // Student is saved. Enroll — if THIS fails, keep the student (recovery).
       try {
@@ -485,10 +494,20 @@ function NewStudentTab({ group, groupMonth }: { group: { id: string; name: strin
         <Input id="new-name" ref={nameRef} value={name} onChange={(e) => { setName(e.target.value); invalidateGate(); setCreatedStudentId(null); }} autoFocus />
       </Field>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Field label="ولي الأمر (اختياري)" htmlFor="new-g-name">
+        <Field
+          label="اسم ولي الأمر"
+          htmlFor="new-g-name"
+          required={guardianStarted}
+          error={guardianStarted && !guardianName.trim() ? "اسم ولي الأمر مطلوب" : undefined}
+        >
           <Input id="new-g-name" value={guardianName} onChange={(e) => setGuardianName(e.target.value)} placeholder="الاسم" />
         </Field>
-        <Field label="رقم الهاتف" htmlFor="new-g-phone">
+        <Field
+          label="رقم الهاتف"
+          htmlFor="new-g-phone"
+          required={guardianStarted}
+          error={guardianStarted && !guardianPhone.trim() ? "رقم هاتف ولي الأمر مطلوب" : undefined}
+        >
           <Input id="new-g-phone" dir="ltr" inputMode="tel" value={guardianPhone} onChange={(e) => { setGuardianPhone(e.target.value); invalidateGate(); }} />
         </Field>
       </div>

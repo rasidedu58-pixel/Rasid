@@ -10,6 +10,7 @@ import type { WorkspaceContext } from "../../team/api/guards/permission.guard";
 import { PermissionResolverService } from "../../team/application/permission-resolver.service";
 import { InMemoryTeamRepository } from "../../team/application/__fixtures__/in-memory-team.repository";
 import { InMemoryStudentsRepository } from "./__fixtures__/in-memory-students.repository";
+import { createStudentRequestSchema, linkGuardianRequestSchema } from "@academic-precision/contracts";
 import { StudentsService } from "./students.service";
 
 const WORKSPACE_A = "workspace-a";
@@ -83,8 +84,8 @@ describe("StudentsService", () => {
           {
             name: "سارة",
             guardians: [
-              { phone: "+201000000001", isPrimary: true },
-              { phone: "+201000000002", isPrimary: true },
+              { name: "ولي ١", phone: "+201000000001", isPrimary: true },
+              { name: "ولي ٢", phone: "+201000000002", isPrimary: true },
             ],
           },
           null,
@@ -92,9 +93,29 @@ describe("StudentsService", () => {
       ).rejects.toBeInstanceOf(ValidationApiException);
     });
 
+    it("rejects a guardian with no name — the API no longer accepts what the UI forbids", () => {
+      // The contract is the enforcement point (the controller parses with it
+      // before the service is reached), so this asserts the parse itself.
+      const parsed = createStudentRequestSchema.safeParse({ name: "طالب", guardians: [{ phone: "01001234567" }] });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.issues.some((i) => i.path.join(".").endsWith("name") && i.message === "اسم ولي الأمر مطلوب")).toBe(true);
+      }
+      // An empty/whitespace-only name is rejected the same way.
+      expect(createStudentRequestSchema.safeParse({ name: "طالب", guardians: [{ name: "   ", phone: "01001234567" }] }).success).toBe(false);
+      // With a name it parses.
+      expect(createStudentRequestSchema.safeParse({ name: "طالب", guardians: [{ name: "والده", phone: "01001234567" }] }).success).toBe(true);
+    });
+
+    it("rejects linking a NEW guardian with no name, while still allowing an existing one by id", () => {
+      expect(linkGuardianRequestSchema.safeParse({ phone: "01001234567" }).success).toBe(false);
+      expect(linkGuardianRequestSchema.safeParse({ name: "خالته", phone: "01001234567" }).success).toBe(true);
+      expect(linkGuardianRequestSchema.safeParse({ guardianId: "11111111-1111-4111-8111-111111111111" }).success).toBe(true);
+    });
+
     it("does NOT auto-merge guardians sharing the same phone across two different students", async () => {
-      await service.createStudent(owner, ownerContext, { name: "A", guardians: [{ phone: "+201234567890" }] }, null);
-      await service.createStudent(owner, ownerContext, { name: "B", guardians: [{ phone: "+201234567890" }] }, null);
+      await service.createStudent(owner, ownerContext, { name: "A", guardians: [{ name: "ولي أ", phone: "+201234567890" }] }, null);
+      await service.createStudent(owner, ownerContext, { name: "B", guardians: [{ name: "ولي ب", phone: "+201234567890" }] }, null);
       expect(repo.guardiansById.size).toBe(2); // two distinct guardian rows, never merged
     });
   });
@@ -151,7 +172,7 @@ describe("StudentsService", () => {
       const created = await service.createStudent(
         owner,
         ownerContext,
-        { name: "طالب", guardians: [{ phone: "+201111111111", isPrimary: true }, { phone: "+201222222222" }] },
+        { name: "طالب", guardians: [{ name: "ولي أول", phone: "+201111111111", isPrimary: true }, { name: "ولي ثان", phone: "+201222222222" }] },
         null,
       );
       const [first, second] = created.guardians;
@@ -278,6 +299,77 @@ describe("StudentsService", () => {
       const foundLower = await service.listStudents(owner, ownerContext, { q: "ap-abc123" });
       expect(foundExact.items.map((s) => s.id)).toContain(legacy.id);
       expect(foundLower.items.map((s) => s.id)).toContain(legacy.id);
+    });
+
+    // --- Phase 2: guardian-phone search actually resolving --------------
+    //
+    // The reported bug: "the guardian's number is in the system but
+    // searching by it returns nothing". The lookup was `normalized_phone =
+    // $query`, so only the exact digit string the guardian was saved with
+    // ever matched.
+
+    it("finds the student by the guardian phone exactly as it was stored", async () => {
+      const created = await service.createStudent(
+        owner,
+        ownerContext,
+        { name: "طالب", guardians: [{ name: "والد الطالب", phone: "01001234567", isPrimary: true }] },
+        null,
+      );
+      const results = await service.listStudents(owner, ownerContext, { q: "01001234567", searchBy: "guardianPhone" });
+      expect(results.items.map((x) => x.id)).toContain(created.student.id);
+    });
+
+    it("finds the student by a PARTIAL guardian phone — the last digits, and the first", async () => {
+      const created = await service.createStudent(
+        owner,
+        ownerContext,
+        { name: "طالب جزئي", guardians: [{ name: "والد", phone: "01009876543", isPrimary: true }] },
+        null,
+      );
+      const bySuffix = await service.listStudents(owner, ownerContext, { q: "6543", searchBy: "guardianPhone" });
+      const byPrefix = await service.listStudents(owner, ownerContext, { q: "0100987", searchBy: "guardianPhone" });
+      expect(bySuffix.items.map((x) => x.id)).toContain(created.student.id);
+      expect(byPrefix.items.map((x) => x.id)).toContain(created.student.id);
+    });
+
+    it("finds a locally-stored number when the search is written internationally, and the reverse", async () => {
+      const local = await service.createStudent(
+        owner,
+        ownerContext,
+        { name: "مخزَّن محليًا", guardians: [{ name: "ولي ١", phone: "01112223344", isPrimary: true }] },
+        null,
+      );
+      const international = await service.createStudent(
+        owner,
+        ownerContext,
+        { name: "مخزَّن دوليًا", guardians: [{ name: "ولي ٢", phone: "+201115556677", isPrimary: true }] },
+        null,
+      );
+
+      const foundLocal = await service.listStudents(owner, ownerContext, { q: "+20 111 222 3344", searchBy: "guardianPhone" });
+      expect(foundLocal.items.map((x) => x.id)).toContain(local.student.id);
+
+      const foundInternational = await service.listStudents(owner, ownerContext, { q: "01115556677", searchBy: "guardianPhone" });
+      expect(foundInternational.items.map((x) => x.id)).toContain(international.student.id);
+    });
+
+    it("finds the student when the guardian phone is typed in Arabic-Indic digits", async () => {
+      const created = await service.createStudent(
+        owner,
+        ownerContext,
+        { name: "طالب عربي", guardians: [{ name: "ولي", phone: "01004445566", isPrimary: true }] },
+        null,
+      );
+      const results = await service.listStudents(owner, ownerContext, { q: "٠١٠٠ ٤٤٤ ٥٥٦٦", searchBy: "guardianPhone" });
+      expect(results.items.map((x) => x.id)).toContain(created.student.id);
+    });
+
+    it("finds the student by name — the explicit filter and the inferred one agree", async () => {
+      const created = await service.createStudent(owner, ownerContext, { name: "عبد الرحمن محمود" }, null);
+      const explicit = await service.listStudents(owner, ownerContext, { q: "عبد الرحمن", searchBy: "name" });
+      const inferred = await service.listStudents(owner, ownerContext, { q: "عبد الرحمن" });
+      expect(explicit.items.map((x) => x.id)).toContain(created.student.id);
+      expect(inferred.items.map((x) => x.id)).toContain(created.student.id);
     });
 
     it("still routes long digit strings to guardianPhone (7+ digits) — new numeric code search MUST NOT break phone lookup", async () => {

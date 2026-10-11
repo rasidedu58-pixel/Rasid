@@ -309,9 +309,28 @@ export async function searchStudents(db: Db, filter: StudentSearchFilter): Promi
     // Phase 15 fix: this branch ignored `cursorId` while the service still
     // emitted a nextCursor from it — paging a phone search returned the
     // same first page forever. Now honors the cursor like the plain list.
+    //
+    // Phase 2 fix: it was `normalized_phone = $q`, exact equality against
+    // the stored digits. A guardian stored as `01001234567` was therefore
+    // unreachable by every spelling a teacher actually types — the last four
+    // digits, the first few, `+20 100 123 4567`, or `1001234567` — which is
+    // why "the number is there but search returns nothing".
+    //
+    // `normalizePhoneSearchQuery` reduces the query to its national
+    // significant digits (see its doc comment) and this matches it as a
+    // substring, so every one of those spellings resolves. The query is
+    // digits-only by construction, so it can carry no LIKE wildcard.
+    //
+    // Cost, stated honestly: a substring match cannot use
+    // `guardians_workspace_normalized_phone_idx`, so this scans the
+    // workspace's guardians. That is a per-teacher table (hundreds, not
+    // millions) and the row is already filtered by `students.workspace_id`
+    // via the join; if a workspace ever grows large enough for this to
+    // matter, the fix is a trigram index on `normalized_phone`, not a
+    // return to exact equality.
     const conditions = [
       eq(students.workspaceId, filter.workspaceId),
-      eq(guardians.normalizedPhone, filter.guardianNormalizedPhone),
+      rawSql`${guardians.normalizedPhone} LIKE '%' || ${filter.guardianNormalizedPhone} || '%'`,
     ];
     if (filter.cursorId) conditions.push(gt(students.id, filter.cursorId));
     if (scopeCondition) conditions.push(scopeCondition);

@@ -19,7 +19,7 @@ import type {
   UpdateStudentGuardianRequest,
   UpdateStudentRequest,
 } from "@academic-precision/contracts";
-import { normalizeArabicName, normalizePhone } from "@academic-precision/database";
+import { normalizeArabicName, normalizePhone, normalizePhoneSearchQuery } from "@academic-precision/database";
 import type { GuardianRow, StudentGuardianWithGuardian, StudentRow } from "@academic-precision/database";
 import {
   QrAlreadyActiveException,
@@ -96,7 +96,10 @@ export class StudentsService {
       if (mode === "code") {
         studentCode = this.normalizeCodeQuery(query.q);
       } else if (mode === "guardianPhone") {
-        guardianNormalizedPhone = normalizePhone(query.q);
+        // NOT `normalizePhone` (the storage form) — the SEARCH form, so a
+        // partial number or an international/trunk-less spelling of the same
+        // number still finds the guardian. See `normalizePhoneSearchQuery`.
+        guardianNormalizedPhone = normalizePhoneSearchQuery(query.q);
       } else {
         normalizedNameQuery = normalizeArabicName(query.q);
       }
@@ -236,7 +239,10 @@ export class StudentsService {
     }
 
     if (body.guardianPhone) {
-      const normalizedPhone = normalizePhone(body.guardianPhone);
+      // Same SEARCH form as the directory lookup, so a guardian already in
+      // the workspace is flagged as a possible duplicate even when the two
+      // entries spell the number differently (+20… vs 0…).
+      const normalizedPhone = normalizePhoneSearchQuery(body.guardianPhone);
       const phoneMatches = await this.repository.searchStudents({
         workspaceId: workspaceContext.workspaceId,
         guardianNormalizedPhone: normalizedPhone,
@@ -458,12 +464,19 @@ export class StudentsService {
       }
       guardian = existing;
     } else {
+      // The contract's `superRefine` already rejects a new guardian with no
+      // name/phone; these are the service-layer backstop for any caller that
+      // reaches here without that parse (and they keep `name` non-null at
+      // the insert, so no new nameless guardian row can be created).
+      if (!body.name) {
+        throw new ValidationApiException({ name: ["اسم ولي الأمر مطلوب"] });
+      }
       if (!body.phone) {
-        throw new ValidationApiException({ phone: ["مطلوب عند إنشاء ولي أمر جديد."] });
+        throw new ValidationApiException({ phone: ["رقم هاتف ولي الأمر مطلوب"] });
       }
       guardian = await this.repository.insertGuardian({
         workspaceId: workspaceContext.workspaceId,
-        name: body.name ?? null,
+        name: body.name,
         phone: body.phone,
         normalizedPhone: normalizePhone(body.phone),
       });

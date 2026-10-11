@@ -36,9 +36,28 @@ export const guardianLinkSchema = z.object({
 });
 export type GuardianLink = z.infer<typeof guardianLinkSchema>;
 
+/**
+ * A guardian a student is created with. `name` is REQUIRED: an unnamed
+ * guardian row is a contact nobody can act on — every academic/financial
+ * follow-up surface (Attention contact log, WhatsApp draft, the guardians
+ * tab) shows this name, and `guardians.name` being nullable in the schema
+ * is for legacy rows, never a licence to create new ones. It was
+ * `.optional()` here, so the API accepted a nameless guardian however
+ * strict the UI was — the validation now lives in the contract both sides
+ * parse.
+ *
+ * `phone` keeps its existing requirement: `guardians.normalized_phone` is
+ * NOT NULL and the search/contact paths resolve guardians by it. Relaxing
+ * that is a schema change, not a validation change — see the Phase 2 report.
+ */
 export const createStudentGuardianInputSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  phone: z.string().trim().min(3),
+  // `required_error` as well as `.min(1)`: a MISSING key and an empty string
+  // must both produce the same message the UI shows, not zod's "Required".
+  name: z.string({ required_error: "اسم ولي الأمر مطلوب", invalid_type_error: "اسم ولي الأمر مطلوب" }).trim().min(1, "اسم ولي الأمر مطلوب"),
+  phone: z
+    .string({ required_error: "رقم هاتف ولي الأمر مطلوب", invalid_type_error: "رقم هاتف ولي الأمر مطلوب" })
+    .trim()
+    .min(3, "رقم هاتف ولي الأمر مطلوب"),
   relationship: z.string().trim().min(1).optional(),
   isPrimary: z.boolean().optional(),
   academicContactEnabled: z.boolean().optional(),
@@ -94,15 +113,27 @@ export const updateStudentRequestSchema = z.object({
 });
 export type UpdateStudentRequest = z.infer<typeof updateStudentRequestSchema>;
 
-export const linkGuardianRequestSchema = z.object({
-  guardianId: z.string().uuid().optional(),
-  name: z.string().trim().min(1).optional(),
-  phone: z.string().trim().min(3).optional(),
-  relationship: z.string().trim().min(1).optional(),
-  isPrimary: z.boolean().optional(),
-  academicContactEnabled: z.boolean().optional(),
-  financialContactEnabled: z.boolean().optional(),
-});
+/**
+ * Links a guardian to an existing student — either an EXISTING guardian by
+ * `guardianId`, or a brand-new one from `name` + `phone`. The new-guardian
+ * branch now requires a name for the same reason `createStudentGuardianInputSchema`
+ * does; linking an existing guardian never restates it.
+ */
+export const linkGuardianRequestSchema = z
+  .object({
+    guardianId: z.string().uuid().optional(),
+    name: z.string().trim().min(1, "اسم ولي الأمر مطلوب").optional(),
+    phone: z.string().trim().min(3).optional(),
+    relationship: z.string().trim().min(1).optional(),
+    isPrimary: z.boolean().optional(),
+    academicContactEnabled: z.boolean().optional(),
+    financialContactEnabled: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.guardianId) return;
+    if (!value.name) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["name"], message: "اسم ولي الأمر مطلوب" });
+    if (!value.phone) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["phone"], message: "رقم هاتف ولي الأمر مطلوب" });
+  });
 export type LinkGuardianRequest = z.infer<typeof linkGuardianRequestSchema>;
 
 export const updateStudentGuardianRequestSchema = z.object({

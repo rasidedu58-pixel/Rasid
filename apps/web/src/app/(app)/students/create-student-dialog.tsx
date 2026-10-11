@@ -92,8 +92,15 @@ export function CreateStudentDialog() {
   }
 
   const primaryPhone = guardians.find((g) => g.phone.trim())?.phone.trim();
-  const guardianError = guardians.some((g) => g.name.trim() && !g.phone.trim());
-  const canSubmit = name.trim().length > 0 && !guardianError;
+  // Guardian rules, Phase 2. The NAME is required — an unnamed guardian is a
+  // contact nobody can act on, and every follow-up surface displays it. The
+  // phone keeps the requirement it already had (`guardians.normalized_phone`
+  // is NOT NULL and guardian search/contact resolve by it), so a row needs
+  // both; the first row is no longer skippable, because a student with no
+  // guardian at all is the same dead end.
+  const missingGuardianName = guardians.some((g, i) => (i === 0 || g.phone.trim()) && !g.name.trim());
+  const missingGuardianPhone = guardians.some((g, i) => (i === 0 || g.name.trim()) && !g.phone.trim());
+  const canSubmit = name.trim().length > 0 && !missingGuardianName && !missingGuardianPhone;
 
   const preview = useMutation({
     mutationFn: () => previewStudentMatch(workspaceId!, { name: name.trim(), guardianPhone: primaryPhone }),
@@ -102,8 +109,8 @@ export function CreateStudentDialog() {
   const create = useMutation({
     mutationFn: () => {
       const payload = guardians
-        .filter((g) => g.phone.trim())
-        .map((g, i) => ({ name: g.name.trim() || undefined, phone: g.phone.trim(), relationship: "guardian", isPrimary: i === 0 }));
+        .filter((g) => g.phone.trim() && g.name.trim())
+        .map((g, i) => ({ name: g.name.trim(), phone: g.phone.trim(), relationship: "guardian", isPrimary: i === 0 }));
       return createStudent(workspaceId!, { name: name.trim(), guardians: payload.length > 0 ? payload : undefined });
     },
   });
@@ -249,7 +256,10 @@ export function CreateStudentDialog() {
             {guardians.map((g, i) => (
               <div key={i} className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-secondary">{i === 0 ? "ولي الأمر" : `ولي أمر إضافي ${new Intl.NumberFormat("ar-EG").format(i)}`}</span>
+                  <span className="text-xs font-medium text-text-secondary">
+                    {i === 0 ? "ولي الأمر" : `ولي أمر إضافي ${new Intl.NumberFormat("ar-EG").format(i)}`}
+                    {i === 0 ? <span className="text-danger" aria-hidden> *</span> : null}
+                  </span>
                   {i > 0 ? (
                     <button type="button" onClick={() => setGuardians((p) => p.filter((_, j) => j !== i))} className="text-danger" aria-label="حذف">
                       <Trash2 className="h-4 w-4" aria-hidden />
@@ -258,7 +268,8 @@ export function CreateStudentDialog() {
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Input
-                    placeholder="الاسم (اختياري)"
+                    aria-label={i === 0 ? "اسم ولي الأمر (مطلوب)" : "اسم ولي الأمر الإضافي"}
+                    placeholder="اسم ولي الأمر *"
                     value={g.name}
                     onChange={(e) => {
                       setGuardians((p) => p.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)));
@@ -276,7 +287,8 @@ export function CreateStudentDialog() {
                     }}
                   />
                 </div>
-                {g.name.trim() && !g.phone.trim() ? <p className="text-xs text-danger">أدخل رقم هاتف لولي الأمر أو احذف الاسم.</p> : null}
+                {(i === 0 || g.phone.trim()) && !g.name.trim() ? <p className="text-xs text-danger">اسم ولي الأمر مطلوب</p> : null}
+                {(i === 0 || g.name.trim()) && !g.phone.trim() ? <p className="text-xs text-danger">رقم هاتف ولي الأمر مطلوب</p> : null}
               </div>
             ))}
             <Button type="button" variant="ghost" size="sm" className="self-start" onClick={() => setGuardians((p) => [...p, emptyGuardian()])}>
